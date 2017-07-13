@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+
+{% block main_content %}
+<h1>Minerva Project</h1>
+
+<div id="tabs">
+    <ul>
+        <li><a href="#tab1">IC</a></li>
+        <li><a href="#tab2">CGM</a></li>
+        <li><a href="#tab3">TBD</a></li>
+    </ul>
+    <div id="tab1">
+        <h2>Insulin-Carb display</h2>
+        <p><form action="{{url_for('ic_display',date=None)}}"
+                 method="GET">
+                <label for="ic_date_human">choose date:
+                    <!-- this is for human consumption -->
+                    <input id="ic_date_human" type="text" value="{{current_date}}" size=10>
+                </label>
+                <!-- this gets sent with the request -->
+                <input id="ic_date_submitted" name="ic_date" type="hidden">
+                <input type="submit">
+            </form></p>
+        {% if records %}
+        <h2>Records for {{record_date}}</h2>
+        <table class="bordered" id="records">
+        <tr>
+            {% for c in cols %}
+            <th>{{c}}</th>
+            {% endfor %}
+        </tr>
+        {% for rec in records %}
+        <tr>
+            {% for c in cols %}
+            <td>{{rec[c]}}</td>
+            {% endfor %}
+        </tr>
+        {% endfor %}
+        </table>
+        {% endif %}
+
+    </div>
+    <div id="tab2">
+        <h2>CGM display</h2>
+        <p><form action="{{url_for('cgm_display')}}"
+                 method="GET">
+                <label for="cgm_date">choose date:
+                    <input id="cgm_date" name="cgm_date" type="text">
+                </label>
+                <input type="submit">
+        </form></p>
+        <div id="cgmPlot"></div>
+        <p>{{table1 | safe}}</p>
+        <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+        <script>
+            var cgmGraph = {{graphJSON | safe}}
+            Plotly.plot('cgmPlot', cgmGraph.data, cgmGraph.layout, {showLink: false});
+        </script>
+    </div>
+    <div id="tab3">
+        <h2>To be decided</h2>
+    </div>
+</div>
+
+{% endblock %}

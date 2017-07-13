@@ -1,0 +1,11 @@
+The raw data is in tables like cgm and insulin_carb.  I will keep it
+unchanged, so that later imports/updates are (hopefully) unaffected.
+
+cgm_1 and insulin_carb_1 are the same except that bogus rows are removed.
+
+cgm_2 and insulin_carb_2 are the same except that timestamps are
+regularized as date_time. Once these are derived from *_1, the *_1 tables
+can be dropped.
+
+
+

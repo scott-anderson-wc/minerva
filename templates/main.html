@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block main_content %}
+<h1>Minerva Project</h1>
+
+    <div id="tab1">
+        <h2>Insulin-Carb-Glucose display for {{record_date}}</h2>
+
+        <p>CGM data from {{datarange.min_cgm}} to {{datarange.max_cgm}}</p>
+        <p>Insulin_Carb data from {{datarange.min_ic}} to {{datarange.max_ic}}</p>
+
+        <p><a href="{{url_yesterday}}">yesterday</a>
+                <form action="{{url_for('plot1',date=None)}}"
+                      method="GET">
+                <label for="date_human">choose date:
+                    <!-- this is for human consumption -->
+                    <input id="date_human" type="text" value="{{current_date}}" size=12>
+                </label>
+                <!-- this gets sent with the request -->
+                <input id="date_submitted" name="date" type="hidden">
+                <input type="submit">
+            </form>
+                <a href="{{url_tomorrow}}">tomorrow</a>
+        </p>
+        <div id="cgmPlot"></div>
+        <p>{{table1 | safe}}</p>
+        <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+        <script>
+            var cgmGraph = {{graphJSON | safe}}
+            console.log('data is '+typeof(cgmGraph.data))
+            Plotly.plot('cgmPlot', cgmGraph.data, cgmGraph.layout, {showLink: false});
+        </script>
+
+
+        {% if records %}
+        <h2>Records</h2>
+        <table class="bordered" id="records">
+        <tr>
+            {% for c in cols %}
+            <th>{{c}}</th>
+            {% endfor %}
+        </tr>
+        {% for rec in records %}
+        <tr>
+            {% for c in cols %}
+            <td>{{rec[c]}}</td>
+            {% endfor %}
+        </tr>
+        {% endfor %}
+        </table>
+        {% endif %}
+
+</div>
+
+{% endblock %}
