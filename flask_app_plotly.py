@@ -31,6 +31,7 @@ app = Flask(__name__)
 __builtin__.app = app           # so its available to other modules.
 
 app.config.from_object('config')
+app.config.from_envvar('FLASK_SETTINGS')
 app.secret_key = os.urandom(24)
 mysql = MySQL()
 mysql.init_app(app)
