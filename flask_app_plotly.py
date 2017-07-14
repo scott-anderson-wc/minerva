@@ -50,6 +50,7 @@ def plot1(datestr=None):
     compute_data_range()
     if not datestr:
         return render_template('main.html',
+                               version = app.config['VERSION'],
                                page_title = 'CGM and IC lookup',
                                cols = [],
                                current_date = '',
@@ -61,6 +62,7 @@ def plot1(datestr=None):
     except:
         flash('invalid date: '+datestr)
         return render_template('main.html',
+                               version = app.config['VERSION'],
                                page_title = 'CGM and IC lookup',
                                cols = [],
                                current_date = '',
@@ -109,6 +111,7 @@ def plot1(datestr=None):
     graph = go.Figure(data = data, layout = layout)
     graphJSON = json.dumps( graph, cls=plotly.utils.PlotlyJSONEncoder)
     return render_template('main.html',
+                           version = app.config['VERSION'],
                            page_title='Minerva',
                            graphJSON = graphJSON,
                            table1 = mealtable,
@@ -133,6 +136,7 @@ def plot1(datestr=None):
 def hello_world():
     compute_data_range()
     return render_template('main.html', page_title='Minerva',
+                           version = app.config['VERSION'],
                            datarange=datarange
                            )
 
@@ -145,6 +149,7 @@ def ic_display(date=None):
         return redirect(url_for('ic_display', date=request.args.get('ic_date')))
     if not date:
         return render_template('main.html',
+                               version = app.config['VERSION'],
                                page_title = 'CGM and IC lookup',
                                cols = [],
                                current_date = '',
@@ -156,6 +161,7 @@ def ic_display(date=None):
     dateObj = datetime.strptime(date, '%Y-%m-%d')
     dateStr = dateObj.strftime('%A, %B %d, %Y')
     return render_template('main.html',
+                           version = app.config['VERSION'],
                            page_title = 'IC lookup for '+date,
                            current_date = dateObj.strftime('%m/%d/%Y'),
                            cols = cols,
@@ -167,6 +173,7 @@ def ic_display(date=None):
 @app.route('/cgm/<date>')
 def cgm_display(date=None):
     return render_template('main.html',
+                           version = app.config['VERSION'],
                            page_title='CGM for '+date)
     
 def compute_data_range():
@@ -197,4 +204,5 @@ if __name__ == '__main__':
     app.logger.setLevel(LOGLEVEL)
     app.logger.addHandler(logHandler)
     debug('Debug is %s' % app.debug)
+    debug('Version is %s' % app.config['VERSION'])
     app.run('0.0.0.0',port=port)
