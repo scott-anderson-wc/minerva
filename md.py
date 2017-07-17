@@ -197,12 +197,15 @@ def debug(*args):
 
 if __name__ == '__main__':
     port = 1942
+    print('starting')
     if not app.debug:
+        print('unlinking old logfile')
         os.unlink(LOGFILE)
     logHandler = RotatingFileHandler(LOGFILE, maxBytes=10000, backupCount=1)
     logHandler.setLevel(LOGLEVEL)
     app.logger.setLevel(LOGLEVEL)
     app.logger.addHandler(logHandler)
+    print('about to try debug statement')
     debug('Debug is %s' % app.debug)
     debug('Version is %s' % app.config['VERSION'])
     app.run('0.0.0.0',port=port)
