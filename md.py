@@ -26,11 +26,20 @@ import util
 
 import __builtin__
 
+def debug(*args):
+    s = ' '.join(map(str,args))
+    if app.debug:
+        print "debug: "+s
+    else:
+        app.logger.debug(s)
+
 app = Flask(__name__)
 
 __builtin__.app = app           # so its available to other modules.
 
 app.config.from_object('config')
+os.environ['FLASK_SETTINGS'] = '/home/hugh9/settings.cfg'
+debug('FLASK_SETTINGS is '+os.environ['FLASK_SETTINGS'])
 app.config.from_envvar('FLASK_SETTINGS')
 app.secret_key = os.urandom(24)
 mysql = MySQL()
@@ -187,13 +196,6 @@ def compute_data_range():
         datarange['max_cgm'] = max_cgm
         datarange['min_cgm'] = min_cgm
         debug('data range is %s' % str(datarange))
-
-def debug(*args):
-    s = ' '.join(map(str,args))
-    if app.debug:
-        print "debug: "+s
-    else:
-        app.logger.debug(s)
 
 if __name__ == '__main__':
     port = 1942
