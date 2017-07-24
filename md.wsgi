@@ -23,19 +23,14 @@ def body(msg):
                        msg=msg
     )
 
+import md
+
 def application(environ, start_response):
     status = '200 OK'
     response_header = [('Content-type','text/html')]
     start_response(status,response_header)
     # debugging output goes to wsgi.errors; which should be the Apache log
     print >> environ['wsgi.errors'],'Scott: a debug message from my application'
-    try:
-        import md
-    except Exception as err:
-        print >> environ['wsgi.errors'], 'Exception during import:'
-        print >> environ['wsgi.errors'], err
-        start_response('500 Internal Server Error',response_header)
-        return [body('exception during import; see logs')]
     try:
         return md.app(environ, start_response)
         print >> environ['wsgi.errors'],'Scott: md success'
