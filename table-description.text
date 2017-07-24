@@ -1,0 +1,26 @@
++---------------------+---------------+------+-----+---------+----------------+
+| Field               | Type          | Null | Key | Default | Extra          |
++---------------------+---------------+------+-----+---------+----------------+
+| user                | varchar(20)   | NO   |     | NULL    |                |
+| date_time           | datetime      | NO   |     | NULL    |                |
+| basal_amt           | decimal(10,3) | YES  |     | NULL    |                |
+| temp_basal_down     | varchar(5)    | YES  |     | NULL    |                |
+| temp_basal_up       | varchar(5)    | YES  |     | NULL    |                |
+| temp_basal_duration | varchar(10)   | YES  |     | NULL    |                |
+| bolus_type          | varchar(15)   | NO   |     | NULL    |                |
+| bolus_volume        | decimal(10,2) | YES  |     | NULL    |                |
+| Immediate_percent   | varchar(8)    | YES  |     | NULL    |                |
+| extended_percent    | varchar(9)    | YES  |     | NULL    |                |
+| duration            | varchar(9)    | YES  |     | NULL    |                |
+| carbs               | decimal(10,2) | YES  |     | NULL    |                |
+| notes               | text          | NO   |     | NULL    |                |
+| rec_num             | int(9)        | NO   | PRI | NULL    | auto_increment |
++---------------------+---------------+------+-----+---------+----------------+
++-----------+-------------+------+-----+---------+----------------+
+| Field     | Type        | Null | Key | Default | Extra          |
++-----------+-------------+------+-----+---------+----------------+
+| user      | varchar(20) | NO   |     | NULL    |                |
+| date_time | datetime    | NO   |     | NULL    |                |
+| mgdl      | varchar(4)  | NO   |     | NULL    |                |
+| rec_num   | int(10)     | NO   | PRI | NULL    | auto_increment |
++-----------+-------------+------+-----+---------+----------------+
