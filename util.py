@@ -25,7 +25,7 @@ def render(alist):
     for sublist in alist:
         sym = sublist[0]
         val = sublist[1]
-        print('current elt is {s}: {v}'.format(s=sym,v=val))
+        # print('current elt is {s}: {v}'.format(s=sym,v=val))
         if type(val) == int:
             sublist.append('<p>Integer {symbol}: {val}</p>'.format(symbol=sym,val=val))
         elif type(val) == numpy.float64:
