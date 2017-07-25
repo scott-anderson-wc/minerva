@@ -23,6 +23,8 @@ def test_to_date():
 
 db_connection = None
 
+# TODO: make this thread-safe
+
 def get_db_connection():
     global db_connection
     if db_connection:
@@ -51,9 +53,8 @@ supper), returns all records for that date.'''
     conn = get_db_connection()
     date = to_date(date_str)
     time = meal_to_time_range(meal_str)
-    # I added a clause to get data from the next day, so this won't
-    # work for breakfast or lunch, but it will work for dinner on
-    # 4/3/16.
+    # I added a clause to get data from the next day, so this will work for supper
+    # It won't work for breakfast or lunch because of the time cut-off.
     query = ('''select * from insulin_carb_2 where 
                 date(date_time) = '{date}' and {time} or 
                 date(date_sub(date_time, interval 1 day))='{date}' and time(date_time) < '03:00' '''
@@ -105,41 +106,6 @@ def prior_base_insulin(df, meal_rec_num):
         if plausible_basal_amount(ba):
             return ba
 
-def excess_basal_insulin_post_meal_v1(df,prior_basal):
-    '''returns the sum of excess basal insulin multiplied by time-interval
-for the post-meal period. The basal insulin is a rate in units/hour,
-right?  This calculation goes for six hours after the meal begins'''
-    calcs = []                  # for documentation
-    first_time = df.date_time[0]
-    prior_time = df.date_time[0]
-    last_time = df.date_time[-1]
-    six_hours = pandas.Timedelta(hours=6)
-    if last_time - prior_time < six_hours:
-        raise ValueError('Did not have 6 hours of data')
-    running_total = 0
-    for row in df.itertuples():
-        if row.date_time - first_time > six_hours:
-            break
-        if (not math.isnan(row.basal_amt) and
-            row.basal_amt > prior_basal):
-            td = (row.date_time - prior_time) # a pandas Timedelta object
-            excess = row.basal_amt - prior_basal
-            hrs = td.total_seconds()/(60*60)
-            amt = excess * hrs
-            calc = ("({curr} - {base})*{time} = {excess}*{hrs} = {amt}"
-                    .format(curr=row.basal_amt,
-                            base=prior_basal,
-                            time=td,
-                            excess=excess,
-                            hrs=hrs,
-                            amt=amt
-                    ))
-            calcs.append(calc)
-            running_total += amt
-            prior_time = row.date_time # new prior time
-    print 'total excess: ',running_total
-    return calcs, running_total
-
 def excess_basal_insulin_post_meal(df,prior_basal):
     '''returns the sum of basal insulin multiplied by time-interval
 for the post-meal period, minus 6*prior_basal. The basal insulin is a rate in units/hour,
@@ -149,27 +115,51 @@ right?  This calculation goes for six hours after the meal begins'''
     prior_time = df.date_time[0]
     last_time = df.date_time[len(df.date_time)-1]
     six_hours = pandas.Timedelta(hours=6)
-    if last_time - prior_time < six_hours:
+    end_time = first_time + six_hours
+    curr_basal = prior_basal
+    if last_time < end_time:
         raise ValueError('Did not have 6 hours of data')
     running_total = 0
+    running_time_total = 0
     for row in df.itertuples():
-        if row.date_time - first_time > six_hours:
+        if row.date_time > end_time:
+            if prior_time < end_time and curr_basal > prior_basal:
+                # add the last little bit
+                td = end_time - prior_time
+                hrs = td.total_seconds()/(60*60)
+                running_time_total += hrs
+                amt = curr_basal * hrs
+                calc = ("<p>from {then} to {now} ({hrs}): {curr}*{hrs} = {amt}<p>"
+                        .format(then=prior_time.strftime("%H:%M"),
+                                now=end_time.strftime("%H:%M"),
+                                curr=curr_basal,
+                                hrs=hrs,
+                                amt=amt
+                        ))
+                calcs.append(calc)
+                running_total += amt
             break
         if (not math.isnan(row.basal_amt) and
             row.basal_amt > prior_basal):
             td = (row.date_time - prior_time) # a pandas Timedelta object
-            excess = row.basal_amt - prior_basal
             hrs = td.total_seconds()/(60*60)
-            amt = excess * hrs
-            calc = ("<p>at {time}: {curr}*{hrs} = {amt}<p>"
-                    .format(time=row.date_time,
-                            curr=row.basal_amt,
+            running_time_total += hrs
+            amt = curr_basal * hrs
+            calc = ("<p>from {then} to {now} ({hrs}): {curr}*{hrs} = {amt}<p>"
+                    .format(then=prior_time.strftime("%H:%M"),
+                            now=row.date_time.strftime("%H:%M"),
+                            curr=curr_basal,
                             hrs=hrs,
                             amt=amt
                     ))
             calcs.append(calc)
             running_total += amt
             prior_time = row.date_time # new prior time
+            curr_basal = row.basal_amt
+    # after the loop
+    if running_time_total != 6.0:
+        print 'error: time does not total to 6 hours: {tot}'.format(tot=running_time_total)
+        raise ValueError('incorrect time total')
     total_excess = running_total-prior_basal*6.0
     calcs.append('<p><strong>sum - 6*base: {total} - {base}*6 = {excess}</strong></p>'
                  .format(total=running_total,
