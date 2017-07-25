@@ -21,7 +21,6 @@ def nan2blank(x):
         return x
 
 def render(alist):
-    global table
     for sublist in alist:
         sym = sublist[0]
         val = sublist[1]

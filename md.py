@@ -201,6 +201,7 @@ def plot2(datestr=None):
                                       side='right'))
     graph = go.Figure(data = data, layout = layout)
     graphJSON = json.dumps( graph, cls=plotly.utils.PlotlyJSONEncoder)
+    print('about to render calcs')
     rendered_calcs = [ sublist[2] for sublist in util.render(calcs) ]
     print('in plot2, about to render template')
     return render_template('main2.html',
