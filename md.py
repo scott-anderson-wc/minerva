@@ -171,6 +171,7 @@ def plot2(datestr=None):
     curs = mysql.connection.cursor()
     plotdict = db.plotCGMByDate(date,curs)
     calcs = pdb.compute_ic_for_date(date, conn=mysql.connection)
+    print('back from pdb')
     # mysql.connection.close()
     dateObj = datetime.strptime(datestr, '%Y-%m-%d')
     datePretty = dateObj.strftime('%A, %B %d, %Y')
@@ -180,7 +181,7 @@ def plot2(datestr=None):
     url_tomorrow = url_for('plot1',datestr=tomorrow)
     calcs_dict = dict(zip([e[0] for e in calcs],
                           [e[1] for e in calcs]))
-    debug('in plot2, I:C is %s' % str(calcs_dict['ic_ratio']))
+    print('in plot2, I:C is %s' % str(calcs_dict['ic_ratio']))
     ic_trace = go.Scatter( x = calcs_dict['meal_time'],
                            y = calcs_dict['ic_ratio'],
                            name = 'IC initial',
@@ -200,7 +201,7 @@ def plot2(datestr=None):
                                       side='right'))
     graph = go.Figure(data = data, layout = layout)
     graphJSON = json.dumps( graph, cls=plotly.utils.PlotlyJSONEncoder)
-    debug('in plot2, about to render template')
+    print('in plot2, about to render template')
     return render_template('main2.html',
                            version = app.config['VERSION'],
                            page_title='Minerva',
