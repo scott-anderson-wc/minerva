@@ -21,18 +21,10 @@ def test_to_date():
     d3 = to_date('4/3/16')
     to_date(d1)
 
-db_connection = None
-
-# TODO: make this thread-safe
-
 def get_db_connection():
-    global db_connection
-    if db_connection:
-        return db_connection
-    else:
-        dsn = dbconn2.read_cnf('/home/hugh9/.my.cnf')
-        db_connection = dbconn2.connect(dsn)
-        return db_connection
+    dsn = dbconn2.read_cnf('/home/hugh9/.my.cnf')
+    db_connection = dbconn2.connect(dsn)
+    return db_connection
 
 def meal_to_time_range(meal_str):
     '''return a SQL query restricting records for just one meal.'''
@@ -46,11 +38,10 @@ def meal_to_time_range(meal_str):
     else:
         return 'true'
 
-def get_ic_for_date(date_str, meal_str='supper'):
+def get_ic_for_date(date_str, conn=get_db_connection(), meal_str='supper'):
     '''returns a pandas.dataframe for the given date and meal. If the
 meal_str doesn't match one of the known values (breakfast, lunch,
 supper), returns all records for that date.'''
-    conn = get_db_connection()
     date = to_date(date_str)
     time = meal_to_time_range(meal_str)
     # I added a clause to get data from the next day, so this will work for supper
@@ -168,9 +159,9 @@ right?  This calculation goes for six hours after the meal begins'''
     print 'total excess: ',total_excess
     return calcs, total_excess
 
-def compute_ic_for_date(date_str):
+def compute_ic_for_date(date_str, conn=get_db_connection()):
     global df_all, df_rel, df_meal, meal_carbs, meal_insulin, meal_rec, prior_insulin, extra_insulin_calcs, extra_insulin, total_insulin, ic_ratio, meal_span, is_long_meal
-    df_all = get_ic_for_date(date_str)
+    df_all = get_ic_for_date(date_str, conn=conn)
     ## just the relevant data. Add more columns as necessary, but this
     ## makes printing more concise
     df_rel = df_all[['date_time','basal_amt','bolus_volume','carbs','rec_num']]
