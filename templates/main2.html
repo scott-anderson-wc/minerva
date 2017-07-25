@@ -34,9 +34,11 @@
 
         {% if calcs %}
             <h2>Calculations</h2>
+	    <ol>
             {% for c in calcs %}
-        	{{c[2]|safe}}
-	    {% endfor %}
+        	<li>{{c|safe}}</li>
+		{% endfor %}
+	    </ol>
 	{% endif %}
 
 </div>
