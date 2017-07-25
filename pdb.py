@@ -51,7 +51,12 @@ supper), returns all records for that date.'''
     conn = get_db_connection()
     date = to_date(date_str)
     time = meal_to_time_range(meal_str)
-    query = ('''select * from insulin_carb_2 where date(date_time) = '{date}' and {time}'''
+    # I added a clause to get data from the next day, so this won't
+    # work for breakfast or lunch, but it will work for dinner on
+    # 4/3/16.
+    query = ('''select * from insulin_carb_2 where 
+                date(date_time) = '{date}' and {time} or 
+                date(date_sub(date_time, interval 1 day))='{date}' and time(date_time) < '03:00' '''
              .format(date=date.strftime('%Y-%m-%d'),
                      time=time))
     print query
@@ -61,12 +66,6 @@ supper), returns all records for that date.'''
     return df
 
 carbs_and_insulin_meal_gap = 10
-
-def floaty(str):
-    if str=='':
-        return 0.0
-    else:
-        return float(str)
 
 tups = []
 
@@ -80,8 +79,8 @@ def carbs_and_insulin_within_meal_gap(df,gap=carbs_and_insulin_meal_gap):
             if a.rec_num >= b.rec_num:
                 continue
             if ((b.date_time - a.date_time <= delta) and
-                (floaty(a.carbs) > 0 and floaty(b.bolus_volume) > 0 or
-                 floaty(a.bolus_volume) > 0 and floaty(a.carbs) > 0)):
+                (a.carbs > 0 and b.bolus_volume > 0 or
+                 a.bolus_volume > 0 and a.carbs > 0)):
                 print a.rec_num, b.rec_num
                 tups.append(a)
                 tups.append(b)
@@ -106,16 +105,21 @@ def prior_base_insulin(df, meal_rec_num):
         if plausible_basal_amount(ba):
             return ba
 
-def excess_basal_insulin_post_meal(df,prior_basal):
+def excess_basal_insulin_post_meal_v1(df,prior_basal):
     '''returns the sum of excess basal insulin multiplied by time-interval
 for the post-meal period. The basal insulin is a rate in units/hour,
-right?  This calculation only goes until the end of the meal period
-(midnight for supper, etc.)
-    '''
+right?  This calculation goes for six hours after the meal begins'''
     calcs = []                  # for documentation
+    first_time = df.date_time[0]
     prior_time = df.date_time[0]
+    last_time = df.date_time[-1]
+    six_hours = pandas.Timedelta(hours=6)
+    if last_time - prior_time < six_hours:
+        raise ValueError('Did not have 6 hours of data')
     running_total = 0
     for row in df.itertuples():
+        if row.date_time - first_time > six_hours:
+            break
         if (not math.isnan(row.basal_amt) and
             row.basal_amt > prior_basal):
             td = (row.date_time - prior_time) # a pandas Timedelta object
@@ -136,8 +140,46 @@ right?  This calculation only goes until the end of the meal period
     print 'total excess: ',running_total
     return calcs, running_total
 
+def excess_basal_insulin_post_meal(df,prior_basal):
+    '''returns the sum of basal insulin multiplied by time-interval
+for the post-meal period, minus 6*prior_basal. The basal insulin is a rate in units/hour,
+right?  This calculation goes for six hours after the meal begins'''
+    calcs = []                  # for documentation
+    first_time = df.date_time[0]
+    prior_time = df.date_time[0]
+    last_time = df.date_time[len(df.date_time)-1]
+    six_hours = pandas.Timedelta(hours=6)
+    if last_time - prior_time < six_hours:
+        raise ValueError('Did not have 6 hours of data')
+    running_total = 0
+    for row in df.itertuples():
+        if row.date_time - first_time > six_hours:
+            break
+        if (not math.isnan(row.basal_amt) and
+            row.basal_amt > prior_basal):
+            td = (row.date_time - prior_time) # a pandas Timedelta object
+            excess = row.basal_amt - prior_basal
+            hrs = td.total_seconds()/(60*60)
+            amt = excess * hrs
+            calc = ("<p>at {time}: {curr}*{hrs} = {amt}<p>"
+                    .format(time=row.date_time,
+                            curr=row.basal_amt,
+                            hrs=hrs,
+                            amt=amt
+                    ))
+            calcs.append(calc)
+            running_total += amt
+            prior_time = row.date_time # new prior time
+    total_excess = running_total-prior_basal*6.0
+    calcs.append('<p><strong>sum - 6*base: {total} - {base}*6 = {excess}</strong></p>'
+                 .format(total=running_total,
+                         base=prior_basal,
+                         excess=total_excess))
+    print 'total excess: ',total_excess
+    return calcs, total_excess
+
 def compute_ic_for_date(date_str):
-    global df_all, df_rel, df_meal, meal_carbs, meal_insulin, meal_rec, prior_insulin, extra_insulin_calcs, extra_insulin, total_insulin, ic_ratio
+    global df_all, df_rel, df_meal, meal_carbs, meal_insulin, meal_rec, prior_insulin, extra_insulin_calcs, extra_insulin, total_insulin, ic_ratio, meal_span, is_long_meal
     df_all = get_ic_for_date(date_str)
     ## just the relevant data. Add more columns as necessary, but this
     ## makes printing more concise
@@ -146,6 +188,10 @@ def compute_ic_for_date(date_str):
     # carbs given within 10 minutes of each other. Return set of rows
     # as a dataframe
     df_meal = carbs_and_insulin_within_meal_gap(df_rel)
+    meal_time = df_meal.date_time[0]
+    meal_end = df_meal.date_time[len(df_meal.date_time)-1]
+    meal_span = meal_end - meal_time
+    is_long_meal = meal_span > pandas.Timedelta(hours=3)
     ## compute total of carbs and upfront insulin
     meal_carbs = df_meal.carbs.sum()
     meal_insulin = df_meal.bolus_volume.sum()
@@ -161,16 +207,19 @@ def compute_ic_for_date(date_str):
     # compute ratio
     ic_ratio = meal_carbs / total_insulin
     print 'I:C ratio is 1:{x}'.format(x=ic_ratio)
-    return {'df_rel': df_rel,
-            'df_meal': df_meal,
-            'meal_carbs': meal_carbs,
-            'meal_insulin': meal_insulin,
-            'meal_rec': meal_rec,
-            'prior_insulin': prior_insulin,
-            'extra_insulin_calcs': extra_insulin_calcs,
-            'extra_insulin': extra_insulin,
-            'total_insulin': total_insulin,
-            'ic_ratio': ic_ratio}
+    return [['df_rel', df_rel],
+            ['df_meal', df_meal],
+            ['meal_time', meal_time],
+            ['meal_span', meal_span],
+            ['is_long_meal', is_long_meal],
+            ['meal_carbs', meal_carbs],
+            ['meal_insulin', meal_insulin],
+            ['meal_rec', meal_rec],
+            ['prior_insulin', prior_insulin],
+            ['extra_insulin_calcs', extra_insulin_calcs],
+            ['extra_insulin', extra_insulin],
+            ['total_insulin', total_insulin],
+            ['ic_ratio', ic_ratio]]
     
 def test_calc(datestr='4/3/16'):
     return compute_ic_for_date(datestr)

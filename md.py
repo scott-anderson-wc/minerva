@@ -16,6 +16,7 @@ from logging.handlers import RotatingFileHandler
 from flask_mysqldb import MySQL
 from datetime import datetime, timedelta
 import db
+import pdb
 
 import json
 import plotly
@@ -133,6 +134,81 @@ def plot1(datestr=None):
                            datarange = datarange
                            )
 
+
+@app.route('/plot2/')
+@app.route('/plot2/<datestr>')
+def plot2(datestr=None):
+    debug('================================================================\nstarting plot2, args is %s' % str(request.args))
+    debug('debug message')
+    # cleans up the URL
+    if request.method == 'GET' and request.args.get('date') != None:
+        debug('redirecting to clean url', url_for('plot2', datestr=request.args.get('date')))
+        return redirect(url_for('plot2', datestr=request.args.get('date')))
+    compute_data_range()
+    if not datestr:
+        return render_template('main.html',
+                               version = app.config['VERSION'],
+                               page_title = 'CGM and IC lookup',
+                               cols = [],
+                               current_date = '',
+                               record_date = '',
+                               records = [],
+                               datarange = datarange)
+    try:
+        date = datetime.strptime(datestr,'%Y-%m-%d')
+    except:
+        flash('invalid date: '+datestr)
+        return render_template('main.html',
+                               version = app.config['VERSION'],
+                               page_title = 'CGM and IC lookup',
+                               cols = [],
+                               current_date = '',
+                               record_date = '',
+                               records = [],
+                               datarange = datarange)
+
+    debug('handling date %s ' % str(date))
+    curs = mysql.connection.cursor()
+    plotdict = db.plotCGMByDate(date,curs)
+    calcs = pdb.compute_ic_for_date(date)
+    dateObj = datetime.strptime(datestr, '%Y-%m-%d')
+    datePretty = dateObj.strftime('%A, %B %d, %Y')
+    yesterday = datetime.strftime(dateObj+timedelta(-1,0,0), '%Y-%m-%d')
+    url_yesterday = url_for('plot1',datestr=yesterday)
+    tomorrow = datetime.strftime(dateObj+timedelta(+1,0,0), '%Y-%m-%d')
+    url_tomorrow = url_for('plot1',datestr=tomorrow)
+    calcs_dict = dict(zip([e[0] for e in calcs],
+                          [e[1] for e in calcs]))
+    ic_trace = go.Scatter( x = calcs_dict['meal_time'],
+                           y = calcs_dict['ic_ratio'],
+                           name = 'IC initial',
+                           mode = 'markers',
+                           yaxis = 'y2')
+    if plotdict == None:
+        print('No CGM data for this date')
+        flash('No CGM data for this date')
+        data = []
+    else:
+        data = plotdict['data']
+    data.append(ic_trace)
+    layout = go.Layout( title = 'glucose and IC',
+                        yaxis = dict(title='mg per dl'),
+                        yaxis2 = dict(title='IC',
+                                      overlaying='y',
+                                      side='right'))
+    graph = go.Figure(data = data, layout = layout)
+    graphJSON = json.dumps( graph, cls=plotly.utils.PlotlyJSONEncoder)
+    return render_template('main2.html',
+                           version = app.config['VERSION'],
+                           page_title='Minerva',
+                           graphJSON = graphJSON,
+                           calcs = util.render(calcs),
+                           record_date = datePretty,
+                           url_tomorrow = url_tomorrow,
+                           current_date = datestr,
+                           url_yesterday = url_yesterday,
+                           datarange = datarange
+                           )
 
 
 # this function *can't* be invoked from global context. the flask_mysqldb
