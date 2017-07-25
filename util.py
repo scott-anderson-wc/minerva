@@ -40,7 +40,7 @@ def render(alist):
         elif type(val) == type(pandas.Timedelta(hours=1)):
             sublist.append('<p>Timedelta {symbol}: {val}'.format(symbol=sym, val=val.__str__()))
         elif type(val) == type(pandas.DataFrame()):
-            table = ['<table>']
+            table = ['<table class="bordered">']
             table.append( '<tr>' )
             table.append( ''.join(['<th>{head}</th>'.format(head=c) for c in val.columns ]) )
             table.append( '</tr>\n' )
