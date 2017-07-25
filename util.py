@@ -15,7 +15,7 @@ def floaty(str):
         return float(str)
 
 def nan2blank(x):
-    if type(x)=='float' and math.isnan(x):
+    if type(x)==numpy.float64 and math.isnan(x):
         return '&nbsp;'
     else:
         return x
