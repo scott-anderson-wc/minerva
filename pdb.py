@@ -4,6 +4,7 @@ import re
 import datetime
 import dbconn2
 import math
+import flask
 
 def to_date(date_str):
     if type(date_str) == type(datetime.datetime.today()):
@@ -89,7 +90,9 @@ def prior_base_insulin(df, meal_rec_num):
     global prior_recs, basal_amts
     prior_recs = df.query('rec_num < '+str(meal_rec_num))
     if len(prior_recs) == 0:
-        raise ValueError('No records prior to meal!')
+        flask.flash('No records prior to meal; cannot figure out prior basal_amt. Using 0.0')
+        print('No records prior to meal; cannot figure out prior basal_amt. Using 0.0')
+        return 0.0
     # reverse their order
     prior_recs.reindex(index=prior_recs.index[::-1])
     basal_amts = prior_recs.basal_amt
@@ -162,6 +165,10 @@ right?  This calculation goes for six hours after the meal begins'''
 def compute_ic_for_date(date_str, conn=get_db_connection()):
     global df_all, df_rel, df_meal, meal_carbs, meal_insulin, meal_rec, prior_insulin, extra_insulin_calcs, extra_insulin, total_insulin, ic_ratio, meal_span, is_long_meal
     df_all = get_ic_for_date(date_str, conn=conn)
+    if len(df_all) == 0:
+        flask.flash('No data for date_str {s}'.format(s=date_str))
+        print('No data for date_str {s}'.format(s=date_str))
+        return [["ic_ratio", None]]
     ## just the relevant data. Add more columns as necessary, but this
     ## makes printing more concise
     df_rel = df_all[['date_time','basal_amt','bolus_volume','carbs','rec_num']]
@@ -169,6 +176,11 @@ def compute_ic_for_date(date_str, conn=get_db_connection()):
     # carbs given within 10 minutes of each other. Return set of rows
     # as a dataframe
     df_meal = carbs_and_insulin_within_meal_gap(df_rel)
+    if len(df_meal)==0:
+        flask.flash('no meals happened for this date and time range')
+        print('no meals happened for this date and time range')
+        return [["df_rel", df_rel],
+                ["ic_ratio", None]]
     meal_time = df_meal.date_time[0]
     meal_end = df_meal.date_time[len(df_meal.date_time)-1]
     meal_span = meal_end - meal_time

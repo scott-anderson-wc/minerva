@@ -34,7 +34,7 @@ def debug(*args):
 
 app = Flask(__name__)
 
-__builtin__.app = app           # so its available to other modules.
+__builtin__.app = app           # so it's available to other modules.
 
 app.config.from_object('config')
 os.environ['FLASK_SETTINGS'] = '/home/hugh9/settings.cfg'
@@ -49,89 +49,8 @@ datarange = None
 @app.route('/plot1/')
 @app.route('/plot1/<datestr>')
 def plot1(datestr=None):
-    debug('================================================================\nstarting plot1, args is %s' % str(request.args))
-    debug('debug message')
-    # cleans up the URL
-    if request.method == 'GET' and request.args.get('date') != None:
-        debug('redirecting to clean url', url_for('plot1', datestr=request.args.get('date')))
-        return redirect(url_for('plot1', datestr=request.args.get('date')))
-    compute_data_range()
-    if not datestr:
-        return render_template('main.html',
-                               version = app.config['VERSION'],
-                               page_title = 'CGM and IC lookup',
-                               cols = [],
-                               current_date = '',
-                               record_date = '',
-                               records = [],
-                               datarange = datarange)
-    try:
-        date = datetime.strptime(datestr,'%Y-%m-%d')
-    except:
-        flash('invalid date: '+datestr)
-        return render_template('main.html',
-                               version = app.config['VERSION'],
-                               page_title = 'CGM and IC lookup',
-                               cols = [],
-                               current_date = '',
-                               record_date = '',
-                               records = [],
-                               datarange = datarange)
-
-    debug('handling date %s ' % str(date))
-    curs = mysql.connection.cursor()
-    plotdict = db.plotCGMByDate(date,curs)
-    ic_initial = db.getICByDate(date,curs)
-    raw = db.getICByDateRaw(db.strip_hyphens(datestr),curs)
-    cols = ['rec_num','date_time','Basal_amt',
-            'temp_basal_down','temp_basal_up','temp_basal_duration',
-            'bolus_type','bolus_volume',
-            'Immediate_percent','extended_percent',
-            'duration','carbs','notes']
-    db.remove_empty_cols(cols,raw)
-    # rawtable = db.makeTableHTML(cols, raw)
-    mealtable = db.makeTableHTML(['when','carbs','bolus','ratio','basis'],ic_initial)
-    dateObj = datetime.strptime(datestr, '%Y-%m-%d')
-    datePretty = dateObj.strftime('%A, %B %d, %Y')
-    yesterday = datetime.strftime(dateObj+timedelta(-1,0,0), '%Y-%m-%d')
-    url_yesterday = url_for('plot1',datestr=yesterday)
-    tomorrow = datetime.strftime(dateObj+timedelta(+1,0,0), '%Y-%m-%d')
-    url_tomorrow = url_for('plot1',datestr=tomorrow)
-    ic_trace = go.Scatter( x = db.col(ic_initial,'time'),
-                           y = db.col(ic_initial,'ratio'),
-                           name = 'IC initial',
-                           mode = 'markers',
-                           yaxis = 'y2')
-    debug('times: %s' % str(db.col(ic_initial,'time')))
-    debug('ratios: %s' % str(db.col(ic_initial,'ratio')))
-    if plotdict == None:
-        print('No CGM data for this date')
-        flash('No CGM data for this date')
-        data = []
-    else:
-        data = plotdict['data']
-    data.append(ic_trace)
-    layout = go.Layout( title = 'glucose and IC',
-                        yaxis = dict(title='mg per dl'),
-                        yaxis2 = dict(title='IC',
-                                      overlaying='y',
-                                      side='right'))
-    graph = go.Figure(data = data, layout = layout)
-    graphJSON = json.dumps( graph, cls=plotly.utils.PlotlyJSONEncoder)
-    return render_template('main.html',
-                           version = app.config['VERSION'],
-                           page_title='Minerva',
-                           graphJSON = graphJSON,
-                           table1 = mealtable,
-                           cols = cols,
-                           records = raw,
-                           record_date = datePretty,
-                           url_tomorrow = url_tomorrow,
-                           current_date = datestr,
-                           url_yesterday = url_yesterday,
-                           datarange = datarange
-                           )
-
+    flash('plot1 is obsolete')
+    redirect(url_for('plot2',datestr=datestr))
 
 @app.route('/plot2/')
 @app.route('/plot2/<datestr>')
@@ -174,29 +93,30 @@ def plot2(datestr=None):
     dateObj = datetime.strptime(datestr, '%Y-%m-%d')
     datePretty = dateObj.strftime('%A, %B %d, %Y')
     yesterday = datetime.strftime(dateObj+timedelta(-1,0,0), '%Y-%m-%d')
-    url_yesterday = url_for('plot1',datestr=yesterday)
+    url_yesterday = url_for('plot2',datestr=yesterday)
     tomorrow = datetime.strftime(dateObj+timedelta(+1,0,0), '%Y-%m-%d')
-    url_tomorrow = url_for('plot1',datestr=tomorrow)
+    url_tomorrow = url_for('plot2',datestr=tomorrow)
     calcs_dict = dict(zip([e[0] for e in calcs],
                           [e[1] for e in calcs]))
     print('in plot2, I:C is %s' % str(calcs_dict['ic_ratio']))
-    ic_trace = go.Scatter( x = calcs_dict['meal_time'],
-                           y = calcs_dict['ic_ratio'],
-                           name = 'IC initial',
-                           mode = 'markers',
-                           yaxis = 'y2')
+    if False:
+        ic_trace = go.Scatter( x = calcs_dict['meal_time'],
+                               y = calcs_dict['ic_ratio'],
+                               name = 'IC initial',
+                               mode = 'markers',
+                               yaxis = 'y2')
     if plotdict == None:
         print('No CGM data for this date')
         flash('No CGM data for this date')
         data = []
     else:
         data = plotdict['data']
-    data.append(ic_trace)
-    layout = go.Layout( title = 'glucose and IC',
-                        yaxis = dict(title='mg per dl'),
-                        yaxis2 = dict(title='IC',
-                                      overlaying='y',
-                                      side='right'))
+    # data.append(ic_trace)
+    layout = go.Layout( title = 'glucose',
+                        yaxis = dict(title='mg per dl'))
+                        # yaxis2 = dict(title='IC',
+                        #               overlaying='y',
+                        #               side='right'))
     graph = go.Figure(data = data, layout = layout)
     graphJSON = json.dumps( graph, cls=plotly.utils.PlotlyJSONEncoder)
     print('about to render calcs')

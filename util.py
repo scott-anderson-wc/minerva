@@ -28,6 +28,10 @@ def render(alist):
         # print('current elt is {s}: {v}'.format(s=sym,v=val))
         if type(val) == int:
             sublist.append('<p>Integer {symbol}: {val}</p>'.format(symbol=sym,val=val))
+        elif type(val) == float:
+            sublist.append('<p>Float {symbol}: {val}</p>'.format(symbol=sym,val=val))
+        elif val is None:
+            sublist.append('<p>{symbol}: None</p>'.format(symbol=sym))
         elif type(val) == numpy.float64:
             sublist.append('<p>Float {symbol}: {val}</p>'.format(symbol=sym,val=val))
         elif type(val) == type(True):
