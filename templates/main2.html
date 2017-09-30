@@ -33,8 +33,9 @@
 
 
         {% if calcs %}
-            <h2>Calculations</h2>
-	    <ol>
+	
+            <h2 id="toggle_calculations">Click to Show Calculations</h2>
+	    <ol id="calculations">
             {% for c in calcs %}
         	<li>{{c|safe}}</li>
 		{% endfor %}

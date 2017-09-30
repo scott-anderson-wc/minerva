@@ -1,6 +1,6 @@
 import os
 from flask import (Flask, render_template, make_response, request, redirect, url_for,
-                   session, flash, send_from_directory)
+                   session, flash, send_from_directory, g)
 from werkzeug import secure_filename
 
 import time
@@ -14,7 +14,7 @@ from logging.handlers import RotatingFileHandler
 from flask_mysqldb import MySQL
 from datetime import datetime, timedelta
 import db
-import pdb
+import pandb
 
 import json
 import plotly
@@ -50,7 +50,7 @@ datarange = None
 @app.route('/plot1/<datestr>')
 def plot1(datestr=None):
     flash('plot1 is obsolete')
-    redirect(url_for('plot2',datestr=datestr))
+    return redirect(url_for('plot2',datestr=datestr))
 
 @app.route('/plot2/')
 @app.route('/plot2/<datestr>')
@@ -87,8 +87,8 @@ def plot2(datestr=None):
     debug('handling date %s ' % str(date))
     curs = mysql.connection.cursor()
     plotdict = db.plotCGMByDate(date,curs)
-    calcs = pdb.compute_ic_for_date(date, conn=mysql.connection)
-    print('back from pdb')
+    calcs = pandb.compute_ic_for_date(date, conn=mysql.connection)
+    print('back from pandb, return type is '+str(type(calcs)))
     # mysql.connection.close()
     dateObj = datetime.strptime(datestr, '%Y-%m-%d')
     datePretty = dateObj.strftime('%A, %B %d, %Y')
@@ -196,6 +196,12 @@ def compute_data_range():
         datarange['max_cgm'] = max_cgm
         datarange['min_cgm'] = min_cgm
         debug('data range is %s' % str(datarange))
+
+@app.teardown_appcontext
+def teardown_db(exception):
+    conn = getattr(g, 'conn', None)
+    if conn is not None:
+        conn.close()
 
 if __name__ == '__main__':
     port = 1942

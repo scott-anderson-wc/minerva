@@ -1,12 +1,16 @@
 # This file is a database interface using Pandas dataframes as the
 # primary datastructure for sets of records from the database.
 
+# get numbered versions!
+# why can't I?  hunh?
+
 import pandas
 import MySQLdb
 import datetime
 import dbconn2
 import math
 import flask
+import util
 
 class StepException(Exception):
     pass
@@ -105,44 +109,53 @@ def carbs_and_insulin_together(df,gap=carbs_and_insulin_together_gap):
 def plausible_basal_amount(ba):
     return ba > 0
 
-def base_insulin_delta(df_rel, df_meal):
-    '''find a change to the base_insulin within +/- 30 minutes of df_meal. 
+def basal_insulin_delta(df_rel, df_meal):
+    '''finds a basal_insulin 2 hours prior to meal.
 
-This algorith finds a plausible (non-zero) base_insulin amount more
-than 1 hour before the meal such that there was an increase to that
-base amount during a 30 minute window around the meal.  Returns a
-tuple of the base amount, the changed amount, and the delta (second
-minus first)
+On 8/4, Janice said look 2 hours before the meal; whatever the basal
+insulin was then, use that as the pre-meal basal. So for the April 3rd
+2016 example day, use 0.2 for the evening meal.
     '''
     global prior_recs, basal_amts
     thirty_mins = datetime.timedelta(hours = 0.5)
     win_start = df_meal.date_time[0] - thirty_mins 
     win_end = df_meal.date_time[len(df_meal)-1] + thirty_mins
-    df_meal_basal = select(df_rel,
-                           lambda row:
-                               (not pandas.isnull(row.basal_amt) and
-                                row.date_time >= win_start and
-                                row.date_time <= win_end))
-    print 'changes to basal during meal hour window',df_meal_basal
     # find earlier basals
-    hour = datetime.timedelta(hours=1)
-    before_meal = df_meal.date_time[0] - hour
+    two_hours = datetime.timedelta(hours=2)
+    before_meal = df_meal.date_time[0] - two_hours
     df_prior_basals = select(df_rel,
                              lambda row:
                                (not pandas.isnull(row.basal_amt) and
                                 not row.basal_amt == 0.0 and
                                 row.date_time < before_meal))
-    print 'prior basal values',df_prior_basals
-    if len(df_meal_basal) == 0:
-        raise ValueError('figure out how to handle missing data')
+    print 'df_prior_basals'
+    print df_prior_basals
     if len(df_prior_basals) == 0:
         raise ValueError('figure out how to handle missing data')
+    # This is the last value, so the most recent value
     prior = df_prior_basals.basal_amt[len(df_prior_basals)-1]
-    meal_basals = df_meal_basal.basal_amt
+    print('prior: ',prior)
+    # meal basals
+    df_meal_basals = select(df_rel,
+                           lambda row:
+                               (not pandas.isnull(row.basal_amt) and
+                                row.basal_amt > prior and
+                                row.date_time >= win_start and
+                                row.date_time <= win_end))
+    print 'df_meal_basals'
+    print df_meal_basals
+    if len(df_meal_basals) == 0:
+        raise ValueError('figure out how to handle missing data')
+    meal_basals = df_meal_basals.basal_amt
     meal_basals_max = meal_basals.max()
     meal_basals_min = meal_basals.min()
     if meal_basals_max > meal_basals_min:
-        raise ValueError('too many different meal_basal values')
+        print('ignoring some mealtime basal settings')
+    # Find the first record that has the change to meal_basal_max
+    meal_basals_max_1 = select(df_meal_basals,
+                               lambda row:
+                               # start here
+                               )
     meal = df_meal_basals.basal_amt[0]
     change_time = df_meal_basals.date_time
     delta = meal - prior
@@ -153,17 +166,21 @@ def excess_basal_insulin_post_meal(df,prior_basal, change_time):
 for the post-meal period, minus 6*prior_basal. The basal insulin is a rate in units/hour,
 right?  This calculation goes for six hours after the meal begins'''
     calcs = []                  # for documentation
-    first_time = change_time
+    first_time = change_time    # timestamp
     prior_time = df.date_time[0]
     last_time = df.date_time[len(df.date_time)-1]
+    print('last timestamp in post-meal rows: ',last_time)
     six_hours = pandas.Timedelta(hours=6)
     end_time = first_time + six_hours
     curr_basal = prior_basal
+    print('looking until ',end_time)
     if last_time < end_time:
         raise ValueError('Did not have 6 hours of data')
     running_total = 0
     running_time_total = 0
+    print('looping over ',len(df),' tuples')
     for row in df.itertuples():
+        print('considering row ',row)
         if row.date_time < change_time:
             continue
         if row.date_time > end_time:
@@ -196,6 +213,7 @@ right?  This calculation goes for six hours after the meal begins'''
                             hrs=hrs,
                             amt=amt
                     ))
+            print('incremental insulin',calc)
             calcs.append(calc)
             running_total += amt
             prior_time = row.date_time # new prior time
@@ -211,64 +229,6 @@ right?  This calculation goes for six hours after the meal begins'''
                          excess=total_excess))
     print 'total excess: ',total_excess
     return calcs, total_excess
-
-def compute_ic_for_date_old(date_str, conn=get_db_connection()):
-    global df_all, df_rel, df_meal, meal_carbs, meal_insulin, meal_rec
-    global prior_insulin, extra_insulin_calcs, extra_insulin, total_insulin, ic_ratio, meal_span, is_long_meal
-    df_all = get_ic_for_date(date_str, conn=conn)
-    if len(df_all) == 0:
-        flask.flash('No data for date_str {s}'.format(s=date_str))
-        print('No data for date_str {s}'.format(s=date_str))
-        return [["ic_ratio", None]]
-    ## just the relevant data. Add more columns as necessary, but this
-    ## makes printing more concise
-    df_rel = df_all[['date_time','basal_amt','bolus_volume','carbs','rec_num']]
-    ## first, get the subset of records just for this meal time
-    df_mealtime = mealtime_records(df_rel)
-    # next, get the initial carbs and insulin, meaning insulin and
-    # carbs given within 10 minutes of each other. Return set of rows
-    # as a dataframe
-    df_meal = carbs_and_insulin_together(df_mealtime)
-    if len(df_meal)==0:
-        flask.flash('no meals happened for this date and time range')
-        print('no meals happened for this date and time range')
-        return [["df_rel", df_rel],
-                ["ic_ratio", None]]
-    meal_time = df_meal.date_time[0]
-    meal_end = df_meal.date_time[len(df_meal.date_time)-1]
-    meal_span = meal_end - meal_time
-    is_long_meal = meal_span > pandas.Timedelta(hours=3)
-    ## compute total of carbs and upfront insulin
-    meal_carbs = df_meal.carbs.sum()
-    meal_insulin = df_meal.bolus_volume.sum()
-    ## base insulin. Work backwards to find first plausible value prior to meal
-    (prior_insulin, meal, delta, change_time) = base_insulin_delta(df_rel, df_meal)
-    print( 'prior_insulin, %{p}, changed to {p2} (delta = {d}) at time {t}'
-           .format(p=prior_insulin,p2=meal,d=delta,t=change_time))
-    # now, subtract that prior insulin from all insulin subsequent to
-    # the meal and sum the excess times the interval
-    extra_insulin_calcs, extra_insulin = excess_basal_insulin_post_meal(df_rel, prior_insulin, change_time)
-    # compute total insulin as upfront + excess
-    total_insulin = meal_insulin + extra_insulin
-    # compute ratio
-    ic_ratio = meal_carbs / total_insulin
-    print 'I:C ratio is 1:{x}'.format(x=ic_ratio)
-    return [['df_rel', df_rel],
-            ['df_meal', df_meal],
-            ['meal_time', meal_time],
-            ['meal_span', meal_span],
-            ['is_long_meal', is_long_meal],
-            ['meal_carbs', meal_carbs],
-            ['meal_insulin', meal_insulin],
-            ['meal_rec', meal_rec],
-            ['prior_insulin', prior_insulin],
-            ['extra_insulin_calcs', extra_insulin_calcs],
-            ['extra_insulin', extra_insulin],
-            ['total_insulin', total_insulin],
-            ['ic_ratio', ic_ratio]]
-    
-            
-
 
 def addstep(sym, val):
     '''add a new step (sym, val) pair, to a dictionary of steps'''
@@ -318,21 +278,30 @@ def compute_ic_for_date(date_str, conn=get_db_connection()):
         util.addstep(steps, 'is_long_meal', is_long_meal)
         ## compute total of carbs and upfront insulin
         meal_carbs = df_meal.carbs.sum()
-
+        util.addstep(steps, 'meal_carbs', meal_carbs)
         meal_insulin = df_meal.bolus_volume.sum()
+        util.addstep(steps, 'meal_insulin', meal_insulin)
         print('computing base insulin')
         ## base insulin. Work backwards to find first plausible value prior to meal
-        (prior_insulin, meal, delta, change_time) = base_insulin_delta(df_rel, df_meal)
+        (prior_insulin, meal, delta, change_time) = basal_insulin_delta(df_rel, df_meal)
         print( 'prior_insulin, {p}, changed to {p2} (delta = {d}) at time {t}'
                .format(p=prior_insulin,p2=meal,d=delta,t=change_time))
+        util.addstep(steps, 'prior_insulin', prior_insulin)
+        util.addstep(steps, 'changed_insulin', meal)
+        util.addstep(steps, 'change_time', change_time)  # TO DO. this has the wrong value
+        util.addstep(steps, 'change_amount', delta)
         # now, subtract that prior insulin from all insulin subsequent to
         # the meal and sum the excess times the interval
         extra_insulin_calcs, extra_insulin = excess_basal_insulin_post_meal(df_rel, prior_insulin, change_time)
+        util.addstep(steps, 'extra_insulin', extra_insulin)
         # compute total insulin as upfront + excess
         total_insulin = meal_insulin + extra_insulin
+        util.addstep(steps, 'total_insulin', total_insulin)
         # compute ratio
         ic_ratio = meal_carbs / total_insulin
         print 'I:C ratio is 1:{x}'.format(x=ic_ratio)
+        util.addstep(steps, 'ic_ratio', ic_ratio)
+        return steps
         return [['df_rel', df_rel],
                 ['df_meal', df_meal],
                 ['meal_time', meal_time],

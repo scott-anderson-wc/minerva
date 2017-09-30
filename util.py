@@ -2,7 +2,27 @@
 import pandas
 import math
 import numpy
+import flask
+import dbconn2
 
+DSN = None
+
+def get_dsn(file='/home/hugh9/.my.cnf'):
+    if DSN is None:
+        DSN = dbconn2.read_cnf('/home/hugh9/.my.cnf')
+    return DSN
+
+def get_db_connection():
+    g = flask.g
+    conn = getattr(g, 'conn', None)
+    if conn is None:
+        conn = g.conn = dbconn2.connect(get_dsn())
+    return conn
+
+def get_dict_cursor():
+    conn = get_db_connection()
+    return conn.cursor(MySQLdb.cursors.DictCursor)
+    
 def dict2str(a_dict):
     '''returns a string for a dictionary-like object'''
     pairs = [ k + ': ' + v for k,v in a_dict ]
@@ -21,6 +41,7 @@ def nan2blank(x):
         return x
 
 def render(alist):
+    '''Takes an association list, like produced by 'addstep', and appends a rendering (to HTML) to each sublist'''
     print('rendering an alist of length %s' % len(alist))
     for sublist in alist:
         sym = sublist[0]
@@ -59,3 +80,17 @@ def render(alist):
     return alist
             
             
+def addstep(steps, sym, val):
+    '''add a new step (sym, val) pair, to a dictionary of steps'''
+    if sym == 'steps':
+        raise ValueError('''Cannot name a step 'steps': %{sym}'''.format(sym=sym))
+    if 'steps' not in steps:
+        steps['steps'] = []
+    steps['steps'].append((sym,val))
+    if sym in steps:
+        raise ValueError('''You already have a step called %{sym}'''.format(sym=sym))
+    print('adding step ',sym,' with value ',val)
+    steps[sym] = val
+    return val
+
+

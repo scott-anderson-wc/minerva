@@ -21,3 +21,8 @@ $("#cgm_date").datepicker({ minDate: new Date(2016,8,12),
                             changeYear: true });
 
 */
+
+$("#toggle_calculations").click(function () {
+    console.log("Toggle Calculations");
+    $("#calculations").toggle();
+});
