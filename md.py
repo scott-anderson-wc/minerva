@@ -96,9 +96,7 @@ def plot2(datestr=None):
     url_yesterday = url_for('plot2',datestr=yesterday)
     tomorrow = datetime.strftime(dateObj+timedelta(+1,0,0), '%Y-%m-%d')
     url_tomorrow = url_for('plot2',datestr=tomorrow)
-    calcs_dict = dict(zip([e[0] for e in calcs],
-                          [e[1] for e in calcs]))
-    print('in plot2, I:C is %s' % str(calcs_dict['ic_ratio']))
+    print('in plot2, I:C is %s' % str(calcs['ic_ratio']))
     if False:
         ic_trace = go.Scatter( x = calcs_dict['meal_time'],
                                y = calcs_dict['ic_ratio'],
@@ -120,7 +118,7 @@ def plot2(datestr=None):
     graph = go.Figure(data = data, layout = layout)
     graphJSON = json.dumps( graph, cls=plotly.utils.PlotlyJSONEncoder)
     print('about to render calcs')
-    rendered_calcs = [ sublist[2] for sublist in util.render(calcs) ]
+    rendered_calcs = [ sublist[2] for sublist in util.render(calcs['steps']) ]
     print('in plot2, about to render template')
     return render_template('main2.html',
                            version = app.config['VERSION'],

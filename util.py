@@ -41,9 +41,12 @@ def nan2blank(x):
         return x
 
 def render(alist):
-    '''Takes an association list, like produced by 'addstep', and appends a rendering (to HTML) to each sublist'''
+    '''Takes an association list, like the 'steps' key in 'addstep', and 
+appends a rendering (to HTML) to each sublist'''
     print('rendering an alist of length %s' % len(alist))
     for sublist in alist:
+        if type(sublist) != type([]):
+            raise TypeError('sublist is not a list: ',sublist)
         sym = sublist[0]
         val = sublist[1]
         # print('current elt is {s}: {v}'.format(s=sym,v=val))
@@ -81,12 +84,12 @@ def render(alist):
             
             
 def addstep(steps, sym, val):
-    '''add a new step (sym, val) pair, to a dictionary of steps'''
+    '''add a new step (sym, val) pair, to a dictionary of steps. Special key 'steps' gives them in order'''
     if sym == 'steps':
         raise ValueError('''Cannot name a step 'steps': %{sym}'''.format(sym=sym))
     if 'steps' not in steps:
         steps['steps'] = []
-    steps['steps'].append((sym,val))
+    steps['steps'].append([sym,val])
     if sym in steps:
         raise ValueError('''You already have a step called %{sym}'''.format(sym=sym))
     print('adding step ',sym,' with value ',val)

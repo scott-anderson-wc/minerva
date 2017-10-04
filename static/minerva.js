@@ -26,3 +26,31 @@ $("#toggle_calculations").click(function () {
     console.log("Toggle Calculations");
     $("#calculations").toggle();
 });
+$("#calculations").toggle();
+
+var isf_value = 50;		// just a default. Should make this configurable.
+
+function calculate_ideal_ic(isf) {
+    /* The deviations from idea range (80-120) for one or two
+     three-hour periods post-meal have already been calculated in the
+     back end and have been saved in variables named bg_excess_period1
+     and bg_exess_period2.
+    */
+    console.log("calc ideal ic using ",isf,bg_excess_period1,bg_excess_period2);
+}
+
+
+$("#isf_value").text(isf_value);
+
+$("#isf_slider").slider({
+    min: 0,
+    max: 100,
+    value: isf_value,
+    slide: function(event, ui) {
+	isf_value = ui.value;	// not sure we need this
+	$("#isf_value").text(ui.value);
+	calculate_ideal_ic(ui.value);
+    }
+});
+
+

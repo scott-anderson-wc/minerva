@@ -31,16 +31,23 @@
             Plotly.plot('cgmPlot', cgmGraph.data, cgmGraph.layout, {showLink: false});
         </script>
 
+	<h2>I:C Ratios</h2>
+	<p>Initial I:C <span id="initial_ic">{{calcs.initial_ic}}</span></p>
+	<p>Effective I:C <span id="effective_ic">{{calcs.effective_ic}}</span></p>
+	<p>Ideal I:C <span id="ideal_ic">ideal</span> based on ISF of <span id="isf_value">isf</span></p>
+	<p>ISF: <span id="isf_slider"></span></p>
 
-        {% if calcs %}
-	
-            <h2 id="toggle_calculations">Click to Show Calculations</h2>
-	    <ol id="calculations">
-            {% for c in calcs %}
-        	<li>{{c|safe}}</li>
-		{% endfor %}
-	    </ol>
-	{% endif %}
+	<script>
+	  var bg_excess_period1 = 111 || {{calcs.bg_excess_period1}};
+	  var bg_excess_period2 = 222 || {{calcs.bg_excess_period2}};
+	</script>
+
+        <h2 id="toggle_calculations">Click to Show Calculations</h2>
+	<ol id="calculations">
+          {% for c in calcs %}
+          <li>{{c|safe}}</li>
+	  {% endfor %}
+	</ol>
 
 </div>
 

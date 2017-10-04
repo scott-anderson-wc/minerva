@@ -1,8 +1,6 @@
 # This file is a database interface using Pandas dataframes as the
 # primary datastructure for sets of records from the database.
 
-# get numbered versions!
-# why can't I?  hunh?
 
 import pandas
 import MySQLdb
@@ -45,7 +43,6 @@ supper), returns all records for that date.'''
     tomorrow = today+datetime.timedelta(days=1)
     time = meal_to_time_range(meal_str)
     # I added a clause to get data from the next day, so this will work for supper
-    # It won't work for breakfast or lunch because of the time cut-off.
     query = ('''select * from insulin_carb_2 where 
                 date(date_time) = '{today}' or 
                 date(date_time) = '{tomorrow}' and time(date_time) < '03:00' '''
@@ -152,12 +149,15 @@ insulin was then, use that as the pre-meal basal. So for the April 3rd
     if meal_basals_max > meal_basals_min:
         print('ignoring some mealtime basal settings')
     # Find the first record that has the change to meal_basal_max
-    meal_basals_max_1 = select(df_meal_basals,
-                               lambda row:
-                               # start here
-                               )
-    meal = df_meal_basals.basal_amt[0]
-    change_time = df_meal_basals.date_time
+    df_meal_basals_max = None
+    for row in df_meal_basals.itertuples():
+        if row.basal_amt == meal_basals_max:
+            print('row: ',row)
+            df_meal_basals_max = pandas.DataFrame([row._asdict()], columns = df_meal_basals.columns)
+            break
+    print('df of max basal',df_meal_basals_max)
+    meal = df_meal_basals_max.basal_amt[0] # same as meal_basals_max
+    change_time = df_meal_basals_max.date_time[0]
     delta = meal - prior
     return ( prior, meal, delta, change_time )
 
@@ -172,59 +172,52 @@ right?  This calculation goes for six hours after the meal begins'''
     print('last timestamp in post-meal rows: ',last_time)
     six_hours = pandas.Timedelta(hours=6)
     end_time = first_time + six_hours
-    curr_basal = prior_basal
     print('looking until ',end_time)
     if last_time < end_time:
-        raise ValueError('Did not have 6 hours of data')
-    running_total = 0
-    running_time_total = 0
+        # since we look until 3am the next day, this shouldn't happen.
+        # So, we will assume the last value continues to the end of the 6 hours
+        pass
+    state = {'curr_basal': prior_basal,
+             'curr_time': change_time,
+             'running_total': 0,
+             'running_time': 0}
+    def incr_excess_basal(new_basal, new_time):
+        if math.isnan(new_basal):
+            new_basal = state['curr_basal']
+        td = new_time - state['curr_time'] # a time_delta object
+        hrs = td.total_seconds()/(60*60)   # need hrs because basal is in units/hr
+        amt = state['curr_basal']*hrs
+        state['running_total'] += amt
+        state['running_time'] += hrs
+        # for explaining this calculation
+        calc = ("<p>from {then} to {now} ({hrs}): {curr}*{hrs} = {amt}<p>"
+                .format(then=prior_time.strftime("%H:%M"),
+                        now=end_time.strftime("%H:%M"),
+                        curr=state['curr_basal'],
+                        hrs=hrs,
+                        amt=amt
+                ))
+        # print('calc',calc)
+        calcs.append(calc)
+        # getting ready for next iteration
+        state['curr_basal'] = new_basal
+        state['curr_time'] = new_time
+        
+            
     print('looping over ',len(df),' tuples')
     for row in df.itertuples():
-        print('considering row ',row)
+        # print('considering row ',row)
         if row.date_time < change_time:
             continue
         if row.date_time > end_time:
-            if prior_time < end_time and curr_basal > prior_basal:
-                # add the last little bit
-                td = end_time - prior_time
-                hrs = td.total_seconds()/(60*60)
-                running_time_total += hrs
-                amt = curr_basal * hrs
-                calc = ("<p>from {then} to {now} ({hrs}): {curr}*{hrs} = {amt}<p>"
-                        .format(then=prior_time.strftime("%H:%M"),
-                                now=end_time.strftime("%H:%M"),
-                                curr=curr_basal,
-                                hrs=hrs,
-                                amt=amt
-                        ))
-                calcs.append(calc)
-                running_total += amt
             break
-        if (not math.isnan(row.basal_amt) and
-            row.basal_amt > prior_basal):
-            td = (row.date_time - prior_time) # a pandas Timedelta object
-            hrs = td.total_seconds()/(60*60)
-            running_time_total += hrs
-            amt = curr_basal * hrs
-            calc = ("<p>from {then} to {now} ({hrs}): {curr}*{hrs} = {amt}<p>"
-                    .format(then=prior_time.strftime("%H:%M"),
-                            now=row.date_time.strftime("%H:%M"),
-                            curr=curr_basal,
-                            hrs=hrs,
-                            amt=amt
-                    ))
-            print('incremental insulin',calc)
-            calcs.append(calc)
-            running_total += amt
-            prior_time = row.date_time # new prior time
-            curr_basal = row.basal_amt
+        incr_excess_basal(row.basal_amt, row.date_time)
     # after the loop
-    if running_time_total != 6.0:
-        print 'error: time does not total to 6 hours: {tot}'.format(tot=running_time_total)
-        raise ValueError('incorrect time total')
-    total_excess = running_total-prior_basal*6.0
+    if state['running_time'] < 6.0:
+        incr_excess_basal(float('nan'),end_time)
+    total_excess = state['running_total']-prior_basal*6.0
     calcs.append('<p><strong>sum - 6*base: {total} - {base}*6 = {excess}</strong></p>'
-                 .format(total=running_total,
+                 .format(total=state['running_total'],
                          base=prior_basal,
                          excess=total_excess))
     print 'total excess: ',total_excess
@@ -302,25 +295,27 @@ def compute_ic_for_date(date_str, conn=get_db_connection()):
         print 'I:C ratio is 1:{x}'.format(x=ic_ratio)
         util.addstep(steps, 'ic_ratio', ic_ratio)
         return steps
-        return [['df_rel', df_rel],
-                ['df_meal', df_meal],
-                ['meal_time', meal_time],
-                ['meal_span', meal_span],
-                ['is_long_meal', is_long_meal],
-                ['meal_carbs', meal_carbs],
-                ['meal_insulin', meal_insulin],
-                ['meal_rec', meal_rec],
-                ['prior_insulin', prior_insulin],
-                ['extra_insulin_calcs', extra_insulin_calcs],
-                ['extra_insulin', extra_insulin],
-                ['total_insulin', total_insulin],
-                ['ic_ratio', ic_ratio]]
+        # return [['df_rel', df_rel],
+        #         ['df_meal', df_meal],
+        #         ['meal_time', meal_time],
+        #         ['meal_span', meal_span],
+        #         ['is_long_meal', is_long_meal],
+        #         ['meal_carbs', meal_carbs],
+        #         ['meal_insulin', meal_insulin],
+        #         ['meal_rec', meal_rec],
+        #         ['prior_insulin', prior_insulin],
+        #         ['extra_insulin_calcs', extra_insulin_calcs],
+        #         ['extra_insulin', extra_insulin],
+        #         ['total_insulin', total_insulin],
+        #         ['ic_ratio', ic_ratio]]
     except Exception as err:
         print('Got an exception: {err}'.format(err=err))
         return None
 
 def test_calc(date_str='4/3/16'):
-    return compute_ic_for_date(date_str)
+    calcs = compute_ic_for_date(date_str) 
+    rendered_calcs = [ sublist[2] for sublist in util.render(calcs['steps']) ]
+    return calcs
     
 def start_calc(date_str='4/3/16', conn=get_db_connection()):
     global df_all, df_rel, df_meal, meal_carbs, meal_insulin, meal_rec
