@@ -73,6 +73,24 @@ def select(df,cond_func):
     recs = [ row._asdict() for row in df.itertuples() if cond_func(row) ]
     return pandas.DataFrame( recs, columns = df.columns )
 
+def select_between_times(df,start,end):
+    '''returns a new dataframe, a subset of df, with just the records between the given times.'''
+    if type(start) == pandas.Timestamp:
+        start = start.time()
+    if type(start) != datetime.time:
+        raise TypeError('start time is not a datetime.time: ',start)
+    if type(end) == pandas.Timestamp:
+        end = end.time()
+    if type(end) != datetime.time:
+        raise TypeError('end time is not a datetime.time: ',end)
+    recs = []
+    for row in df.itertuples():
+        rowtime = row.date_time.time()
+        print(start,rowtime,end)
+        if rowtime >= start and rowtime <= end:
+            recs.append(row)
+    return pandas.DataFrame( recs, columns = df.columns )
+
 
 def mealtime_records(df,meal_name='supper'):
     '''Returns just the records in dataframe df that are in the time interval for meal_name'''
@@ -291,30 +309,23 @@ def compute_ic_for_date(date_str, conn=get_db_connection()):
         total_insulin = meal_insulin + extra_insulin
         util.addstep(steps, 'total_insulin', total_insulin)
         # compute ratio
-        ic_ratio = meal_carbs / total_insulin
-        print 'I:C ratio is 1:{x}'.format(x=ic_ratio)
-        util.addstep(steps, 'ic_ratio', ic_ratio)
+        initial_ic = meal_carbs / total_insulin
+        print 'Initial I:C ratio is 1:{x}'.format(x=initial_ic)
+        util.addstep(steps, 'initial_ic', initial_ic)
+        ## effective IC is based on extra boluses given within 6 hours post-meal
+
+        ## TBD
+        util.addstep(steps, 'effective_insulin', total_insulin)
+        util.addstep(steps, 'effective_ic', initial_ic)
+        util.addstep(steps, 'bg_excess_period1', 111)
+        util.addstep(steps, 'bg_excess_period2', 222)
         return steps
-        # return [['df_rel', df_rel],
-        #         ['df_meal', df_meal],
-        #         ['meal_time', meal_time],
-        #         ['meal_span', meal_span],
-        #         ['is_long_meal', is_long_meal],
-        #         ['meal_carbs', meal_carbs],
-        #         ['meal_insulin', meal_insulin],
-        #         ['meal_rec', meal_rec],
-        #         ['prior_insulin', prior_insulin],
-        #         ['extra_insulin_calcs', extra_insulin_calcs],
-        #         ['extra_insulin', extra_insulin],
-        #         ['total_insulin', total_insulin],
-        #         ['ic_ratio', ic_ratio]]
     except Exception as err:
         print('Got an exception: {err}'.format(err=err))
         return None
 
 def test_calc(date_str='4/3/16'):
     calcs = compute_ic_for_date(date_str) 
-    rendered_calcs = [ sublist[2] for sublist in util.render(calcs['steps']) ]
     return calcs
     
 def start_calc(date_str='4/3/16', conn=get_db_connection()):

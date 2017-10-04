@@ -30,6 +30,14 @@ $("#calculations").toggle();
 
 var isf_value = 50;		// just a default. Should make this configurable.
 
+function display_results() {
+    $("#initial_ic").text(initial_ic.toFixed(2));
+    $("#effective_ic").text(effective_ic.toFixed(2));
+    $("#bg_excess_period1").text(bg_excess_period1.toFixed(2));
+    $("#bg_excess_period2").text(bg_excess_period2.toFixed(2));
+}    
+display_results();
+
 function calculate_ideal_ic(isf) {
     /* The deviations from idea range (80-120) for one or two
      three-hour periods post-meal have already been calculated in the
@@ -37,8 +45,14 @@ function calculate_ideal_ic(isf) {
      and bg_exess_period2.
     */
     console.log("calc ideal ic using ",isf,bg_excess_period1,bg_excess_period2);
+    // for supper, I'll add the two for now
+    var extra = (bg_excess_period1+bg_excess_period2)/isf_value;
+    $("#extra_insulin").text(extra.toFixed(2));
+    var total = effective_insulin + extra;
+    var ideal = total/meal_carbs;
+    $("#ideal_ic").text(ideal.toFixed(2));
 }
-
+calculate_ideal_ic(isf_value);	// default when page is loaded
 
 $("#isf_value").text(isf_value);
 

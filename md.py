@@ -88,7 +88,8 @@ def plot2(datestr=None):
     curs = mysql.connection.cursor()
     plotdict = db.plotCGMByDate(date,curs)
     calcs = pandb.compute_ic_for_date(date, conn=mysql.connection)
-    print('back from pandb, return type is '+str(type(calcs)))
+    print('back from pandb, calculated the following values:')
+    print(calcs.keys())
     # mysql.connection.close()
     dateObj = datetime.strptime(datestr, '%Y-%m-%d')
     datePretty = dateObj.strftime('%A, %B %d, %Y')
@@ -96,10 +97,10 @@ def plot2(datestr=None):
     url_yesterday = url_for('plot2',datestr=yesterday)
     tomorrow = datetime.strftime(dateObj+timedelta(+1,0,0), '%Y-%m-%d')
     url_tomorrow = url_for('plot2',datestr=tomorrow)
-    print('in plot2, I:C is %s' % str(calcs['ic_ratio']))
+    print('in plot2, I:C is %s' % str(calcs['initial_ic']))
     if False:
-        ic_trace = go.Scatter( x = calcs_dict['meal_time'],
-                               y = calcs_dict['ic_ratio'],
+        ic_trace = go.Scatter( x = calcs['meal_time'],
+                               y = calcs['initial_ic'],
                                name = 'IC initial',
                                mode = 'markers',
                                yaxis = 'y2')
@@ -117,14 +118,12 @@ def plot2(datestr=None):
                         #               side='right'))
     graph = go.Figure(data = data, layout = layout)
     graphJSON = json.dumps( graph, cls=plotly.utils.PlotlyJSONEncoder)
-    print('about to render calcs')
-    rendered_calcs = [ sublist[2] for sublist in util.render(calcs['steps']) ]
     print('in plot2, about to render template')
     return render_template('main2.html',
                            version = app.config['VERSION'],
                            page_title='Minerva',
                            graphJSON = graphJSON,
-                           calcs = rendered_calcs,
+                           calcs = calcs,
                            record_date = datePretty,
                            url_tomorrow = url_tomorrow,
                            current_date = datestr,
