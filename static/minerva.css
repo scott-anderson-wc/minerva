@@ -78,4 +78,6 @@ table.bordered {
     font-weight: bold;
 }
 
-#ic_ratios td { text-align: right; }
+#ic_ratios th { text-align: right; }
+#ic_ratios td:nth-of-type(1) { text-align: right; }
+#ic_ratios td:nth-of-type(2) { text-align: left; }

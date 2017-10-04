@@ -66,6 +66,7 @@ def render1(sym_value_list):
     elif type(val) == type(pandas.Timedelta(hours=1)):
         sym_value_list.append('<p>Timedelta {symbol}: {val}'.format(symbol=sym, val=val.__str__()))
     elif type(val) == type(pandas.DataFrame()):
+        print('rendering dataframe named {s} of size {n}'.format(s=sym,n=len(val)))
         table = ['<table class="bordered">']
         table.append( '<tr>' )
         table.append( ''.join(['<th>{head}</th>'.format(head=c) for c in val.columns ]) )
@@ -75,8 +76,9 @@ def render1(sym_value_list):
             table.append( ''.join(['<td>{data}</td>'.format(data=nan2blank(val[c][i]))
                                    for c in val.columns ]) )
             table.append( '</tr>' )
-            table.append('</table>')
-            sym_value_list.append('<h3>Dataframe {head}</h3>\n'.format(head=sym) + ''.join(table))
+        # after the rows
+        table.append('</table>')
+        sym_value_list.append('<h3>Dataframe {head}</h3>\n'.format(head=sym) + ''.join(table))
     else:
         raise ValueError('no render for {sym} with {val}'.format(sym=sym,val=val))
             

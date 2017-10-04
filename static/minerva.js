@@ -26,12 +26,15 @@ $("#toggle_calculations").click(function () {
     console.log("Toggle Calculations");
     $("#calculations").toggle();
 });
-$("#calculations").toggle();
+// $("#calculations").toggle();
 
 var isf_value = 50;		// just a default. Should make this configurable.
 
 function display_results() {
+    $(".meal_carbs").text(meal_carbs.toFixed(0));
     $("#initial_ic").text(initial_ic.toFixed(2));
+    $(".initial_insulin").text(initial_insulin);
+    $(".correction_insulin").text(correction_insulin);
     $("#effective_ic").text(effective_ic.toFixed(2));
     $("#bg_excess_period1").text(bg_excess_period1.toFixed(2));
     $("#bg_excess_period2").text(bg_excess_period2.toFixed(2));
@@ -46,9 +49,9 @@ function calculate_ideal_ic(isf) {
     */
     console.log("calc ideal ic using ",isf,bg_excess_period1,bg_excess_period2);
     // for supper, I'll add the two for now
-    var extra = (bg_excess_period1+bg_excess_period2)/isf_value;
-    $("#extra_insulin").text(extra.toFixed(2));
-    var total = effective_insulin + extra;
+    desired_extra_insulin = (bg_excess_period1+bg_excess_period2)/isf_value;
+    $(".desired_extra_insulin").text(desired_extra_insulin.toFixed(2));
+    var total = effective_insulin + desired_extra_insulin;
     var ideal = total/meal_carbs;
     $("#ideal_ic").text(ideal.toFixed(2));
 }

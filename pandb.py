@@ -75,20 +75,13 @@ def select(df,cond_func):
 
 def select_between_times(df,start,end):
     '''returns a new dataframe, a subset of df, with just the records between the given times.'''
-    if type(start) == pandas.Timestamp:
-        start = start.time()
-    if type(start) != datetime.time:
-        raise TypeError('start time is not a datetime.time: ',start)
-    if type(end) == pandas.Timestamp:
-        end = end.time()
-    if type(end) != datetime.time:
-        raise TypeError('end time is not a datetime.time: ',end)
-    recs = []
-    for row in df.itertuples():
-        rowtime = row.date_time.time()
-        print(start,rowtime,end)
-        if rowtime >= start and rowtime <= end:
-            recs.append(row)
+    if type(start) != pandas.Timestamp:
+        raise TypeError('start time is not a Timestamp: ',start)
+    if type(end) != pandas.Timestamp:
+        raise TypeError('end time is not a Timestamp: ',end)
+    recs = [ row._asdict() 
+             for row in df.itertuples()
+             if row.date_time >= start and row.date_time <= end ]
     return pandas.DataFrame( recs, columns = df.columns )
 
 
@@ -306,17 +299,23 @@ def compute_ic_for_date(date_str, conn=get_db_connection()):
         extra_insulin_calcs, extra_insulin = excess_basal_insulin_post_meal(df_rel, prior_insulin, change_time)
         util.addstep(steps, 'extra_insulin', extra_insulin)
         # compute total insulin as upfront + excess
-        total_insulin = meal_insulin + extra_insulin
-        util.addstep(steps, 'total_insulin', total_insulin)
+        initial_insulin = meal_insulin + extra_insulin
+        util.addstep(steps, 'initial_insulin', initial_insulin)
         # compute ratio
-        initial_ic = meal_carbs / total_insulin
+        initial_ic = meal_carbs / initial_insulin
         print 'Initial I:C ratio is 1:{x}'.format(x=initial_ic)
         util.addstep(steps, 'initial_ic', initial_ic)
         ## effective IC is based on extra boluses given within 6 hours post-meal
-
+        df_post_meal = select_between_times(df_rel,
+                                            meal_time,
+                                            meal_time+pandas.Timedelta(hours=6))
+        correction_insulin = df_post_meal.bolus_volume.sum()
+        util.addstep(steps, 'correction_insulin', correction_insulin)
+        effective_insulin = initial_insulin+correction_insulin
+        util.addstep(steps, 'effective_insulin', effective_insulin)
+        util.addstep(steps, 'effective_ic', meal_carbs / effective_insulin )
+        print('df_rel as this many records: ',len(df_rel))
         ## TBD
-        util.addstep(steps, 'effective_insulin', total_insulin)
-        util.addstep(steps, 'effective_ic', initial_ic)
         util.addstep(steps, 'bg_excess_period1', 111)
         util.addstep(steps, 'bg_excess_period2', 222)
         return steps

@@ -33,25 +33,42 @@
 
 	<h2>I:C Ratios</h2>
 	<table class="bordered" id="ic_ratios">
-	  <tr><th>Initial I:C</th><td><span id="initial_ic"></span></td></tr>
-	  <tr><th>Effective I:C</th><td><span id="effective_ic"></span></td></tr>
-	  <tr><th>Ideal I:C</th><td><span id="ideal_ic"></span></td></tr>
+	  <tr>
+	    <th>  Initial I:C</th>
+	    <td><span id="initial_ic"></span></td>
+	    <td><span class="meal_carbs"></span> / <span class="initial_insulin"></span></td>
+	  </tr><tr>
+	    <th>Effective I:C</th>
+	    <td><span id="effective_ic"></span></td>
+	    <td><span class="meal_carbs"></span> /
+	      (<span class="initial_insulin">xxx</span> +
+		<span class="correction_insulin">yyy</span>)</td>
+	  </tr> <tr>
+	    <th>    Ideal I:C</th>
+	    <td><span id="ideal_ic"></span></td>
+	    <td><span class="meal_carbs"></span> /
+	      (<span class="initial_insulin">xxx</span> +
+		<span class="correction_insulin">yyy</span> +
+		<span class="desired_extra_insulin">zzz</span>)</td>
+	  </tr>
 	</table>
 	<p>Ideal I:C based on bg excess of
 	  <span id="bg_excess_period1"></span> (first 3 hours) 
 	  <span id="bg_excess_period2"></span> (next 3 hours).
-	  adding an extra <span id="extra_insulin"></span>
 	  based on ...
 	</p>
 	<p>ISF: <span id="isf_value"></span><div id="isf_slider"></div></p>
 
 	<script>
-	  var initial_ic = 12 || {{calcs.initial_ic}};
-	  var effective_ic = 23 || {{calcs.effective_ic}};
-	  var meal_carbs = 45 || {{calcs.meal_carbs}};
-	  var effective_insulin = 123 || {{calcs.effective_insulin}};
-	  var bg_excess_period1 = 111 || {{calcs.bg_excess_period1}};
-	  var bg_excess_period2 = 222 || {{calcs.bg_excess_period2}};
+	  var initial_ic = {{calcs.initial_ic}};
+	  var effective_ic = {{calcs.effective_ic}};
+	  var meal_carbs = {{calcs.meal_carbs}};
+	  var initial_insulin = {{calcs.initial_insulin}};
+	  var correction_insulin = {{calcs.correction_insulin}};
+	  var effective_insulin = {{calcs.effective_insulin}};
+	  var bg_excess_period1 = {{calcs.bg_excess_period1}};
+	  var bg_excess_period2 = {{calcs.bg_excess_period2}};
+	  var desired_extra_insulin = 0;
 	</script>
 
         <h2 id="toggle_calculations">Click to Show Calculations</h2>
