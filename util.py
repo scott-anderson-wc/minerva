@@ -99,7 +99,7 @@ def addstep(steps, sym, val):
     render1(sublist)
     steps['steps'].append(sublist)
     if sym in steps:
-        raise ValueError('''You already have a step called %{sym}'''.format(sym=sym))
+        raise ValueError('''You already have a step called {sym}'''.format(sym=sym))
     print('adding step ',sym,' with value ',val)
     steps[sym] = val
     return val

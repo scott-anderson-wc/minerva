@@ -87,7 +87,7 @@ def plot2(datestr=None):
     debug('handling date %s ' % str(date))
     curs = mysql.connection.cursor()
     plotdict = db.plotCGMByDate(date,curs)
-    calcs = pandb.compute_ic_for_date(date, conn=mysql.connection)
+    calcs = pandb.compute_ic_and_excess_bg_for_date(date, conn=mysql.connection)
     print('back from pandb, calculated the following values:')
     print(calcs.keys())
     # mysql.connection.close()

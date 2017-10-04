@@ -246,11 +246,10 @@ def addstep(sym, val):
     steps[sym] = val
     return val
 
-def compute_ic_for_date(date_str, conn=get_db_connection()):
+def compute_ic_for_date(date_str, conn=get_db_connection(), steps=dict()):
     global df_all, df_rel, df_meal, meal_carbs, meal_insulin, meal_rec
     global prior_insulin, extra_insulin_calcs, extra_insulin, total_insulin, ic_ratio, meal_span, is_long_meal
     try:
-        steps = dict()
         df_all = get_ic_for_date(date_str, conn=conn)
         if len(df_all) == 0:
             flask.flash('No data for date_str {s}'.format(s=date_str))
@@ -315,16 +314,60 @@ def compute_ic_for_date(date_str, conn=get_db_connection()):
         util.addstep(steps, 'effective_insulin', effective_insulin)
         util.addstep(steps, 'effective_ic', meal_carbs / effective_insulin )
         print('df_rel as this many records: ',len(df_rel))
-        ## TBD
-        util.addstep(steps, 'bg_excess_period1', 111)
-        util.addstep(steps, 'bg_excess_period2', 222)
         return steps
     except Exception as err:
         print('Got an exception: {err}'.format(err=err))
         return None
 
+def get_cgm_for_date(date_str, conn=get_db_connection(), meal_str='supper'):
+    '''returns a pandas.dataframe for the given date and meal. Currently
+ignores meal_str, but eventually focus on those records. If the
+meal_str doesn't match one of the known values (breakfast, lunch,
+supper), returns all records for that date.
+    '''
+    today = to_date(date_str)
+    time = meal_to_time_range(meal_str)
+    # I added a clause to get data from the next day, so this will work for supper
+    query = ('''select date_time, mgdl from cgm_2 where 
+                date(date_time) = '{today}' '''
+             .format(today=today.strftime('%Y-%m-%d')))
+    print query
+    df = pandas.read_sql(query,
+                         conn,
+                         parse_dates = ['date_time'])
+    return df
+
+def compute_excess_bg(df,min_ideal,max_ideal):
+    high_sum = 0
+    for cgm in df.mgdl:
+        if cgm > max_ideal:
+            high_sum += (float(cgm) - max_ideal)
+    return high_sum
+
+## ================================================================
+
+def compute_ic_and_excess_bg_for_date(date_str, conn=get_db_connection()):
+    steps = dict()
+    calcs = compute_ic_for_date(date_str, conn, steps)
+    df_cgm = get_cgm_for_date(date_str, conn)
+    meal_time = steps['meal_time']
+    df_period1 = select_between_times(df_cgm,
+                                      meal_time,
+                                      meal_time+pandas.Timedelta(hours=3))
+    bg_excess_period1 = compute_excess_bg(df_period1, 80, 120)
+    util.addstep(steps, 'bg_excess_period1', bg_excess_period1)
+    df_period2 = select_between_times(df_cgm,
+                                      meal_time+pandas.Timedelta(hours=3),
+                                      meal_time+pandas.Timedelta(hours=6))
+    bg_excess_period2 = compute_excess_bg(df_period2, 80, 120)
+    util.addstep(steps, 'bg_excess_period2', bg_excess_period2)
+    return steps
+    
+## ================================================================
+
+
 def test_calc(date_str='4/3/16'):
-    calcs = compute_ic_for_date(date_str) 
+    calcs = compute_ic_and_excess_bg_for_date(date_str) 
     return calcs
     
 def start_calc(date_str='4/3/16', conn=get_db_connection()):
