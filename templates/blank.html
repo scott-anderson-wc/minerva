@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{# use this version when you want to pick a date, but don't have any calculations #}
+
+{% block main_content %}
+<h1>Minerva Project</h1>
+
+    <div id="tab1">
+        <h2>Insulin-Carb-Glucose display for {{record_date}}</h2>
+
+        <p>CGM data from {{datarange.min_cgm}} to {{datarange.max_cgm}}</p>
+        <p>Insulin_Carb data from {{datarange.min_ic}} to {{datarange.max_ic}}</p>
+
+        <p> <form action="{{url_for('plot2',date=None)}}"
+                      method="GET">
+                <label for="date_human">choose date:
+                    <!-- this is for human consumption -->
+                    <input id="date_human" type="text" value="" size=12>
+                </label>
+                <!-- this gets sent with the request -->
+                <input id="date_submitted" name="date" type="hidden">
+                <input type="submit">
+            </form>
+        </p>
+
+</div>
+
+{% endblock %}

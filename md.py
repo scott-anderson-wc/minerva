@@ -63,25 +63,17 @@ def plot2(datestr=None):
         return redirect(url_for('plot2', datestr=request.args.get('date')))
     compute_data_range()
     if not datestr:
-        return render_template('main2.html',
+        print('rendering page w/o datestr')
+        return render_template('blank.html',
                                version = app.config['VERSION'],
                                page_title = 'CGM and IC lookup',
-                               cols = [],
-                               current_date = '',
-                               record_date = '',
-                               records = [],
                                datarange = datarange)
     try:
         date = datetime.strptime(datestr,'%Y-%m-%d')
     except:
-        flash('invalid date: '+datestr)
-        return render_template('main2.html',
+        return render_template('blank.html',
                                version = app.config['VERSION'],
                                page_title = 'CGM and IC lookup',
-                               cols = [],
-                               current_date = '',
-                               record_date = '',
-                               records = [],
                                datarange = datarange)
 
     debug('handling date %s ' % str(date))
@@ -141,10 +133,11 @@ def plot2(datestr=None):
 @app.route('/')
 def hello_world():
     compute_data_range()
-    return render_template('main2.html', page_title='Minerva',
+    return render_template('blank.html', 
                            version = app.config['VERSION'],
-                           datarange=datarange
-                           )
+                           page_title = 'CGM and IC lookup',
+                           datarange = datarange)
+
 
 @app.route('/ic/')
 @app.route('/ic/<date>')
