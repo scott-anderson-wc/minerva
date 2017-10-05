@@ -13,30 +13,35 @@
 
 	<h2>I:C Ratios</h2>
 	<table class="bordered" id="ic_ratios">
+	  <tr><td colspan="3"></td><th>carbs</th></tr>
 	  <tr>
 	    <th>  Initial I:C</th>
 	    <td><span id="initial_ic"></span></td>
-	    <td>= <span class="meal_carbs"></span> / <span class="initial_insulin"></span></td>
+	    <td>= <span class="initial_insulin"></span></td>
+	    <td><span class="meal_carbs"></span> </td>
 	  </tr><tr>
 	    <th>Effective I:C</th>
 	    <td><span id="effective_ic"></span></td>
-	    <td>= <span class="meal_carbs"></span> /
+	    <td>= 
 	      (<span class="initial_insulin">xxx</span> +
-		<span class="correction_insulin">yyy</span>)</td>
+	      <span class="correction_insulin">yyy</span>) </td>
+	    <td><span class="meal_carbs"></span> </td>
 	  </tr> <tr>
 	    <th>    Ideal I:C</th>
 	    <td><span id="ideal_ic"></span></td>
-	    <td>= <span class="meal_carbs"></span> /
+	    <td>= 
 	      (<span class="initial_insulin">xxx</span> +
 		<span class="correction_insulin">yyy</span> +
-		<span class="desired_extra_insulin">zzz</span>)</td>
+		<span class="desired_extra_insulin">zzz</span>) </td>
+	    <td><span class="meal_carbs"></span></td>
 	  </tr>
 	</table>
 	<p>Ideal I:C based on bg excess of
 	  <span id="bg_excess_period1"></span> (first 3 hours) 
 	  <span id="bg_excess_period2"></span> (next 3 hours)
-	  for a total of <span id="bg_excess_total"></span>
+	  for an average of <span id="bg_excess_mean"></span>
 	  and based on ISF of <span id="isf_value"></span>
+	  from the slider below.
 	</p>
 	<div id="isf_slider"></div>
 
@@ -61,7 +66,7 @@ function display_results() {
     $("#effective_ic").text(effective_ic.toFixed(2));
     $("#bg_excess_period1").text(bg_excess_period1.toFixed(2));
     $("#bg_excess_period2").text(bg_excess_period2.toFixed(2));
-    $("#bg_excess_total").text((bg_excess_period1+bg_excess_period2).toFixed(2));
+    $("#bg_excess_mean").text(((bg_excess_period1+bg_excess_period2)/2.0).toFixed(2));
 }    
 display_results();
 
@@ -72,8 +77,9 @@ function calculate_ideal_ic(isf) {
      and bg_exess_period2.
     */
     console.log("calc ideal ic using ",isf,bg_excess_period1,bg_excess_period2);
-    // for supper, I'll add the two for now
-    desired_extra_insulin = (bg_excess_period1+bg_excess_period2)/isf_value;
+    // for supper, I'll average the two for now
+    var mean_excess = (bg_excess_period1+bg_excess_period2)/2.0;
+    desired_extra_insulin = mean_excess / isf_value;
     $(".desired_extra_insulin").text(desired_extra_insulin.toFixed(2));
     var total = effective_insulin + desired_extra_insulin;
     var ideal = total/meal_carbs;

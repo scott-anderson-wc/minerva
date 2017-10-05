@@ -356,11 +356,13 @@ def get_cgm_for_time_range(start, end, conn=get_db_connection()):
 def compute_excess_bg(df,min_ideal,max_ideal):
     '''Returns the average amount by which the bg exceeds the ideal amount'''
     high_sum = 0
+    num_vals = 0
     for cgm in df.mgdl:
         cgm = float(cgm)
         if cgm > max_ideal:
             high_sum += (cgm - max_ideal)
-    return high_sum/len(df.mgdl)
+            num_vals += 1
+    return high_sum/num_vals
 
 ## ================================================================
 
