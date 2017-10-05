@@ -1,9 +1,11 @@
 # some utility functions
 import pandas
 import math
+import datetime
 import numpy
 import flask
 import dbconn2
+import json
 
 DSN = None
 
@@ -39,6 +41,12 @@ def nan2blank(x):
         return '&nbsp;'
     else:
         return x
+
+def iso_to_readable(val_str):
+    isoformat = '%Y-%m-%dT%H:%M:%S'
+    readable = '%I:%M %p'
+    return datetime.datetime.strptime(val_str,isoformat).strftime(readable)
+
 
 def render1(sym_value_list):
     '''Appends a rendering (to HTML) of a list of a symbol and its value'''
@@ -79,6 +87,9 @@ def render1(sym_value_list):
         # after the rows
         table.append('</table>')
         sym_value_list.append('<h3>Dataframe {head}</h3>\n'.format(head=sym) + ''.join(table))
+    elif type(val) == type({}):
+        # punt with JSON for now
+        sym_value_list.append(json.dumps(val))
     else:
         raise ValueError('no render for {sym} with {val}'.format(sym=sym,val=val))
             

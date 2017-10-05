@@ -1,29 +1,7 @@
 {% extends "base.html" %}
 
-{# this template is when you have calculations and such to display. #}
+{% block data_display %}
 
-{% block main_content %}
-<h1>Minerva Project</h1>
-
-    <div id="tab1">
-        <h2>Insulin-Carb-Glucose display for Supper on {{record_date}}</h2>
-
-        <p>CGM data from {{datarange.min_cgm}} to {{datarange.max_cgm}}</p>
-        <p>Insulin_Carb data from {{datarange.min_ic}} to {{datarange.max_ic}}</p>
-
-        <p><a href="{{url_yesterday}}">yesterday</a>
-                <form action="{{url_for('plot2',date=None)}}"
-                      method="GET">
-                <label for="date_human">choose date:
-                    <!-- this is for human consumption -->
-                    <input id="date_human" type="text" value="{{current_date}}" size=12>
-                </label>
-                <!-- this gets sent with the request -->
-                <input id="date_submitted" name="date" type="hidden">
-                <input type="submit">
-            </form>
-                <a href="{{url_tomorrow}}">tomorrow</a>
-        </p>
         <div id="cgmPlot"></div>
         <p>{{table1 | safe}}</p>
         <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
@@ -56,10 +34,11 @@
 	</table>
 	<p>Ideal I:C based on bg excess of
 	  <span id="bg_excess_period1"></span> (first 3 hours) 
-	  <span id="bg_excess_period2"></span> (next 3 hours).
-	  based on ...
+	  <span id="bg_excess_period2"></span> (next 3 hours)
+	  for a total of <span id="bg_excess_total"></span>
+	  and based on ISF of <span id="isf_value"></span>
 	</p>
-	<p>ISF: <span id="isf_value"></span><div id="isf_slider"></div></p>
+	<div id="isf_slider"></div>
 
 	<script>
 	  var initial_ic = {{calcs.initial_ic}};
@@ -71,14 +50,65 @@
 	  var bg_excess_period1 = {{calcs.bg_excess_period1}};
 	  var bg_excess_period2 = {{calcs.bg_excess_period2}};
 	  var desired_extra_insulin = 0;
+
+var isf_value = 10;		// just a default. Should make this configurable.
+
+function display_results() {
+    $(".meal_carbs").text(meal_carbs.toFixed(0));
+    $("#initial_ic").text(initial_ic.toFixed(2));
+    $(".initial_insulin").text(initial_insulin);
+    $(".correction_insulin").text(correction_insulin);
+    $("#effective_ic").text(effective_ic.toFixed(2));
+    $("#bg_excess_period1").text(bg_excess_period1.toFixed(2));
+    $("#bg_excess_period2").text(bg_excess_period2.toFixed(2));
+    $("#bg_excess_total").text((bg_excess_period1+bg_excess_period2).toFixed(2));
+}    
+display_results();
+
+function calculate_ideal_ic(isf) {
+    /* The deviations from idea range (80-120) for one or two
+     three-hour periods post-meal have already been calculated in the
+     back end and have been saved in variables named bg_excess_period1
+     and bg_exess_period2.
+    */
+    console.log("calc ideal ic using ",isf,bg_excess_period1,bg_excess_period2);
+    // for supper, I'll add the two for now
+    desired_extra_insulin = (bg_excess_period1+bg_excess_period2)/isf_value;
+    $(".desired_extra_insulin").text(desired_extra_insulin.toFixed(2));
+    var total = effective_insulin + desired_extra_insulin;
+    var ideal = total/meal_carbs;
+    $("#ideal_ic").text(ideal.toFixed(2));
+}
+calculate_ideal_ic(isf_value);	// default when page is loaded
+
+$("#isf_value").text(isf_value);
+
+$("#isf_slider").slider({
+    min: 0,
+    max: 100,
+    value: isf_value,
+    slide: function(event, ui) {
+	isf_value = ui.value;	// not sure we need this
+	$("#isf_value").text(ui.value);
+	calculate_ideal_ic(ui.value);
+    }
+});
+
 	</script>
 
-        <h2 id="toggle_calculations">Click to Show Calculations</h2>
+        <h2 id="toggle_calculations">Calculations</h2>
 	<ol id="calculations">
           {% for c in calcs.steps %}
           <li>{{c[2]|safe}}</li>
 	  {% endfor %}
 	</ol>
+
+<script>
+$("#toggle_calculations").click(function () {
+    console.log("Toggle Calculations");
+    $("#calculations").toggle();
+});
+</script>
 
 </div>
 

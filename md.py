@@ -64,21 +64,20 @@ def plot2(datestr=None):
     compute_data_range()
     if not datestr:
         print('rendering page w/o datestr')
-        return render_template('blank.html',
+        return render_template('base.html',
                                version = app.config['VERSION'],
                                page_title = 'CGM and IC lookup',
                                datarange = datarange)
     try:
         date = datetime.strptime(datestr,'%Y-%m-%d')
     except:
-        return render_template('blank.html',
+        return render_template('base.html',
                                version = app.config['VERSION'],
                                page_title = 'CGM and IC lookup',
                                datarange = datarange)
 
     debug('handling date %s ' % str(date))
     curs = mysql.connection.cursor()
-    plotdict = db.plotCGMByDate(date,curs)
     calcs = pandb.compute_ic_and_excess_bg_for_date(date, conn=mysql.connection)
     print('back from pandb, calculated the following values:')
     print(calcs.keys())
@@ -89,26 +88,44 @@ def plot2(datestr=None):
     url_yesterday = url_for('plot2',datestr=yesterday)
     tomorrow = datetime.strftime(dateObj+timedelta(+1,0,0), '%Y-%m-%d')
     url_tomorrow = url_for('plot2',datestr=tomorrow)
-    print('in plot2, I:C is %s' % str(calcs['initial_ic']))
+    if 'initial_ic' in calcs:
+        print('in plot2, I:C is %s' % str(calcs['initial_ic']))
+    else:
+        print("in plot2, I:C couldn't be calculated")
+
     if False:
         ic_trace = go.Scatter( x = calcs['meal_time'],
                                y = calcs['initial_ic'],
                                name = 'IC initial',
                                mode = 'markers',
                                yaxis = 'y2')
-    if plotdict == None:
-        print('No CGM data for this date')
-        flash('No CGM data for this date')
-        data = []
-    else:
-        data = plotdict['data']
-    # data.append(ic_trace)
-    layout = go.Layout( title = 'glucose',
+    cgm_data = calcs['cgm_data']
+    times = cgm_data['times']
+    xmin = times[0]
+    xmax = times[-1]
+    trace = go.Scatter( x = cgm_data['times'], y=cgm_data['vals'], name='cgm')
+#    ideal_bg = go.Scatter( x = [xmin,xmax], y = [120,120], mode='lines', marker={'color':'red'}, name='max ideal bg')
+    
+    start = util.iso_to_readable(xmin)
+    end = util.iso_to_readable(xmax)
+    layout = go.Layout( title = ('blood glucose showing {n} values from {start} to {end}'
+                                 .format(n=len(cgm_data['vals']),
+                                         start=start,end=end)),
                         yaxis = dict(title='mg per dl'))
-                        # yaxis2 = dict(title='IC',
-                        #               overlaying='y',
-                        #               side='right'))
-    graph = go.Figure(data = data, layout = layout)
+    # add transparent rectangle for ideal bg
+    layout.update(dict(shapes = [ {
+        'type': 'rect',
+        'xref': 'x',
+        'yref': 'y',
+        'x0': xmin,
+        'x1': xmax,
+        'y0': 80,
+        'y1': 120,
+        'fillcolor': '#ccffcc',
+        'opacity': '0.4',
+        'line': {'width':2,'color':'#ccffcc'}
+        } ]) )
+    graph = go.Figure(data = [trace], layout = layout)
     graphJSON = json.dumps( graph, cls=plotly.utils.PlotlyJSONEncoder)
     print('in plot2, about to render template')
     return render_template('main2.html',
@@ -133,7 +150,7 @@ def plot2(datestr=None):
 @app.route('/')
 def hello_world():
     compute_data_range()
-    return render_template('blank.html', 
+    return render_template('base.html', 
                            version = app.config['VERSION'],
                            page_title = 'CGM and IC lookup',
                            datarange = datarange)

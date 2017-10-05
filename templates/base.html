@@ -25,11 +25,52 @@
 <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.1.1/jquery.min.js"></script>
 <script src="https://ajax.googleapis.com/ajax/libs/jqueryui/1.12.1/jquery-ui.min.js"></script>
 
-{% block main_content %}
-<h1>Welcome!</h1>
-{% endblock %}
+<h1>Minerva Project</h1>
 
-<script src="{{url_for('static',filename='minerva.js')}}"></script>
+    <div id="tab1">
+        <h2>Insulin-Carb-Glucose display for {{record_date}}</h2>
+
+        <p>CGM data from {{datarange.min_cgm}} to {{datarange.max_cgm}}</p>
+        <p>Insulin_Carb data from {{datarange.min_ic}} to {{datarange.max_ic}}</p>
+
+        <p>
+	  {% if url_yesterday %}
+	  <a href="{{url_yesterday}}">yesterday</a>
+	  {% endif %}
+          <form action="{{url_for('plot2',date=None)}}"
+                      method="GET">
+                <label for="date_human">choose date:
+                    <!-- this is for human consumption -->
+                    <input id="date_human" type="text" value="" size=12>
+                </label>
+                <!-- this gets sent with the request -->
+                <input id="date_submitted" name="date" type="hidden">
+                <input type="submit">
+            </form>
+	  {% if url_tomorrow %}
+	  <a href="{{url_tomorrow}}">tomorrow</a>
+	  {% endif %}
+        </p>
+
+	<script>
+/* maybe these should be dynamic, but eventually, 
+ * the maxDate will be today (live data) and 
+ * the minDate will never change. */
+
+$("#date_human").datepicker({ 
+    // US date format
+    minDate: new Date("5/19/2014"), 
+    maxDate: new Date("2/20/2017"),
+    changeMonth: true,
+    dateFormat: "yy-mm-dd",
+    altField: "#date_submitted",
+    altFormat: "yy-mm-dd"
+});
+	</script>
+
+</div>
+{% block data_display %}
+{% endblock %}
 
 </body>
 </html>

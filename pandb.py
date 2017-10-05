@@ -9,6 +9,9 @@ import dbconn2
 import math
 import flask
 import util
+import plotly
+import plotly.plotly as py
+import plotly.graph_objs as go
 
 class StepException(Exception):
     pass
@@ -337,20 +340,50 @@ supper), returns all records for that date.
                          parse_dates = ['date_time'])
     return df
 
+def get_cgm_for_time_range(start, end, conn=get_db_connection()):
+    '''returns a pandas.dataframe for the given time range'''
+    # I added a clause to get data from the next day, so this will work for supper
+    query = ('''select date_time, mgdl from cgm_2 where 
+                date_time >= '{start}' and date_time <= '{end}' '''
+             .format(start=start.strftime('%Y-%m-%d %H:%M'),
+                     end=end.strftime('%Y-%m-%d %H:%M')))
+    print query
+    df = pandas.read_sql(query,
+                         conn,
+                         parse_dates = ['date_time'])
+    return df
+
 def compute_excess_bg(df,min_ideal,max_ideal):
+    '''Returns the average amount by which the bg exceeds the ideal amount'''
     high_sum = 0
     for cgm in df.mgdl:
+        cgm = float(cgm)
         if cgm > max_ideal:
-            high_sum += (float(cgm) - max_ideal)
-    return high_sum
+            high_sum += (cgm - max_ideal)
+    return high_sum/len(df.mgdl)
+
+## ================================================================
+
+def format_cgm(df_cgm):
+    times = [ ts.isoformat() for ts in df_cgm.date_time.tolist() ]
+    vals = [ float(v) for v in df_cgm.mgdl.tolist() ]
+    return {'times':times, 'vals':vals}
+
 
 ## ================================================================
 
 def compute_ic_and_excess_bg_for_date(date_str, conn=get_db_connection()):
+    print('date_str is a ',type(date_str))
     steps = dict()
     calcs = compute_ic_for_date(date_str, conn, steps)
-    df_cgm = get_cgm_for_date(date_str, conn)
-    meal_time = steps['meal_time']
+    if 'meal_time' not in steps:
+        meal_time = pandas.Timestamp(str(date_str)+' 18:00') # supper for now
+    else:
+        meal_time = steps['meal_time']
+    meal_time_3 = meal_time+pandas.Timedelta(hours=3)
+    meal_time_6 = meal_time+pandas.Timedelta(hours=6)
+    df_cgm = get_cgm_for_time_range(meal_time, meal_time_6, conn)
+    util.addstep(steps, 'df_cgm', df_cgm)
     df_period1 = select_between_times(df_cgm,
                                       meal_time,
                                       meal_time+pandas.Timedelta(hours=3))
@@ -361,6 +394,7 @@ def compute_ic_and_excess_bg_for_date(date_str, conn=get_db_connection()):
                                       meal_time+pandas.Timedelta(hours=6))
     bg_excess_period2 = compute_excess_bg(df_period2, 80, 120)
     util.addstep(steps, 'bg_excess_period2', bg_excess_period2)
+    util.addstep(steps, 'cgm_data', format_cgm(df_cgm))
     return steps
     
 ## ================================================================

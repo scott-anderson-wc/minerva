@@ -1,4 +1,5 @@
-console.log("Minerva JS loaded");
+// This file is obsolete
+console.log("Obsolete Minerva JS loaded");
 
 /* maybe these should be dynamic, but eventually, 
  * the maxDate will be today (live data) and 
