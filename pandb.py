@@ -179,7 +179,8 @@ def excess_basal_insulin_post_meal(df,prior_basal, change_time):
     '''returns the sum of basal insulin multiplied by time-interval
 for the post-meal period, minus 6*prior_basal. The basal insulin is a rate in units/hour,
 right?  This calculation goes for six hours after the meal begins'''
-    calcs = []                  # for documentation
+    ## for documenting the steps
+    calcs = ['<p>from HH:MM to HH:MM (hours): amnt*hours = incr  (tally)</p>']
     first_time = change_time    # timestamp
     prior_time = df.date_time[0]
     last_time = df.date_time[len(df.date_time)-1]
@@ -198,18 +199,20 @@ right?  This calculation goes for six hours after the meal begins'''
     def incr_excess_basal(new_basal, new_time):
         if math.isnan(new_basal):
             new_basal = state['curr_basal']
-        td = new_time - state['curr_time'] # a time_delta object
+        then = state['curr_time']
+        td = new_time - then # a time_delta object
         hrs = td.total_seconds()/(60*60)   # need hrs because basal is in units/hr
         amt = state['curr_basal']*hrs
         state['running_total'] += amt
         state['running_time'] += hrs
         # for explaining this calculation
-        calc = ("<p>from {then} to {now} ({hrs}): {curr}*{hrs} = {amt}<p>"
-                .format(then=prior_time.strftime("%H:%M"),
-                        now=end_time.strftime("%H:%M"),
+        calc = ("<p>from {then} to {now} ({hrs:.2f}): {curr:.2f}*{hrs:.2f} = {amt:.2f} ({tally:.2f})<p>"
+                .format(then=then.strftime("%H:%M"),
+                        now=new_time.strftime("%H:%M"),
                         curr=state['curr_basal'],
                         hrs=hrs,
-                        amt=amt
+                        amt=amt,
+                        tally=state['running_total']
                 ))
         # print('calc',calc)
         calcs.append(calc)
@@ -299,6 +302,7 @@ def compute_ic_for_date(date_str, conn=get_db_connection(), steps=dict()):
         # now, subtract that prior insulin from all insulin subsequent to
         # the meal and sum the excess times the interval
         extra_insulin_calcs, extra_insulin = excess_basal_insulin_post_meal(df_rel, prior_insulin, change_time)
+        util.addstep(steps, 'extra_insulin_calcs', extra_insulin_calcs)
         util.addstep(steps, 'extra_insulin', extra_insulin)
         # compute total insulin as upfront + excess
         initial_insulin = meal_insulin + extra_insulin
