@@ -104,14 +104,49 @@ def plot2(datestr=None):
     xmin = times[0]
     xmax = times[-1]
     trace = go.Scatter( x = cgm_data['times'], y=cgm_data['vals'], name='cgm')
-#    ideal_bg = go.Scatter( x = [xmin,xmax], y = [120,120], mode='lines', marker={'color':'red'}, name='max ideal bg')
-    
+    traces = [trace]
     start = util.iso_to_readable(xmin)
     end = util.iso_to_readable(xmax)
     layout = go.Layout( title = ('blood glucose showing {n} values from {start} to {end}'
                                  .format(n=len(cgm_data['vals']),
                                          start=start,end=end)),
-                        yaxis = dict(title='mg per dl'))
+                        yaxis = dict(title='mg per dl',
+                                     # the y zeroline is the line where y=0
+                                     zeroline=True,
+                                     zerolinecolor='#800000',
+                                     zerolinewidth=2,
+                                     # this is the vertical line at the left edge
+                                     showline=False,
+                                     rangemode='tozero'),
+                        xaxis = dict(title='time of day',
+                                     showline=True,
+                                     zeroline=True)
+                        )
+    # add basals and boluses
+    add_basal_insulin_and_bolus_insulin = True
+    if add_basal_insulin_and_bolus_insulin:
+        basal_trace = go.Scatter( x = [ d['time']
+                                        for d in calcs['extra_insulin_data' ]],
+                                  y = [ d['basal']
+                                        for d in calcs['extra_insulin_data' ]],
+                                  name = 'basal',
+                                  mode = 'markers',
+                                  marker = dict( color = 'orange', size=6 ),
+                                  yaxis = 'y2')
+        traces.append(basal_trace)
+        bolus_trace = go.Scatter( x = [ d['time']
+                                        for d in calcs['bolus_data' ]],
+                                  y = [ d['bolus_volume']
+                                        for d in calcs['bolus_data' ]],
+                                  name = 'bolus_volume',
+                                  marker = dict( color = 'red', size=12 ),
+                                  mode = 'markers',
+                                  yaxis = 'y2')
+        traces.append(bolus_trace)
+        layout.update(yaxis2=dict( title='insulin',
+                                   overlaying='y',
+                                   side='right'))
+
     # add transparent rectangle for ideal bg
     layout.update(dict(shapes = [ {
         'type': 'rect',
@@ -125,7 +160,7 @@ def plot2(datestr=None):
         'opacity': '0.4',
         'line': {'width':2,'color':'#ccffcc'}
         } ]) )
-    graph = go.Figure(data = [trace], layout = layout)
+    graph = go.Figure(data = traces, layout = layout)
     graphJSON = json.dumps( graph, cls=plotly.utils.PlotlyJSONEncoder)
     print('in plot2, about to render template')
     return render_template('main2.html',

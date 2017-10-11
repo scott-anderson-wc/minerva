@@ -66,8 +66,25 @@ def render1(sym_value_list):
     elif type(val) == type(True):
         sym_value_list.append('<p>Boolean {symbol}: {val}</p>'.format(symbol=sym,val=val))
     elif type(val) == list:
-        # assume a list of strings, explaining some calculation
-        sym_value_list.append('<p>{symbol}: {val}</p>'.format(symbol=sym,val=''.join(val)))
+        if type(val[0]) == type(''):
+            # assume a list of strings, explaining some calculation
+            sym_value_list.append('<p>{symbol}: {val}</p>'.format(symbol=sym,val=''.join(val)))
+        elif type(val[0]) == type({}):
+            # assume a list of dictionaries, format as a table
+            table = ['<table class="bordered">']
+            cols = val[0].keys()
+            table.append('<tr>')
+            table.append(''.join(['<th>{head}</th>'.format(head=c)
+                                  for c in cols]))
+            table.append( '</tr>\n' )
+            for row in val:
+                table.append('<tr>')
+                table.append(''.join(['<td>{data}</td>'.format(data=row[col])
+                                      for col in cols]))
+                table.append( '</tr>\n' )
+            table.append('</table>')
+            sym_value_list.append('<p>{symbol}: {val}</p>'.format(symbol=sym,
+                                                                  val=''.join(table)))
     elif type(val) == type(pandas.to_datetime('3/4/16')):
         sym_value_list.append(('<p>Datetime {symbol}: {val}</p>'
                                .format(symbol=sym,val=val.strftime('%m/%d/%y %H:%M'))))
