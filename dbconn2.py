@@ -1,13 +1,30 @@
-#!/usr/bin/python2.7
+#!/usr/local/bin/python2.7
 
-# Credentials to access databases as the webdb user.
+'''Credentials to access databases as the webdb user.
 
-# Also creates a function to replace the MySQL.connect method and
-# reassigns the error class, so that we reduce the number of dependencies
-# on MySQLdb
+Also creates a function to replace the MySQL.connect method and
+reassigns the error class, so that we reduce the number of dependencies
+on MySQLdb.
+
+How to use this:
+
+import dbconn2
+import MySQLdb
+
+dsn = dbconn2.read_cnf('/home/cs304/.my.cnf')
+dsn['db'] = 'wmdb'     # the database we want to connect to
+dbconn2.connect(dsn)
+curs = conn.cursor(MySQLdb.cursors.DictCursor) # results as Dictionaries
+curs.execute('select name,birthdate from person')
+curs.execute('select name,birthdate from person where name like ?',
+             ['george'])
+curs.fetchall()
+curs.fetchone()
+'''
 
 import MySQLdb
 import re
+import os
 
 Error = MySQLdb.Error
 
@@ -18,7 +35,9 @@ def file_contents(filename):
     file.close()
     return contents
 
-def read_cnf(cnf_file):
+def read_cnf(cnf_file=None):
+    if cnf_file is None:
+        cnf_file = os.path.expanduser('~/.my.cnf')
     cnf = file_contents(cnf_file)
     credentials = {}
     # the key is the name used in the CNF file;
