@@ -1,5 +1,8 @@
 '''Compute insulion on board (IOB) from insulin inputs and the insulin action curve.
 
+This is the version running on hughnew. It uses different table names
+versus the one on tempest, specifically insulin_carb_2 rather than insulin_carb.
+
 '''
 
 from copy import copy
@@ -9,7 +12,9 @@ import csv
 import itertools
 from collections import deque
 from datetime import datetime, timedelta
+import decimal                  # some MySQL types are returned as type decimal
 
+SERVER = 'hughnew'              # versus tempest
 CSVfilename = 'insulin_action_curves.csv'
 CSVcolumn = 4          # index into the row; empirically, this is zero-based
 EPOCH_FORMAT = '%Y-%m-%d %H:%M:%S'
@@ -51,12 +56,14 @@ def format_elt(elt):
         return elt.strftime(CSV_FORMAT)
     elif type(elt) == float:
         return elt
+    elif type(elt) == decimal.Decimal:
+        return float(elt)
     elif type(elt) == bool:
         return 1 if elt else 0
     elif type(elt) == str or type(elt) == unicode:
         return elt
     else:
-        raise TypeError('no format for type{t} with value {v}'.format(type(elt), elt))
+        raise TypeError('no format for type{t} with value {v}'.format(t=type(elt), v=elt))
 
 def format_row(row,keys=ICS_KEYS):
     '''Returns a list suitable for output to a CSV file. Keys are listed in the order of the given arg'''
@@ -116,6 +123,10 @@ def float_or_none(x):
         return float(x)
     elif x == '' or x == u'':
         return None
+    elif type(x) == decimal.Decimal:
+        return float(x)
+    elif x is None:
+        return None
     else:
         raise TypeError("Don't know how to coerce {x} of type {t}".format(x=x,t=type(x)))
 
@@ -126,6 +137,8 @@ def float_or_zero(x):
         return float(x)
     elif type(x) == float:
         return x
+    elif type(x) == decimal.Decimal:
+        return float(x)
     elif x is None:
         return 0.0
     else:
@@ -170,7 +183,10 @@ def all_rows(conn):
 def gen_rows(conn=get_conn(),pipeIn=None):
     if pipeIn is None:
         curs = conn.cursor(MySQLdb.cursors.DictCursor) # results as Dictionaries
-        curs.execute('SELECT epoch,Basal_amt,bolus_volume FROM insulin_carb')
+        if SERVER == 'hughnew':
+            curs.execute('SELECT date_time as epoch,Basal_amt,bolus_volume FROM insulin_carb_2')
+        else:
+            curs.execute('SELECT epoch,Basal_amt,bolus_volume FROM insulin_carb')
         while True:
             row = curs.fetchone()
             if row is None:
@@ -322,11 +338,13 @@ def read_insulin_action_curve(CSVcolumn=6,test=True):
             # skip first row, which is the header
             return [ float(x) for x in vals[1:]]
 
+'''
 def first_insulin_rows(conn=get_conn(), N=60):
     curs = conn.cursor(MySQLdb.cursors.DictCursor) # results as Dictionaries
     curs.execute('SELECT Basal_amt,bolus_volume FROM insulin_carb LIMIT %s',
                  [N])
     return curs.fetchall()
+'''
 
 def read_insulin_carb_smoothed(csvfile='insulin_carb_smoothed.csv',test=True):
     if test:
@@ -390,15 +408,9 @@ def compute_insulin_on_board(rows=None,test_data=True,showCalc=True,test_iac=Tru
         for i in xrange(min(N,len(lastrows))):
             prevrow = lastrows[i]
             ins_act = IAC[i]
-            if test:
-                # print([i,ins_act, prevrow['basal_amt_12'],prevrow['bolus_volume']])
-                pass
             if showCalc:
                 calc.append((ins_act,prevrow['basal_amt_12']+prevrow['bolus_volume']))
             incr += ins_act*(prevrow['basal_amt_12']+prevrow['bolus_volume'])
-        if incr > 0 and test:
-            # print('new row at time {time} has iob {incr}'.format(time=newest['rtime'],incr=incr))
-            pass
         # might be zero, but so what
         newest = lastrows[0]
         newest['iob'] = incr
@@ -515,4 +527,5 @@ def test2(n=20):
 
 
 if __name__ == '__main__':
-    test()
+    write_real_stuff()
+    
