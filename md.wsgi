@@ -23,6 +23,12 @@ def body(msg):
                        msg=msg
     )
 
+# for virtualenv (from flask.pocoo.org/docs/0.12/deploying/mod_wsgi/
+activate_this = '/var/www/html/scott/prod/venv/bin/activate_this.py'
+execfile(activate_this, dict(__file__=activate_this))
+print os.environ['PATH']
+print sys.path
+
 import md
 
 def application(environ, start_response):
