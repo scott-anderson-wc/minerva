@@ -78,6 +78,10 @@ def more(source,page=20,printer=print):
     except StopIteration:
         return 'Iteration is exhausted'
     
+def cat(source):
+    for s in source:
+        yield s
+
 def tee(source,prefix='',stringify=str,printer=print):
     for s in source:
         printer(prefix+stringify(s))
@@ -86,6 +90,41 @@ def tee(source,prefix='',stringify=str,printer=print):
 def mapiter(source,func):
     for s in source:
         yield func(s)
+
+def average(seq):
+    # print('in average, seq is ',seq)
+    return sum(seq)/len(seq)
+
+def shift(elts,new):
+    for i in xrange(len(elts)-1):
+        elts[i] = elts[i+1]
+    elts[len(elts)-1] = new
+
+def test_shift():
+    x = [1,2,3,4,5]
+    print(x)
+    shift(x,6)
+    print(x)
+    shift(x,7)
+    print(x)
+    shift(x,8)
+    print(x)
+    shift(x,9)
+    print(x)
+    shift(x,10)
+    print(x)
+
+def do_window(rows, size=5):
+    win = []
+    while len(win) < size:
+        win.append(rows.next())
+    while True:
+        avg = average(win)
+        shift(win,rows.next())
+        yield avg
+
+# ================================================================
+
 
 def test1():
     exhaust(printall(islice(count(1), 20)))
@@ -105,3 +144,5 @@ def test5():
                  lambda x: x*x),
          printer=lambda x: print('x^2 is ',x))
     
+def test6():
+    more(do_window(count(1)))

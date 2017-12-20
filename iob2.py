@@ -22,9 +22,9 @@ EPOCH_FORMAT = '%Y-%m-%d %H:%M:%S'
 RTIME_FORMAT = '%Y-%m-%d %H:%M'
 US_FORMAT = '%m/%d %H:%M'
 CSV_FORMAT = '%Y-%m-%d %H:%M'
-ICS_KEYS = ['rtime','basal_amt_12','bolus_volume','Basal_amt','carbs','real']
+ICS_KEYS = ['rtime','basal_amt_12','bolus_volume','Basal_amt','carbs','real_row']
 IOB_KEYS = ICS_KEYS[:]
-IOB_KEYS.append('active_insulin')
+IOB_KEYS.extend(['active_insulin','rescue_carbs','rescue_insulin','tags'])
 
 def get_dsn():
     return dbconn2.read_cnf()
@@ -52,12 +52,25 @@ def csv_dict_generator(csvfilename):
         for row in reader:
             yield dict(zip(header,row))
 
-def format_elt(elt):
+key_defaults = {'user': None,
+                'Basal_amt': 0.0,
+                'basal_amt_12': 0.0,
+                'bolus_volume': 0.0,
+                'carbs': 0.0,
+                'notes': None,
+                'real_row': 0,
+                'rescue_carbs': 0,
+                'rescue_insulin': 0,
+                'tags': ''}
+
+def format_elt(elt,key):
     if elt is None:
-        return ''
+        return key_defaults[key]
     elif type(elt) == datetime:
         return elt.strftime(CSV_FORMAT)
     elif type(elt) == float:
+        return elt
+    elif type(elt) == int:
         return elt
     elif type(elt) == decimal.Decimal:
         return float(elt)
@@ -66,20 +79,28 @@ def format_elt(elt):
     elif type(elt) == str or type(elt) == unicode:
         return elt
     else:
-        raise TypeError('no format for type{t} with value {v}'.format(t=type(elt), v=elt))
+        raise TypeError('no format for type {t} with value {v}'.format(t=type(elt), v=elt))
 
 def listify_row(row,keys=ICS_KEYS):
     '''Returns a list suitable for output to a CSV file. Keys are listed in the order of the given arg'''
-    return [ format_elt(row[key]) if key in row else '' for key in keys ]
+    return [ format_elt(row[key],key) if key in row else '' for key in keys ]
 
 def csv_output(rows, CSVfilename, keys):
-    '''Write the rows (can be an iterable) to the give filename'''
+    '''Write the rows (can be an iterable) to the given filename'''
     with open(CSVfilename, 'wb') as csvfile:
         writer = csv.writer(csvfile) # default format is Excel
         writer.writerow(keys)
         for row in rows:
             writer.writerow(listify_row(row,keys))
 
+def csv_output_all(rows, CSVfilename):
+    '''Write the rows (can be an iterable) to the given filename; first line of output is all the keys in the first row.'''
+    with open(CSVfilename, 'wb') as csvfile:
+        writer = csv.writer(csvfile) # default format is Excel
+        row1 = rows.next()
+        writer.writerow(row1.keys())
+        for row in itertools.chain([row1],rows):
+            writer.writerow(listify_row(row,keys))
 
 def integers():
     n = 0
@@ -289,7 +310,7 @@ def gen_insulin_carb_vrows(conn=get_conn(),rows=None, pipeIn=None):
                     break
             
         # make a virtual row. We will selectively copy from real row later
-        vrow = {'rtime': vrow_time, 'real': vrow_time == curr_time}
+        vrow = {'rtime': vrow_time, 'real_row': vrow_time == curr_time}
         # copy from real row
         for key in ['carbs', 'Basal_amt', 'bolus_volume']:
             if vrow_time == curr_time:
@@ -362,7 +383,7 @@ def read_insulin_carb_smoothed(csvfile='insulin_carb_smoothed.csv',test=True):
 
 def compute_insulin_on_board(rows=None,test_data=True,showCalc=True,test_iac=True):
     '''read rows from insulin_carb table convolve the insulin values with
-    insulin_action_curve (IAC) to get insulin_on_board (IOB), writing the
+    insulin_action_curve (IAC) to get active_insulin (AI), writing the
     latter out to a new table.
 
     Strategy: preload N rows of IAC. Hold N rows of insulin_carb in
@@ -467,7 +488,108 @@ def run_iob(test_data=True, showCalc=True, test_iac=True):
         keys = IOB_KEYS
     rows = list(iob_rows)
     csv_output(rows, outfile, keys)
+
     
+# ================================================================
+# Find rescue carb events, defined as carbs w/o insulin in +/- 30 minutes.
+# Also fine rescue insulin, defined as insulin w/o carbs in +/- 30 minutes.
+# So, we'll combine those since they use a similar window.    
+
+def find_rescue_events(rows=None):
+    '''Get a 65 minute window of data, checking the middle of it for
+    rescue events. Put rescue events in two new columns, and add elements
+    to a 'tags' column. '''
+    window = []
+    winsize = 65/5                 # number of rows in the window
+
+    def addCol(row,key,init):
+        if key not in row:
+            row[key] = init
+
+    def initRow(row):
+        addCol(row,'tags','')
+        addCol(row,'rescue_carbs',0)
+        addCol(row,'rescue_insulin',0)
+        return row
+
+    while len(window) < winsize:
+        window.append(initRow(rows.next()))
+    middle = int(winsize/2)
+    after = window[winsize-1]['rtime']
+    before = window[0]['rtime']
+    print('window temporal size is {after} - {before} = {diff}'.format(after=after,
+                                                                       before=before,
+                                                                       diff=(after-before)))
+    def anyCarbs(seq):
+        for s in seq:
+            if s['carbs'] > 0:
+                return True
+        return False
+
+    def anyInsulin(seq):
+        for s in seq:
+            if s['bolus_volume'] > 0:
+                return True
+        return False
+
+    def addTag(row,tag):
+        if row['tags'] == '':
+            row['tags'] = tag
+        else:
+            row['tags'] += ' '+tag
+
+    rescue_carb_events = 0
+    rescue_insulin_events = 0
+
+    try:
+        while True:
+            mid = window[middle]
+            if mid['carbs'] > 0 and not anyInsulin(window):
+                # print('FOUND RESCUE CARBS! at ',mid['rtime'])
+                rescue_carb_events += 1
+                addTag(mid,'rescue_carbs')
+                mid['rescue_carbs'] = 1
+            if mid['bolus_volume'] > 0 and not anyCarbs(window):
+                rescue_insulin_events += 1
+                # print('FOUND RESCUE INSULIN! at ',mid['rtime'])
+                addTag(mid,'rescue_insulin')
+                mid['rescue_insulin'] = 1
+            out = window[0]
+            pipe.shift(window,initRow(rows.next()))
+            yield out
+    except StopIteration:
+        print 'found {x} rescue_carb events and {y} rescue_insulin_events'.format(
+            x=rescue_carb_events,
+            y=rescue_insulin_events)
+        for r in window:
+            yield r
+
+# ================================================================
+# Output to database tables
+
+def db_output(rows, tablename, keys):
+    '''Write rows (can be an interable) to the given table'''
+    conn = get_conn()
+    curs = conn.cursor(MySQLdb.cursors.DictCursor) # results as Dictionaries
+    # clear out old data
+    curs.execute('delete from {table}'.format(table=tablename))
+    sql = 'insert into {table}({cols}) values({vals})'.format(
+        table=tablename,
+        cols=','.join(keys),
+        vals=','.join(['%s' for k in keys]))
+    print('insert using ',sql)
+    insert_count = 0
+    for row in rows:
+        # wow, this is a lot of consing; hopefully GC can keep up
+        if len(row.keys()) != len(keys):
+            for k in keys:
+                if k not in row:
+                    raise Exception('row is missing some keys, including',k)
+        insert_count += 1
+        if insert_count % 1000 == 0:
+            print str(insert_count)+' '
+        curs.execute(sql,listify_row(row,keys))
+
 
 # ================================================================
 # Testing code for insulin_carb_smoothed
@@ -614,6 +736,52 @@ def pipe4(test=False):
                    gen_insulin_carb_vrows,
                    gen_all_rows_basals)
     csv_output(g(None), filename, IOB_KEYS)
+
+def test_data2():
+    for row in [
+        {'epoch': '2016-08-08 07:00:00', 'Basal_amt': u'0.0', 'bolus_volume': u'0.0'}, # start at zero
+        {'epoch': '2016-08-08 08:00:00', 'Basal_amt': u'0.0', 'bolus_volume': u'2.0'}, # rescue insulin
+        {'epoch': '2016-08-08 09:00:00', 'Basal_amt': u'0.0', 'bolus_volume': u'2.0', 'carbs': 3.0}, # not rescue carbs or insulin
+        {'epoch': '2016-08-08 10:00:00', 'Basal_amt': u'0.0', 'bolus_volume': u'0.0', 'carbs': 3.0}, # rescue carbs
+        {'epoch': '2016-08-08 11:00:00', 'Basal_amt': u'0.0', 'bolus_volume': u'0.0'}, # last row
+
+        ]:
+        print('draw from test data')
+        yield row
+    
+
+vals = None
+
+def pipe5(test=False):
+    '''Compute smoothed data including rescue carbs and rescue insulin'''
+    if test:
+        rows = test_data2
+    else:
+        rows = gen_rows
+    global vals
+    vals = []
+
+    def collect(p):
+        for v in p:
+            vals.append(v)
+            yield v
+
+    def cat(p):
+        for v in p:
+            yield v
+
+    g = pipe.pipe( lambda x: rows(),
+                   lambda p: pipe.mapiter(p, coerce_row),
+                   lambda p: gen_insulin_carb_vrows(rows=p), # does the actual smoothing
+                   lambda p: gen_all_rows_basals(rows=p), # calc basal_amt_12
+                   find_rescue_events,
+                   compute_insulin_on_board,
+                   # lambda p: pipe.tee(p,prefix='x: ',stringify=lambda r: str(listify_row(r,IOB_KEYS))),
+                   cat
+                   )
+    # pipe.more(g(None))
+    db_output(g(None), 'insulin_carb_smoothed', IOB_KEYS)
+    
 
 if __name__ == '__main__':
     write_real_stuff()
