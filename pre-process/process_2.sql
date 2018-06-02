@@ -61,6 +61,6 @@ select
 
 delete from cgm_2;
 insert into cgm_2(user,date_time,mgdl,rec_num)
-select user, str_to_date(time,'%m/%d/%Y %H:%i'), mgdl, rec_num
+select user, str_to_date(date_time,'%Y%m%d%H%i%s'), mgdl, rec_num
 from cgm_1;
 

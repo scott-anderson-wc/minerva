@@ -3,9 +3,23 @@ unchanged, so that later imports/updates are (hopefully) unaffected.
 
 cgm_1 and insulin_carb_1 are the same except that bogus rows are removed.
 
+Create the _1 tables by running the process_1.sql script in pre-process/
+
 cgm_2 and insulin_carb_2 are the same except that timestamps are
 regularized as date_time. Once these are derived from *_1, the *_1 tables
-can be dropped.
+can be dropped (though I haven't).
 
+Create the _2 tables by running the process_2.sql script in pre-process/
 
+The _2 tables aren't modified by the iob2.py scripts. That script
+creates insulin_carb_smoothed:
 
+If you want to change the structure of ICS (insulin_carb_smoothed), you have to:
+
+1. update the sql/make-insulin_carb_smoothed.sql
+2. execute it
+3. run iob2.pipe_create_ics()
+4. insert-cgm-data.sql
+5. run iob2.pipe_update_ics()
+
+Sometimes, it's easier to do ALTER TABLE.
