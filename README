@@ -11,6 +11,10 @@ can be dropped (though I haven't).
 
 Create the _2 tables by running the process_2.sql script in pre-process/
 
+Clean up the data as well.
+
+All this is done by the pre-process/reprocess.sh script.
+
 The _2 tables aren't modified by the iob2.py scripts. That script
 creates insulin_carb_smoothed:
 
@@ -18,8 +22,26 @@ If you want to change the structure of ICS (insulin_carb_smoothed), you have to:
 
 1. update the sql/make-insulin_carb_smoothed.sql
 2. execute it
-3. run iob2.pipe_create_ics()
-4. insert-cgm-data.sql
-5. run iob2.pipe_update_ics()
+3. possibly update the ICS_KEYS value which sets the keys/cols to read and write
+4. run dynamic_insulin.py which runs pipe_create_ics() which deletes all rows and writes smoothed values
+   this counts up to 446,411 by thousands, twice, and takes a long time (15 minutes?)
+5. sql/insert-cgm-data.sql  which copies the mgdl values from cgm_2
+6. run iob2.pipe_update_ics() which computes things like find_rescue_events
 
 Sometimes, it's easier to do ALTER TABLE.
+
+There is now a script: pre-process/reprocess.sh
+
+
+================================================================
+TODO
+
+Complete conversion of the smoothing code (creating virtual rows) to
+use the get_row and set_row functions.  Make sure those are fast -- how?
+Ideally, some kind of macro ...
+
+Convert the pipeline code that uses smoothed data (ICS) to use grouped
+data (ICG) since it's a lot fewer rows to process (26K versus 446K).
+
+Improve the coding as a pipeline, to minimize DB I/O and still
+maintain modularity.

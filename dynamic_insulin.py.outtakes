@@ -1,0 +1,73 @@
+# ================================================================
+# Find rescue carb events, defined as carbs w/o insulin in +/- 30 minutes.
+# Also find corrective insulin, defined as insulin w/o carbs in +/- 30 minutes.
+# So, we'll combine those since they use a similar window.    
+
+def find_rescue_events(rows=None):
+    '''Get a 65 minute window of data, checking the middle of it for
+    rescue events. Put rescue events in two new columns, and add elements
+    to a 'tags' column. '''
+    window = []
+    winsize = 65/5                 # number of rows in the window
+
+    def addCol(row,key,init):
+        if key not in row:
+            row_set(row,key,init)
+
+    def initRow(row):
+        addCol(row,'tags','')
+        addCol(row,'rescue_carbs',0)
+        addCol(row,'corrective_insulin',0)
+        return row
+
+    while len(window) < winsize:
+        window.append(initRow(rows.next()))
+    middle = int(winsize/2)
+    after = row_get(window[winsize-1],'rtime')
+    before = row_get(window[0],'rtime')
+    print('first window temporal size is {after} - {before} = {diff}'.format(after=after,
+                                                                       before=before,
+                                                                       diff=(after-before)))
+    def anyCarbs(seq):
+        for s in seq:
+            if row_get(s,'carbs') > 0:
+                return True
+        return False
+
+    def anyInsulin(seq):
+        for s in seq:
+            if row_get(s,'total_bolus_volume') > 0:
+                return True
+        return False
+
+    def addTag(row,tag):
+        curr = row_get(row,'tags')
+        new = (curr + ' ' + tag) if curr != '' else tag
+        row_set(row,'tags',new)
+
+    rescue_carb_events = 0
+    corrective_insulin_events = 0
+
+    try:
+        while True:
+            mid = window[middle]
+            if row_get(mid,'carbs') > 0 and not anyInsulin(window):
+                # print('FOUND RESCUE CARBS! at ',mid['rtime'])
+                rescue_carb_events += 1
+                addTag(mid,'rescue_carbs')
+                row_set(mid,'rescue_carbs', 1)
+            insulin = row_get(mid,'total_bolus_volume') or 0
+            if insulin > 0 and not anyCarbs(window):
+                corrective_insulin_events += 1
+                # print('FOUND RESCUE INSULIN! at ',mid['rtime'])
+                addTag(mid,'corrective_insulin')
+                row_set(mid,'corrective_insulin', 1)
+            out = window[0]
+            pipe.shift(window,initRow(rows.next()))
+            yield out
+    except StopIteration:
+        print 'found {x} rescue_carb events and {y} corrective_insulin_events'.format(
+            x=rescue_carb_events,
+            y=corrective_insulin_events)
+        for r in window:
+            yield r

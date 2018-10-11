@@ -56,9 +56,13 @@ def printall(source):
         print(s)
         yield s
 
-def exhaust(source):
+def exhaust(source,progress=None):
+    n = 0
     try:
         while True:
+            n += 1
+            if progress is not None and n % progress == 0:
+                print('progress: {n}'.format(n=n))
             source.next()
     except StopIteration:
         return 'Iteration is exhausted'
@@ -99,6 +103,11 @@ def shift(elts,new):
     for i in xrange(len(elts)-1):
         elts[i] = elts[i+1]
     elts[len(elts)-1] = new
+
+def shiftdown(elts,new):
+    for i in xrange(len(elts)-1):
+        elts[i+1] = elts[i]
+    elts[0] = new
 
 def test_shift():
     x = [1,2,3,4,5]

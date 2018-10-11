@@ -1,0 +1,149 @@
+description of cgm
++------------+-------------+------+-----+---------+----------------+
+| Field      | Type        | Null | Key | Default | Extra          |
++------------+-------------+------+-----+---------+----------------+
+| user       | varchar(20) | NO   |     | NULL    |                |
+| date       | varchar(29) | NO   |     | NULL    |                |
+| date_time  | varchar(14) | NO   |     | NULL    |                |
+| epoch_time | varchar(10) | NO   |     | NULL    |                |
+| mgdl       | varchar(4)  | NO   |     | NULL    |                |
+| rec_num    | int(10)     | NO   | PRI | NULL    | auto_increment |
++------------+-------------+------+-----+---------+----------------+
+description of cgm_1
++-----------+-----------------------+------+-----+---------+-------+
+| Field     | Type                  | Null | Key | Default | Extra |
++-----------+-----------------------+------+-----+---------+-------+
+| user      | varchar(20)           | NO   |     | NULL    |       |
+| date_time | datetime              | YES  |     | NULL    |       |
+| mgdl      | mediumint(8) unsigned | YES  |     | NULL    |       |
+| rec_num   | int(10)               | NO   | PRI | NULL    |       |
++-----------+-----------------------+------+-----+---------+-------+
+description of cgm_2
++-----------+-----------------------+------+-----+---------+-------+
+| Field     | Type                  | Null | Key | Default | Extra |
++-----------+-----------------------+------+-----+---------+-------+
+| user      | varchar(20)           | YES  |     | NULL    |       |
+| date_time | datetime              | YES  |     | NULL    |       |
+| rtime     | datetime              | YES  |     | NULL    |       |
+| mgdl      | mediumint(8) unsigned | YES  |     | NULL    |       |
+| rec_num   | int(10)               | YES  |     | NULL    |       |
++-----------+-----------------------+------+-----+---------+-------+
+description of insulin_carb
++---------------------+-------------+------+-----+---------+----------------+
+| Field               | Type        | Null | Key | Default | Extra          |
++---------------------+-------------+------+-----+---------+----------------+
+| user                | varchar(20) | NO   |     | NULL    |                |
+| date                | varchar(22) | NO   |     | NULL    |                |
+| date_time           | varchar(12) | NO   |     | NULL    |                |
+| epoch_time          | varchar(10) | NO   |     | NULL    |                |
+| Basal_amt           | varchar(16) | NO   |     | NULL    |                |
+| temp_basal_down     | varchar(5)  | NO   |     | NULL    |                |
+| temp_basal_up       | varchar(5)  | NO   |     | NULL    |                |
+| temp_basal_duration | varchar(10) | NO   |     | NULL    |                |
+| bolus_type          | varchar(15) | NO   |     | NULL    |                |
+| bolus_volume        | varchar(7)  | NO   |     | NULL    |                |
+| Immediate_percent   | varchar(8)  | NO   |     | NULL    |                |
+| extended_percent    | varchar(9)  | NO   |     | NULL    |                |
+| duration            | varchar(9)  | NO   |     | NULL    |                |
+| carbs               | varchar(8)  | NO   |     | NULL    |                |
+| notes               | text        | NO   |     | NULL    |                |
+| rec_num             | int(9)      | NO   | PRI | NULL    | auto_increment |
++---------------------+-------------+------+-----+---------+----------------+
+description of insulin_carb_1
++---------------------+-------------+------+-----+---------+----------------+
+| Field               | Type        | Null | Key | Default | Extra          |
++---------------------+-------------+------+-----+---------+----------------+
+| user                | varchar(20) | NO   |     | NULL    |                |
+| date                | varchar(22) | NO   |     | NULL    |                |
+| date_time           | varchar(12) | NO   |     | NULL    |                |
+| epoch_time          | varchar(10) | NO   |     | NULL    |                |
+| Basal_amt           | varchar(16) | NO   |     | NULL    |                |
+| temp_basal_down     | varchar(5)  | NO   |     | NULL    |                |
+| temp_basal_up       | varchar(5)  | NO   |     | NULL    |                |
+| temp_basal_duration | varchar(10) | NO   |     | NULL    |                |
+| bolus_type          | varchar(15) | NO   |     | NULL    |                |
+| bolus_volume        | varchar(7)  | NO   |     | NULL    |                |
+| Immediate_percent   | varchar(8)  | NO   |     | NULL    |                |
+| extended_percent    | varchar(9)  | NO   |     | NULL    |                |
+| duration            | varchar(9)  | NO   |     | NULL    |                |
+| carbs               | varchar(8)  | NO   |     | NULL    |                |
+| notes               | text        | NO   |     | NULL    |                |
+| rec_num             | int(9)      | NO   | PRI | NULL    | auto_increment |
++---------------------+-------------+------+-----+---------+----------------+
+description of insulin_carb_2
++--------------+-----------------------+------+-----+---------+----------------+
+| Field        | Type                  | Null | Key | Default | Extra          |
++--------------+-----------------------+------+-----+---------+----------------+
+| user         | varchar(20)           | NO   |     | NULL    |                |
+| date_time    | datetime              | NO   |     | NULL    |                |
+| rtime        | datetime              | NO   |     | NULL    |                |
+| basal_amt    | float                 | YES  |     | NULL    |                |
+| bolus_type   | varchar(15)           | NO   |     | NULL    |                |
+| bolus_volume | float                 | YES  |     | NULL    |                |
+| duration     | mediumint(8) unsigned | YES  |     | NULL    |                |
+| carbs        | float                 | YES  |     | NULL    |                |
+| notes        | text                  | NO   |     | NULL    |                |
+| rec_num      | int(9)                | NO   | PRI | NULL    | auto_increment |
++--------------+-----------------------+------+-----+---------+----------------+
+description of insulin_carb_smoothed
++----------------------------------+-----------------------------------------------------+------+-----+---------+-------+
+| Field                            | Type                                                | Null | Key | Default | Extra |
++----------------------------------+-----------------------------------------------------+------+-----+---------+-------+
+| user                             | varchar(20)                                         | YES  |     | NULL    |       |
+| rtime                            | datetime                                            | NO   | PRI | NULL    |       |
+| basal_amt                        | float                                               | YES  |     | NULL    |       |
+| basal_amt_12                     | float                                               | YES  |     | NULL    |       |
+| normal_insulin_bolus_volume      | float                                               | YES  |     | NULL    |       |
+| combination_insulin_bolus_volume | float                                               | YES  |     | NULL    |       |
+| carbs                            | float                                               | YES  |     | NULL    |       |
+| notes                            | text                                                | YES  |     | NULL    |       |
+| minutes_since_last_meal          | mediumint(9)                                        | YES  |     | NULL    |       |
+| minutes_since_last_bolus         | mediumint(9)                                        | YES  |     | NULL    |       |
+| carb_code                        | enum('Breakfast','Lunch','Dinner','Snack','Rescue') | YES  |     | NULL    |       |
+| real_row                         | tinyint(4)                                          | YES  |     | 0       |       |
+| rescue_carbs                     | tinyint(4)                                          | YES  |     | 0       |       |
+| corrective_insulin               | tinyint(4)                                          | YES  |     | 0       |       |
+| tags                             | varchar(50)                                         | YES  |     | NULL    |       |
+| cgm                              | mediumint(8) unsigned                               | YES  |     | NULL    |       |
+| bg                               | mediumint(8) unsigned                               | YES  |     | NULL    |       |
+| cgm_slope_10                     | float                                               | YES  |     | NULL    |       |
+| cgm_slope_30                     | float                                               | YES  |     | NULL    |       |
+| cgm_slope_45                     | float                                               | YES  |     | NULL    |       |
+| cgm_derivative_10                | float                                               | YES  |     | NULL    |       |
+| cgm_derivative_30                | float                                               | YES  |     | NULL    |       |
+| cgm_derivative_45                | float                                               | YES  |     | NULL    |       |
+| dynamic_carbs                    | float                                               | YES  |     | NULL    |       |
+| dynamic_insulin                  | float                                               | YES  |     | 0       |       |
+| rec_nums                         | varchar(50)                                         | YES  |     | NULL    |       |
++----------------------------------+-----------------------------------------------------+------+-----+---------+-------+
+description of ics
++----------------------------------+-----------------------------------------------------+------+-----+---------+-------+
+| Field                            | Type                                                | Null | Key | Default | Extra |
++----------------------------------+-----------------------------------------------------+------+-----+---------+-------+
+| user                             | varchar(20)                                         | YES  |     | NULL    |       |
+| rtime                            | datetime                                            | NO   | PRI | NULL    |       |
+| basal_amt                        | float                                               | YES  |     | NULL    |       |
+| basal_amt_12                     | float                                               | YES  |     | NULL    |       |
+| normal_insulin_bolus_volume      | float                                               | YES  |     | NULL    |       |
+| combination_insulin_bolus_volume | float                                               | YES  |     | NULL    |       |
+| carbs                            | float                                               | YES  |     | NULL    |       |
+| notes                            | text                                                | YES  |     | NULL    |       |
+| minutes_since_last_meal          | mediumint(9)                                        | YES  |     | NULL    |       |
+| minutes_since_last_bolus         | mediumint(9)                                        | YES  |     | NULL    |       |
+| carb_code                        | enum('Breakfast','Lunch','Dinner','Snack','Rescue') | YES  |     | NULL    |       |
+| real_row                         | tinyint(4)                                          | YES  |     | 0       |       |
+| rescue_carbs                     | tinyint(4)                                          | YES  |     | 0       |       |
+| corrective_insulin               | tinyint(4)                                          | YES  |     | 0       |       |
+| tags                             | varchar(50)                                         | YES  |     | NULL    |       |
+| cgm                              | mediumint(8) unsigned                               | YES  |     | NULL    |       |
+| bg                               | mediumint(8) unsigned                               | YES  |     | NULL    |       |
+| cgm_slope_10                     | float                                               | YES  |     | NULL    |       |
+| cgm_slope_30                     | float                                               | YES  |     | NULL    |       |
+| cgm_slope_45                     | float                                               | YES  |     | NULL    |       |
+| cgm_derivative_10                | float                                               | YES  |     | NULL    |       |
+| cgm_derivative_30                | float                                               | YES  |     | NULL    |       |
+| cgm_derivative_45                | float                                               | YES  |     | NULL    |       |
+| carbs_on_board                   | float                                               | YES  |     | NULL    |       |
+| dynamic_insulin                  | float                                               | YES  |     | 0       |       |
+| rec_nums                         | varchar(50)                                         | YES  |     | NULL    |       |
++----------------------------------+-----------------------------------------------------+------+-----+---------+-------+

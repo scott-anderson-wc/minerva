@@ -1,0 +1,53 @@
+There are 971 duplicates among the date_time values. 
+
+Some occur multiple times. In fact, there are 657 timestamps that
+occur more than twice, some occurring as often as 21 times!  I can
+send you a listing of those if you're curious, but I think at this
+point we don't care, we just want to clean them up.
+
+I computed summary statistics on the various groups of data, namely
+
+len (the size of the group of duplicates)
+max
+min
+diff (the difference between the max and the min)
+%more (the percentage by which max is bigger than min, as a percent of min)
+mean
+std deviation
+coeffient of variation (cov) which is std dev / mean
+
+Here's a sample:
+
+mgdl range on date_time duplicates
+duplicated date_time	len	max	min	diff	%more	mean	stdev	cov
+2014-12-01 20:02:00	21	134	60	74	123.33	107.7	 33.8	0.31
+2014-07-21 08:41:00	21	132	74	58	 78.38	 96.7	 25.3	0.26
+2014-07-02 20:02:00	21	198	184	14	  7.61	190.7	  5.7	0.03
+2014-12-14 02:31:00	21	190	186	4	  2.15	188.3	  1.7	0.01
+2014-12-08 18:51:00	21	139	135	4	  2.96	137.0	  1.6	0.01
+
+All of these are groups of size 21. The biggest has a range of 74,
+where the largest is 123% more than the smallest.  The COV is 0.31 in
+that case.
+
+The third group above ranges from 184 to 198, which is just 14, or 7%
+more. The COV is just 0.03.
+
+We could average or discard groups based just on the %more value, but
+that ignores all but the most extreme values. If we use COV, we at
+least consider all the values.
+
+Given the examples above, I think a COV threshhold of 0.1 would be
+good. Finding some values close to that threshhold yields:
+
+2014-10-27 17:53:00	14	149	124	25	 20.16	136.5	 12.5	0.09
+2014-09-15 07:51:00	14	131	106	25	 23.58	118.5	 12.5	0.11
+
+Here the group size is 14, with a range of 25 in each case. The first
+has a max that is 20.15% bigger than the smallest, with a COV of
+0.09. The second has a max that is 23.58% bigger than the smallest,
+and a COV of 0.11.
+
+A COV threshhold of 0.1 would keep the first group, replacing it with
+its mean, and discard the second group.
+

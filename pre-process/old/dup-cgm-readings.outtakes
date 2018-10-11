@@ -1,0 +1,17 @@
+-- select date_time, cov
+-- from (
+--     select date_time, std(mgdl)/avg(mgdl) as cov
+--     from cgm_1
+--     group by date_time
+--     having count(*) > 1) T
+-- order by cov desc;
+
+
+-- this is very slow
+
+delete from cgm_1
+where date_time in
+    (select date_time
+     from cgm_duplicates
+     group by date_time
+     having count(*) > 1 and std(mgdl)/avg(mgdl) > 0.1);

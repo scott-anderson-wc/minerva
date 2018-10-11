@@ -1,0 +1,55 @@
+def tuple_set(row,key,val):
+    if cursor_columns is None:
+        raise 'Forgot to set cursor columns!'
+    row[cursor_columns.index(key)] = val
+    return row
+
+
+
+def compute_active_insulin(rows=None,test_data=False,showCalc=False,test_iac=False):
+    '''read rows from insulin_carb table convolve the insulin values with
+    insulin_action_curve (IAC) to get active_insulin (AI), writing the
+    latter out to a new table.
+    '''
+
+    window = []
+    winsize = len(IAC)          # number of rows in the window
+
+    while len(window) < winsize:
+        window.append(rows.next())
+
+    print('showCalc is {sc}'.format(sc=showCalc))
+    for row in rows:
+        # print('row1',row)
+        tuple_set(row, 'active_insulin', 0.0)
+        if showCalc:
+            calc = []
+            row['active_insulin_calc'] = 'not yet'
+        # if len(lastrows) < N:
+        #    continue
+        # ================================================================
+        # the previous lines are for all rows, including the first N-1 rows
+        incr = 0
+        for i in xrange(min(N,len(lastrows))):
+            prevrow = lastrows[i]
+            ins_act = IAC[i]
+            ins_in = (tuple_get(prevrow,'basal_amt_12')+
+                      tuple_get(prevrow,'bolus_volume'))))
+            if showCalc:
+                calc.append((ins_act,ins_in))
+            incr += ins_act*ins_in
+        newest = window[0]
+        tuple_set(newest,'active_insulin',incr)
+        if showCalc:
+            tuple_set(newest,'active_insulin_calc', str(calc))
+        # print('number of buffered rows: {n}'.format(n=len(lastrows)))
+        # because we're adding rows onto the front, that has the effect of time-reversing
+        # the IAC
+        lastrows.insert(0, row)
+
+        if len(lastrows) > N:
+            yield lastrows.pop()
+    # After loop over all input rows, produce all the lastrows
+    for last in lastrows:
+
+

@@ -1,0 +1,65 @@
+/*
+select count(*) as 'all singleton rtime values in insulin_carb_2'
+from (select rtime from insulin_carb_2 group by rtime having count(*) = 1) as T;
+
+select count(*) as 'all duplicate rtime values in insulin_carb_2'
+from (select rtime from insulin_carb_2 group by rtime having count(*) > 1) as T;
+*/
+
+
+
+drop function if exists round5;
+create function round5( x int)
+returns integer
+return 5 * round( x / 5 );
+
+drop function if exists date5;
+create function  date5( d datetime )
+returns  datetime  deterministic
+return cast(concat(date(d),
+                  ' ',
+                  hour(d),
+                  ':',
+                  round5(minute(d)))
+	    as datetime);
+	    
+drop function if exists date5b;
+create function  date5b( d datetime )
+returns  datetime  deterministic
+return if(round5(minute(d))<60,
+          cast(concat(date(d),
+                  ' ',
+                  hour(d),
+                  ':',
+                  round5(minute(d)))
+	    as datetime),
+	  adddate( cast(concat(date(d),' ',hour(d),':',5*floor(minute(d)/5)) as datetime),
+	           interval 5 minute));
+
+
+
+
+insert into ics(user,rtime,basal_amt,basal_amt_12,
+		normal_insulin_bolus_volume,
+		combination_insulin_bolus_volume,
+		carbs,
+		notes)
+select user,rtime,basal_amt,basal_amt/12,
+       if(bolus_type='Normal',bolus_volume,0),
+       if(bolus_type='Combination',bolus_volume,0),
+       carbs,
+       notes
+       from insulin_carb_2
+       where rtime in (select rtime from insulin_carb_2 group by rtime having count(*) = 1);
+
+-- now, deal with duplicates. First, basal_amt, where we take the
+-- basal_amt value from the last row (largest rec_num) in the group
+
+insert into ics(user,rtime,basal_amt,basal_amt_12)
+select user,main.rtime,basal_amt,basal_amt/12
+       from insulin_carb_2 as main,
+       (select rtime,max(rec_num) as max_rec_num
+        from insulin_carb_2
+	group by rtime
+	having count(*) > 1) as dups
+       where main.rtime = dups.rtime and main.rec_num = dups.max_rec_num;

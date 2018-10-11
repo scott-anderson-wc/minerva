@@ -1,0 +1,173 @@
+{% extends "b.html" %}
+
+{% block main_content %}
+
+<h1>Minerva Project</h1>
+
+<section id="controls">
+    <h2>Month {{display_date}}</h2>
+    <p>Data for {{display_date}}</p>
+    <p><form action="{{prev_month}}"><button>prev</button></form>
+    <form action="{{next_month}}"><button>next</button></form>
+    </p>
+    <h2>Columns</h2>
+    <p id="column_buttons"></p>
+    <h2>Tags</h2>
+    <p id="tag_buttons"></p>
+    <p id="tag_matches"></p>
+ </section>
+
+<section>
+<h2>Data Display</h2>
+
+    <style>
+#controls form { display: inline-block; }
+
+#data_display tbody { height: 90%; overflow: scroll; }
+#data_display td { padding: 0px 0.2em }
+
+.rescue_carb {
+    background-color: #ffcccc;
+    border-color: red;
+}
+
+.correction_insulin {
+    background-color: #ffcccc;
+    border-color: red;
+}
+    </style>
+
+
+    <table id="data_display" class="bordered">
+        <thead>
+           <tr class="header"></tr>
+        </thead>
+    </table>
+</section>
+
+<script>
+var keys_and_data = {{ data | safe }};
+
+var data;
+var keys;
+
+function formatDate(date) {
+    if( date instanceof Date ) {
+	var h = date.getHours();
+	var m = date.getMinutes();
+	return ((date.getMonth()+1)+'/'+date.getDate()+'@'
+		+ ( h < 10 ? '0' + h : h )
+		+ ':'
+		+ ( m < 10 ? '0' + m : m ));
+    } else {
+	throw "Not a date: "+date;
+    }
+}
+
+function formatElt(value,key) {
+    if(key === 'rtime') {
+	return formatDate(new Date(value));
+    } else if( ['Basal_amt','basal_amt_12','bolus_volume','carbs'].indexOf(key) != -1 ) {
+	return value.toFixed(3);
+    } else {
+	return value;
+    }
+}
+
+function formatHeader(dest) {
+    for( var i=0; i<keys.length; i++) {
+	$("<th>").text(keys[i]).attr('data-key',keys[i]).appendTo(dest)
+    }
+}
+
+function formatData() {
+    var start = Date.now();
+    var i;
+    keys = keys_and_data.keys;
+    data = keys_and_data.data;
+    var rtime_index = keys.indexOf('rtime');
+    var tag_index = keys.indexOf('tags');
+    var row, len=data.length;
+    formatHeader("#data_display .header");
+    var tbody = $("<tbody>");
+    for(row=0; row<len; row++) {
+	// insert headers just before each midnight row
+	var d = new Date(data[row][rtime_index]);
+	if(d.getHours()==0 && d.getMinutes()==0) {
+	    formatHeader(tbody);
+	}
+	// insert row
+	var tr = $("<tr>");
+	for( i=0; i<keys.length; i++ ) {
+	    $("<td>")
+		.text(formatElt(data[row][i],keys[i]))
+	        .attr('data-key',keys[i])
+	        .appendTo(tr);
+	}
+	if(data[row][tag_index] != '') {
+	    var tags = data[row][tag_index].split(' ');
+	    tags.forEach(function(tag) {
+		tr.attr('data-'+tag,tag);
+	    });
+	}
+	tr.appendTo(tbody);
+    }
+    tbody.appendTo("#data_display");
+    var stop = Date.now();
+    console.log('formatting took '+(stop-start)+' ms');
+}
+
+    formatData();
+
+function makeColumnButtons() {
+    var i;
+    for( i=0; i<keys.length; i++) {
+	$("<button>")
+	    .text(keys[i])
+	    .attr('data-key',keys[i])
+	    .appendTo("#column_buttons");
+    }
+}
+makeColumnButtons();
+
+$("#column_buttons").on('click','[data-key]',function (event) {
+    var key = $(this).attr('data-key');
+    $("#data_display").find("[data-key="+key+"]").toggle();
+});
+
+function initHiding() {    
+    var hidden = "user,notes,real_row,rec_num".split(",");
+    hidden.forEach(function (key) {
+	$("#column_buttons").find('[data-key='+key+']').click();
+    });
+}		   
+initHiding();
+
+var tags = "rescue_carbs,corrective_insulin".split(",");
+
+function makeTagButtons() {
+    tags.forEach(function (tag) {
+	$("<button>").text(tag).attr('data-tag',tag).appendTo("#tag_buttons");
+    });
+}
+makeTagButtons();
+
+function highlightTaggedRows(tag) {
+    var rows = $('#data_display').find('tr[data-'+tag+']');
+    $("#tag_matches").text('Matched '+rows.length+' rows');
+    rows.toggleClass(tag)
+}
+
+$("#tag_buttons").on('click','[data-tag]',function (event) {
+    var tag = $(this).attr('data-tag');
+    highlightTaggedRows(tag);
+});
+highlightTaggedRows('rescue_insulin');
+
+</script>
+
+</div>
+{% endblock %}
+
+</body>
+</html>
