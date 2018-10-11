@@ -7,5 +7,9 @@ if [ -e $out ]; then
 fi
 
 # order is important. the -t has to be first
-mysql -te "describe insulin_carb_2;" | cat >> $out
-mysql -te "describe cgm_2;" >> $out
+for table in cgm cgm_1 cgm_2 insulin_carb insulin_carb_1 insulin_carb_2 insulin_carb_smoothed ics
+do
+    echo "description of $table" >> $out
+    mysql -te "describe $table;" | cat >> $out
+done
+

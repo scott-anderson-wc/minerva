@@ -46,6 +46,47 @@ mysql.init_app(app)
 
 datarange = None
 
+def browseprevmonth(year,month):
+    (year, month) = (int(year), int(month))
+    (year, month) = (year, month-1) if month != 1 else (year-1, 12)
+    return url_for('browseym',year=year,month=month)
+
+def browsenextmonth(year,month):
+    (year, month) = (int(year), int(month))
+    (year,month) = (year, month+1) if month != 12 else (year+1, 1)
+    return url_for('browseym',year=year,month=month)
+
+@app.route('/browseym/')
+@app.route('/browseym/<year>/<month>')
+def browseym(year=2017,month=2):
+    data = pandb.get_data_json(year,month)
+    print('len(data) is ',len(data))
+    return render_template('browse.html',
+                           version = app.config['VERSION'],
+                           display_date = str(month)+'/'+str(year),
+                           prev_month = browseprevmonth(year,month),
+                           next_month = browsenextmonth(year,month),
+                           data = data)
+                           
+@app.route('/browse/')
+@app.route('/browse/<datestr>')
+def browse(datestr=None):
+    if datestr is not None:
+        try:
+            dateobj = pandb.to_date(datestr)
+            displaydate = datetime.strftime(dateobj,'%A %B %d, %Y')
+        except:
+            flash('bad date')
+            datestr = None
+            displaydate = 'all'
+    else:
+        displaydate = 'all'
+    return render_template('browse.html',
+                           version = app.config['VERSION'],
+                           displaydate = displaydate,
+                           data = pandb.get_data_json(None,None))
+                           
+
 @app.route('/plot1/')
 @app.route('/plot1/<datestr>')
 def plot1(datestr=None):
@@ -248,6 +289,7 @@ def teardown_db(exception):
 if __name__ == '__main__':
     port = 1942
     print('starting')
+    app.debug = True
     if not app.debug:
         print('unlinking old logfile')
         os.unlink(LOGFILE)

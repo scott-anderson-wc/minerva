@@ -12,10 +12,10 @@ import util
 import plotly
 import plotly.plotly as py
 import plotly.graph_objs as go
+import json
 
 class StepException(Exception):
     pass
-
 
 def to_date(date_str):
     if type(date_str) == type(datetime.datetime.today()):
@@ -25,7 +25,7 @@ def to_date(date_str):
             return datetime.datetime.strptime(date_str, fmt)
         except:
             pass
-    raise ValueError('Could not understand this date_str: ' + date_str)
+    raise ValueError('Could not understand this date_str: ',date_str)
 
 def test_to_date():
     d1 = to_date('2016-04-03')
@@ -494,3 +494,36 @@ def start_calc(date_str='4/3/16', conn=get_db_connection()):
     ## first, get the subset of records just for this meal time
 
 
+## ================================================================
+
+# for browsing
+
+def json_serial(obj):
+    if isinstance(obj, (datetime.datetime, datetime.date)):
+        return obj.isoformat()
+    elif isinstance(obj,Decimal):
+        return float(obj)
+    raise TypeError("Type %s is not serializable" % type(obj))
+
+
+def get_data(year,month):
+    conn = get_db_connection()
+    # The data, as lists
+    curs = conn.cursor()
+    if year is None and month is None:
+        curs.execute('SELECT * FROM insulin_carb_smoothed')
+    else:
+        curs.execute('SELECT * FROM insulin_carb_smoothed WHERE year(rtime) = %s and month(rtime) = %s',
+                     [year,month])
+    desc = curs.description
+    keys = [ col[0] for col in curs.description ]
+    data = curs.fetchall()
+    return keys, data
+
+def get_data_json(year,month):
+    keys,data = get_data(year,month)
+    return json.dumps({'keys': keys, 'data': data},
+                      default=json_serial)
+
+        
+        
