@@ -12,3 +12,6 @@
 
 # ignore log files
 *.log
+
+venv
+
