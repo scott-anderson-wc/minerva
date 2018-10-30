@@ -198,4 +198,4 @@ create table insulin_carb_smoothed like insulin_carb_grouped;
 drop table if exists insulin_carb_smoothed_2;
 create table insulin_carb_smoothed_2 like insulin_carb_grouped;
 
-select 'all done';
+select 'all done with make-insulin_carb_smoothed.sql';
