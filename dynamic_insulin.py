@@ -1088,6 +1088,7 @@ def pipe_write_ics2(test=False,start=None,end=None):
                    # nonzerocarbs
                    )
     # pipe.more(g(None))
+    # I don't recall why I switched to insulin_carb_smoothed_2. Need to figure that out.
     ic_output_list(g(None),
                    'insulin_carb_smoothed_2',
                    cursor_columns)
