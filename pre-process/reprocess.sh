@@ -3,7 +3,7 @@
 # script to run when new data from Dexcom etc is uploaded. Does the pre-processing to
 # create the derived _2 tables and resolve duplicates.
 
-dir="$HOME/scott/devel/pre-process/logs"
+dir="logs"
 log=`date +${dir}/reprocess.log.%F`
 
 if [ -e $log ]; then
