@@ -12,5 +12,9 @@
 
 # ignore log files
 *.log
+*.csv
+*.output
+*.sh_output
+*.zip
 
 venv
