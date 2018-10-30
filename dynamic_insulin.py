@@ -780,7 +780,7 @@ simpler.
                     row_set(mid,'carb_code',name)
                     addTag(mid,name)
                 else:
-                    # print('FOUND RESCUE CARBS! at ',mid['rtime'])
+                    print('FOUND RESCUE CARBS! at ',row_get(mid,'rtime'))
                     rescue_carb_events += 1
                     addTag(mid,'rescue_carbs')
                     row_set(mid,'rescue_carbs', 1)
@@ -793,7 +793,7 @@ simpler.
             # corrective insulin
             if row_get(mid,'total_bolus_volume') > 0 and not anyCarbs(window):
                 corrective_insulin_events += 1
-                # print('FOUND RESCUE INSULIN! at ',mid['rtime'])
+                print('FOUND CORRECTIVE INSULIN! at ',row_get(mid,'rtime'))
                 addTag(mid,'corrective_insulin')
                 row_set(mid,'corrective_insulin', 1)
             
@@ -1146,7 +1146,7 @@ def finish_insulin_carb_smoothed(start=None,end=None):
     print num_rows()
     print '='*30,'starting pipe_write_ics2'
     pipe_write_ics2(start=start,end=end)
-    print '='*30,'done'
+    print '='*30,'done with finish_insulin_carb_smoothed'
 
 ## ================================================================
 
