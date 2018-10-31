@@ -38,6 +38,7 @@ import csv
 import itertools
 from datetime import datetime, timedelta
 import decimal                  # some MySQL types are returned as type decimal
+from dbi import get_dsn, get_conn # connect to the database
 
 
 SERVER = 'hughnew'              # hughnew versus tempest
@@ -57,20 +58,6 @@ IOB_KEYS.extend(['active_insulin','rescue_carbs','corrective_insulin','tags'])
 
 IC_KEYS = None        # keys for ICG and ICS, set by keys_from_icg
 
-DSN = None
-Conn = None
-
-def get_dsn():
-    global DSN
-    if DSN is None:
-        DSN = dbconn2.read_cnf()
-    return DSN
-
-def get_conn(dsn=get_dsn()):
-    global Conn
-    if Conn is None:
-        Conn = dbconn2.connect(dsn)
-    return Conn
 
 def csv_values():
     with open(CSVfilename, 'rU') as csvfile:
