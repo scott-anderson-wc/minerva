@@ -15,6 +15,7 @@ from flask_mysqldb import MySQL
 from datetime import datetime, timedelta
 import db
 import pandb
+import isf
 
 import json
 import plotly
@@ -278,8 +279,44 @@ def compute_data_range():
         datarange['min_ic'] = min_ic
         datarange['max_cgm'] = max_cgm
         datarange['min_cgm'] = min_cgm
+
+
         debug('data range is %s' % str(datarange))
 
+@app.route('/browseisf/')
+@app.route('/browseisf/<date>/', methods = ['GET','POST'])
+def browse_isf(date=None):
+    if request.method == "GET": 
+        if date == None:
+            rows = isf.get_isf('2018-01-01 05:00')
+            dtime = '2018-01-01 05:50'
+    else:
+        rows = isf.get_isf(date)
+        dtime = rows[0]['rtime']
+        time = dtime.strftime('%m-%d-%y %H:%M')
+        if rows[0]['ISF_trouble'] == 'ok':
+            return render_template('isf.html',
+                                   isf_trouble = None,
+                                   script = url_for('browse_isf', date = dtime),
+                                   rows = rows,
+                                   dtime = dtime,
+                                   page_title ='ISF for ' + time)
+
+        else:
+            return render_template('isf.html',
+                                   isf_trouble = rows[0]['ISF_trouble'],
+                                   script = url_for('browse_isf', date =dtime),
+                                   rows = rows,
+                                   dtime = dtime,
+                                   page_title = 'ISF for ' + time)
+    return render_template ('isf.html',
+                            isf_trouble = None,
+                            script = url_for('browse_isf', date = dtime),
+                            rows = rows,
+                            time = dtime, 
+                            page_title ='ISF for ' +dtime) 
+    
+    
 @app.teardown_appcontext
 def teardown_db(exception):
     conn = getattr(g, 'conn', None)

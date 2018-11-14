@@ -1,0 +1,43 @@
+{% extends "b.html" %}
+
+{% block main_content %}
+<h1> Minerva Project </h1>
+
+<h2> {{page_title}} </h2> 
+
+{% if isf_trouble %}
+<div id = "error">
+  <p>There was some trouble calculating the ISF for this time period due to : {{isf_trouble}}</p>
+</div>
+
+{% endif %}
+  
+<div id = "table">
+  <table cellspacing = "10">
+    <tr>
+      <th>Time</th>
+      <th>Corrective Insulin</th>
+      <th>BG Value</th>
+      <th>CGM Value</th>
+      <th>Total Bolus</th>
+      <th>ISF Value</th>
+    </tr>
+    {% for row in rows %}
+    <tr align = "center">
+      <td class = "time"> {{row.rtime}}</td>
+      <td class = "corrective_insulin"> {{row.corrective_insulin}}</td>
+      <Td class = "bg"> {{row.bg}} </td>
+      <td class = "cgm"> {{row.cgm}} </td>
+      <td class = "bolus"> {{row.total_bolus_volume}} </td>
+      <td class = "isf"> {{row.ISF}} </td>
+    </tr>
+    {% endfor %}
+
+  </table>
+</div>
+
+<form method = "POST" action = "{{script}}">
+  <input type = "submit" name = "submit" value = "Next"> 
+</form> 
+{% endblock %} 
+								   
