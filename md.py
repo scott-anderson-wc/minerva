@@ -288,8 +288,10 @@ def compute_data_range():
 def browse_isf(date=None):
     if request.method == "GET": 
         if date == None:
-            rows = isf.get_isf('2018-01-01 05:00')
             dtime = '2018-01-01 05:50'
+        else:
+            dtime = date
+        rows = isf.get_isf(dtime)
     else:
         rows = isf.get_isf(date)
         dtime = rows[0]['rtime']
