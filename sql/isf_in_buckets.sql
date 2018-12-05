@@ -29,7 +29,9 @@ select rtime,isf from insulin_carb_smoothed_2
        select rtime,isf_rounded as isf from insulin_carb_smoothed_2
        where isf_rounded is not null;
 
-select time_bucket(rtime),count(isf)
+select time_bucket(rtime) as bucket,count(isf)
 from isfvals
-group by time_bucket(rtime);
+group by time_bucket(rtime)
+order by bucket;
+
 
