@@ -5,6 +5,7 @@ from werkzeug import secure_filename
 
 import time
 import logging
+import random
 
 LOGFILE='app.log'
 LOGLEVEL=logging.DEBUG
@@ -278,7 +279,7 @@ def compute_data_range():
         datarange['max_ic'] = max_ic
         datarange['min_ic'] = min_ic
         datarange['max_cgm'] = max_cgm
-        datarange['min_cgm'] = min_cgm
+
 
 
         debug('data range is %s' % str(datarange))
@@ -319,6 +320,34 @@ def browse_isf(date=None):
                             page_title ='ISF for ' +dtime) 
     
     
+@app.route('/isfplots/')
+def isfplots():
+    (all, bucket_list) = isf.get_all_isf_plus_buckets()
+    all_whisker = go.Box( y = all, name = 'all isf' )
+    layout = go.Layout( title = ('isf values'),
+                        yaxis = dict(title='mgdl/unit',
+                                     # the y zeroline is the line where y=0
+                                     zeroline=True,
+                                     zerolinecolor='#800000',
+                                     zerolinewidth=2,
+                                     # this is the vertical line at the left edge
+                                     showline=False,
+                                     rangemode='tozero')
+                        )
+    graph = go.Figure(data = [all_whisker], layout = layout)
+    graphJSON = json.dumps( graph, cls=plotly.utils.PlotlyJSONEncoder)
+    return render_template('main2.html',
+                           version = app.config['VERSION'],
+                           page_title='Minerva ISF values',
+                           graphJSON = graphJSON,
+                           calcs = '',
+                           record_date = '',
+                           url_tomorrow = '',
+                           current_date = '',
+                           url_yesterday = '',
+                           datarange = '')
+
+
 @app.teardown_appcontext
 def teardown_db(exception):
     conn = getattr(g, 'conn', None)
