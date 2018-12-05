@@ -100,3 +100,13 @@ def get_isf(rtime):
     curs.execute('''SELECT rtime, corrective_insulin, bg, cgm, total_bolus_volume,ISF,ISF_rounded,ISF_trouble from insulin_carb_smoothed_2 where rtime>= %s and rtime<= addtime(%s,'2:00')''',[start,start])
     return curs.fetchall()
 
+def get_all_isf_plus_buckets():
+    conn = get_conn()
+    curs = conn.cursor()
+    curs.execute('''SELECT isf from isfvals''')
+    all = curs.fetchall()
+    curs.execute('''select time_bucket(rtime),isf from isfvals''')
+    bucketed = curs.fetchall()
+    bucket_list = [ [ row[1] for row in bucketed if row[0] == b ]
+                    for b in range(0,24,2) ]
+    return (all, bucket_list)
