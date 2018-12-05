@@ -28,6 +28,7 @@ def compute_isf():
         startbg = first['cgm'] #default use cgm value for start 
         endbg = None  #default use cgm value for end 
         isf_trouble = None
+        isf_round = None
         
         #if there is a bg value for the start use that 
         if(first['bg']):
@@ -46,8 +47,12 @@ def compute_isf():
 
             #if there was corrective insulin given after 30min of start time, label as problem 
             if (r['corrective_insulin'] == 1 and r['rtime']> (start['rtime']+timedelta(minutes=30))):
-                curs.execute('''UPDATE insulin_carb_smoothed_2 SET ISF_trouble = %s where rtime = %s''',['extra insulin',start['rtime']])
-                isf_trouble ='yes'; 
+                #only trouble if corrective insulin was given after 30min from start time and before 20min from 2hr mark (100min = 1hr40min)
+                if( r['rtime'] < (start['rtime']+timedelta(minutes=100))): 
+                    curs.execute('''UPDATE insulin_carb_smoothed_2 SET ISF_trouble = %s where rtime = %s''',['extra insulin',start['rtime']])
+                    isf_trouble ='yes';
+                else:
+                    isf_round = True; 
 
             #if no bg value for start time, find one in within 10min of start time (?) 
             if (startbg == None and r['rtime'] <= (start['rtime'] + timedelta(minutes=10))):
@@ -61,16 +66,20 @@ def compute_isf():
                 else:
                     endbg =r['cgm']
                 
-            print r
+            #print r
         if (endbg and startbg and isf_trouble == None):
             #compute isf
             isf = (startbg-endbg)/total_bolus
             print "ISF: ", isf
-            curs.execute('''UPDATE insulin_carb_smoothed_2 SET isf = %s where rtime = %s''', [isf, time])
+            #if extra insulin given after 1hr 40min, put isf value in different column 
+            if (isf_round):
+                curs.execute('''UPDATE insulin_carb_smoothed_2 SET ISF_rounded = %s where rtime = %s''',[isf, time])
+            else: 
+                curs.execute('''UPDATE insulin_carb_smoothed_2 SET isf = %s where rtime = %s''', [isf, time])
             curs.execute('''UPDATE insulin_carb_smoothed_2 SET ISF_trouble = %s where rtime = %s''',['ok', time])
         elif (endbg ==  None and startbg == None):
             curs.execute('''UPDATE insulin_carb_smoothed_2 SET ISF_trouble = %s where rtime = %s''', ['nobg', start['rtime']])
-        print "start: ", startbg, "end: ", endbg
+        #print "start: ", startbg, "end: ", endbg
         # check if any additional insulin given within 30 minutes of start -- done 
         # check if any additional insulin given later in that time range -- done
         # check if we have a CGM or BG value near the beginning of the range AND -- done 
@@ -78,7 +87,7 @@ def compute_isf():
         # if we have *both* CGM and BG, take the BG
         # compute ISF based on starting and ending CGM or BG
         # update database using start (the primary key for ICS2)
-        raw_input('another?')
+        #raw_input('another?')
 
 
 def get_isf(rtime):
@@ -88,6 +97,6 @@ def get_isf(rtime):
     start = curs.fetchone()['rtime']
 
     #get table from rtime
-    curs.execute('''SELECT rtime, corrective_insulin, bg, cgm, total_bolus_volume,ISF,ISF_trouble from insulin_carb_smoothed_2 where rtime>= %s and rtime<= addtime(%s,'2:00')''',[start,start])
+    curs.execute('''SELECT rtime, corrective_insulin, bg, cgm, total_bolus_volume,ISF,ISF_rounded,ISF_trouble from insulin_carb_smoothed_2 where rtime>= %s and rtime<= addtime(%s,'2:00')''',[start,start])
     return curs.fetchall()
 
