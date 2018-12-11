@@ -323,8 +323,22 @@ def browse_isf(date=None):
 @app.route('/isfplots/')
 def isfplots():
     (all, bucket_list) = isf.get_all_isf_plus_buckets()
-    all_whisker = go.Box( y = all, name = 'all isf' )
-    layout = go.Layout( title = ('isf values'),
+    allData = [data[0] for data in all if data[0]]
+    print bucket_list[5]
+    all_whisker = go.Box( y = allData, name = 'all isf')
+    bucket0 = go.Box(y = bucket_list[0], name = '0am-2am')
+    bucket1 = go.Box(y = bucket_list[1], name = '2am-4am')
+    bucket2 = go.Box(y = bucket_list[2], name = '4am-6am')
+    bucket3 = go.Box(y = bucket_list[3], name = '6am-8am')
+    bucket4 = go.Box(y = bucket_list[4], name = '8am-10am')
+    bucket5 = go.Box(y = bucket_list[5], name = '10am-12pm')
+    bucket6 = go.Box(y = bucket_list[6], name = '12pm-14pm')
+    bucket7 = go.Box(y = bucket_list[7], name = '14pm-16pm')
+    bucket8 = go.Box(y = bucket_list[8], name = '16pm-18pm')
+    bucket9 = go.Box(y = bucket_list[9], name = '18pm-20pm')
+    bucket10 = go.Box(y = bucket_list[10], name = '20pm-22pm')
+    bucket11 = go.Box(y = bucket_list[11], name = '22pm-24pm')
+    layout = go.Layout( title = ('isf values'), width = 1500,height = 1000,
                         yaxis = dict(title='mgdl/unit',
                                      # the y zeroline is the line where y=0
                                      zeroline=True,
@@ -334,18 +348,15 @@ def isfplots():
                                      showline=False,
                                      rangemode='tozero')
                         )
-    graph = go.Figure(data = [all_whisker], layout = layout)
+    graph = go.Figure(data = [all_whisker,bucket0,bucket1,bucket2,bucket3
+                              ,bucket4,bucket5
+                              ,bucket6,bucket7,bucket8,bucket9,bucket10,bucket11]
+                             ,layout = layout)
     graphJSON = json.dumps( graph, cls=plotly.utils.PlotlyJSONEncoder)
-    return render_template('main2.html',
+    return render_template('isfplots.html',
                            version = app.config['VERSION'],
                            page_title='Minerva ISF values',
-                           graphJSON = graphJSON,
-                           calcs = '',
-                           record_date = '',
-                           url_tomorrow = '',
-                           current_date = '',
-                           url_yesterday = '',
-                           datarange = '')
+                           graphJSON = graphJSON)
 
 
 @app.teardown_appcontext

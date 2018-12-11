@@ -21,6 +21,7 @@
       <th>CGM Value</th>
       <th>Total Bolus</th>
       <th>ISF Value</th>
+      <th>ISF 1hr 40 Value </th> 
     </tr>
     {% for row in rows %}
     <tr align = "center">
@@ -30,6 +31,7 @@
       <td class = "cgm"> {{row.cgm}} </td>
       <td class = "bolus"> {{row.total_bolus_volume}} </td>
       <td class = "isf"> {{row.ISF}} </td>
+      <td class = "isf_rounded"> {{row.ISF_rounded}}</td>
     </tr>
     {% endfor %}
 

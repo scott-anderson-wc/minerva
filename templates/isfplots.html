@@ -1,0 +1,14 @@
+{% extends "b.html" %}
+
+{% block main_content %}
+
+<div id="isfPlot"></div>
+<p>{{table1 | safe}}</p>
+<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+<script>
+  var isfGraph = {{graphJSON | safe}}
+  console.log('data is '+isfGraph.data)
+  console.log('type is '+typeof(isfGraph))
+  Plotly.plot('isfPlot', isfGraph.data, isfGraph.layout, {showLink: false});
+ </script>
+{% endblock %}

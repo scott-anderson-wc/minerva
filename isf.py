@@ -103,10 +103,10 @@ def get_isf(rtime):
 def get_all_isf_plus_buckets():
     conn = get_conn()
     curs = conn.cursor()
-    curs.execute('''SELECT isf from isfvals''')
-    all = curs.fetchall()
+    curs.execute('''SELECT isf from isfvals ''')
+    allData = curs.fetchall()
     curs.execute('''select time_bucket(rtime),isf from isfvals''')
     bucketed = curs.fetchall()
     bucket_list = [ [ row[1] for row in bucketed if row[0] == b ]
                     for b in range(0,24,2) ]
-    return (all, bucket_list)
+    return(allData,bucket_list)
