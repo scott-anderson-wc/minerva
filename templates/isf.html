@@ -5,6 +5,10 @@
 
 <h2> {{page_title}} </h2> 
 
+<form method = "POST" action = "{{script}}">
+  <input type = "submit" name = "submit" value = "Next"> 
+</form> 
+
 {% if isf_trouble %}
 <div id = "error">
   <p>There was some trouble calculating the ISF for this time period due to : {{isf_trouble}}</p>
@@ -41,8 +45,5 @@
   </table>
 </div>
 
-<form method = "POST" action = "{{script}}">
-  <input type = "submit" name = "submit" value = "Next"> 
-</form> 
 {% endblock %} 
 								   

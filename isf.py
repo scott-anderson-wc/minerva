@@ -1,5 +1,6 @@
 '''Iterate over ICS2 and compute ISF values'''
 
+import sys
 import MySQLdb
 import dbconn2
 import csv
@@ -90,14 +91,135 @@ def compute_isf():
         #raw_input('another?')
 
 
+# added 12/13/2018 to avoid huge ISF values caused by tiny boluses
+# not yet in use
+min_bolus = 0.1                 
+
+# this is the new implementation to compare with the old one that Mina did
+# which sometimes computes *both* isf_rounded and isf, which seems weird to
+# me -- Scott
+
+def compute_isf_new(conn):
+    curs = conn.cursor(MySQLdb.cursors.DictCursor)
+    curs.execute('delete from isfcalcs') # make sure it is initially empty
+    curs.execute('''select rtime, total_bolus_volume from insulin_carb_smoothed_2 
+                    where corrective_insulin = 1
+                    and year(rtime) = 2018''')
+                    # and total_bolus_volume >= %s''', [min_bolus])
+
+    for row in curs.fetchall():
+        start = row
+        curs.execute('''select rtime,corrective_insulin,bg,cgm,total_bolus_volume 
+                        from insulin_carb_smoothed_2
+                        where rtime >= %s and rtime <= addtime(%s,'2:00')''',
+                     [start['rtime'], start['rtime']])
+        rows = curs.fetchall()
+        first = rows[0]
+        time = first['rtime'] 
+        total_bolus = first['total_bolus_volume']
+        startbg = first['cgm'] #default use cgm value for start 
+        endbg = None  #default use cgm value for end 
+        isf_trouble = None
+        isf_round = None
+        
+        #if there is a bg value for the start use that 
+        if(first['bg']):
+            startbg = first['bg']
+        if(rows[24]['bg']):
+            endbg = rows[24]['bg'] 
+
+        for r in rows:
+
+            #check if there was corrective insulin given within 30min of start time
+            if (r['corrective_insulin'] == 1 and
+                r['rtime'] > start['rtime'] and
+                r['rtime'] <= (start['rtime']+timedelta(minutes=30))):
+                #if so, adjust the time and total bolus given 
+                time = r['rtime']
+                total_bolus = total_bolus +  r['total_bolus_volume']
+
+            #if there was corrective insulin given after 30min of start time,
+            # label as problem 
+            if (r['corrective_insulin'] == 1 and
+                r['rtime']> (start['rtime']+timedelta(minutes=30))):
+                #only trouble if corrective insulin was given after 30min
+                # from start time and before 20min from 2hr mark (100min = 1hr40min)
+                if( r['rtime'] < (start['rtime']+timedelta(minutes=100))): 
+                    curs.execute('''UPDATE insulin_carb_smoothed_2 SET ISF_trouble = %s where rtime = %s''',['extra insulin',start['rtime']])
+                    isf_trouble ='yes';
+                else:
+                    isf_round = True; 
+
+            #if no bg value for start time, find one in within 10min of start time (?) 
+            if (startbg == None and
+                r['rtime'] <= (start['rtime'] + timedelta(minutes=10))):
+                startbg = r['bg'] or r['cgm']
+
+            # similarly find endbg within 10 min of end time
+            if((r['rtime'] >= (start['rtime'] + timedelta(minutes=110))) and
+               ( r['cgm'] or r['bg'])):
+                endbg = r['bg'] or r['cgm']
+                
+            #print r
+        if (endbg and startbg and isf_trouble == None):
+            #compute isf
+            isf = (startbg-endbg)/total_bolus
+            # print "ISF: ", isf
+            #if extra insulin given after 1hr 40min, put isf value in different column 
+            if (isf_round):
+                curs.execute('''UPDATE insulin_carb_smoothed_2 SET ISF_rounded = %s where rtime = %s''',[isf, time])
+            else: 
+                curs.execute('''UPDATE insulin_carb_smoothed_2 SET isf = %s where rtime = %s''', [isf, time])
+            curs.execute('''UPDATE insulin_carb_smoothed_2 SET ISF_trouble = %s where rtime = %s''',['ok', time])
+            # New: record details of the calculation. [Scott 12/14/2019]
+            curs.execute('''insert into isfcalcs(rtime,isf,bg0,bg1,bolus) 
+                            values (%s,%s,%s,%s,%s)''',
+                         [time, isf,startbg,endbg,total_bolus])
+                            
+
+        elif (endbg ==  None and startbg == None):
+            curs.execute('''UPDATE insulin_carb_smoothed_2 SET ISF_trouble = %s where rtime = %s''', ['nobg', start['rtime']])
+
+# ================================================================
+# interface functions to md.py
+
 def get_isf(rtime):
     conn = get_conn()
     curs = conn.cursor(MySQLdb.cursors.DictCursor)
-    curs.execute('''SELECT rtime from insulin_carb_smoothed_2  where corrective_insulin = 1 and rtime > %s''',[rtime])
+    curs.execute('''SELECT rtime from insulin_carb_smoothed_2 
+                    where corrective_insulin = 1 and rtime > %s''',
+                 [rtime])
     start = curs.fetchone()['rtime']
 
     #get table from rtime
-    curs.execute('''SELECT rtime, corrective_insulin, bg, cgm, total_bolus_volume,ISF,ISF_rounded,ISF_trouble from insulin_carb_smoothed_2 where rtime>= %s and rtime<= addtime(%s,'2:00')''',[start,start])
+    curs.execute('''SELECT rtime, corrective_insulin, bg, cgm, total_bolus_volume,ISF,ISF_rounded,ISF_trouble 
+                    from insulin_carb_smoothed_2 
+                    where rtime>= %s and rtime<= addtime(%s,'2:00')''',
+                 [start,start])
+    return curs.fetchall()
+
+def get_isf_next(conn,rtime):
+    '''returns the next ISF value after the given rtime; 
+this lets us implement the 'next" button'''
+    curs = conn.cursor(MySQLdb.cursors.DictCursor)
+    curs.execute('''SELECT rtime from insulin_carb_smoothed_2 
+                    where corrective_insulin = 1 and rtime > %s''',
+                 [rtime])
+    return curs.fetchone()['rtime']
+
+def get_isf_at(conn,rtime):
+    curs = conn.cursor(MySQLdb.cursors.DictCursor)
+    # in case rtime is not exact, find the first value that is >= to the given string
+    curs.execute('''SELECT rtime from insulin_carb_smoothed_2 
+                    where corrective_insulin = 1 and rtime >= %s''',
+                 [rtime])
+    start = curs.fetchone()['rtime']
+
+    #get table from rtime
+    curs.execute('''SELECT rtime, corrective_insulin, bg, cgm, total_bolus_volume,ISF,ISF_rounded,ISF_trouble 
+                    from insulin_carb_smoothed_2 
+                    where rtime>= %s and rtime<= addtime(%s,'2:00')''',
+                 [start,start])
     return curs.fetchall()
 
 def get_all_isf_plus_buckets():
@@ -110,3 +232,16 @@ def get_all_isf_plus_buckets():
     bucket_list = [ [ row[1] for row in bucketed if row[0] == b ]
                     for b in range(0,24,2) ]
     return(allData,bucket_list)
+
+# new code to recompute ISF values from command line
+if __name__ == '__main__':
+    if len(sys.argv) < 2:
+        print('Usage: {} new/old'.format(sys.argv[0]))
+    elif sys.argv[1] == 'new':
+        compute_isf_new()
+    elif sys.argv[1] == 'old':
+        compute_isf()
+    else:
+        print('Usage: {} new/old'.format(sys.argv[0]))
+
+        

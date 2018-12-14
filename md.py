@@ -16,7 +16,9 @@ from flask_mysqldb import MySQL
 from datetime import datetime, timedelta
 import db
 import pandb
+from dbi import get_dsn, get_conn # connect to the database
 import isf
+import date_ui
 
 import json
 import plotly
@@ -319,6 +321,50 @@ def browse_isf(date=None):
                             time = dtime, 
                             page_title ='ISF for ' +dtime) 
     
+# this route uses a slash instead of the space, which looks like %20 in the URL
+# it also looks up the exact date, instead of the *next* one.
+@app.route('/browseisf2/')
+@app.route('/browseisf2/<date>/')
+@app.route('/browseisf2/<date>/<time>', methods = ['GET','POST'])
+def browse_isf2(date=None,time=None):
+    # not sufficiently general, but okay for now
+    first_date, first_time = '2018-01-01','05:50:00'
+    if date == None:
+        date,time = first_date,first_time
+    elif time == None:
+        date = first_date
+    try:
+        rtime_str,rtime_dt = date_ui.to_datestr(date,time)
+    except:
+        flash('invalid date: {} {}'.format(date,time))
+        return redirect(url_for('browse_isf2'))
+    print('browsing w/ start time = {}'.format(rtime_str))
+
+    if request.method == "POST":
+        # POST almost certainly means the user clicked the "next" button
+        # we'll assume that
+        conn = get_conn()
+        print('getting next ISF after {}'.format(rtime_str))
+        start_dt = isf.get_isf_next(conn,rtime_str)
+        return redirect(url_for('browse_isf2',
+                                date=start_dt.strftime('%Y-%m-%d'),
+                                time=start_dt.strftime('%H:%M:%S')))
+    else:
+        conn = get_conn()
+        rows = isf.get_isf_at(conn,rtime_str)
+        trouble = rows[0]['ISF_trouble']
+        # convert 'ok' to empty
+        trouble = '' if trouble == 'ok' else trouble
+        return render_template('isf2.html',
+                               isf_trouble = trouble,
+                               script = url_for('browse_isf2',
+                                                date = rtime_dt.strftime('%Y-%m-%d'),
+                                                time = rtime_dt.strftime('%H:%M:%S')),
+                               rows = rows,
+                               page_title = ('''ISF for {dt:%A}, 
+                                                {dt:%B} {dt.day}, {dt.year},
+                                                at {dt.hour}:{dt.minute:02d}'''
+                                             .format(dt=rtime_dt)))
     
 @app.route('/isfplots/')
 def isfplots():
