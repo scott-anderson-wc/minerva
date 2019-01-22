@@ -200,7 +200,8 @@ create table insulin_carb_smoothed_2 like insulin_carb_grouped;
 
 -- Added these two columns to compute ISF
 alter table insulin_carb_smoothed_2 add column ISF float after corrective_insulin;
-alter table insulin_carb_smoothed_2 add column ISF_trouble enum('yes','no') after ISF;
+alter table remove column ISF_trouble;
+alter table insulin_carb_smoothed_2 add column ISF_trouble varchar(50) after ISF;
 
 
 select 'all done with make-insulin_carb_smoothed.sql';
