@@ -43,6 +43,7 @@ def compute_isf():
             #check if there was corrective insulin given within 30min of start time
             if (r['corrective_insulin'] == 1 and r['rtime'] > start['rtime'] and r['rtime'] <= (start['rtime']+timedelta(minutes=30))):
                 #if so, adjust the time and total bolus given 
+                print 'extra insulin {} at time {}, earlier was {}'.format(r['total_bolus_volume'],r['rtime'],start['rtime'])
                 time = r['rtime']
                 total_bolus = total_bolus +  r['total_bolus_volume']
 
@@ -53,6 +54,7 @@ def compute_isf():
                     curs.execute('''UPDATE insulin_carb_smoothed_2 SET ISF_trouble = %s where rtime = %s''',['extra insulin',start['rtime']])
                     isf_trouble ='yes';
                 else:
+                    print 'ISF for {} has late insulin at {}'.format(start['rtime'],r['rtime'])
                     isf_round = True; 
 
             #if no bg value for start time, find one in within 10min of start time (?) 
@@ -102,17 +104,22 @@ min_bolus = 0.1
 def compute_isf_new(conn):
     curs = conn.cursor(MySQLdb.cursors.DictCursor)
     curs.execute('delete from isfcalcs') # make sure it is initially empty
-    curs.execute('''select rtime, total_bolus_volume from insulin_carb_smoothed_2 
+    curs.execute('''select rtime from insulin_carb_smoothed_2 
                     where corrective_insulin = 1
-                    and year(rtime) = 2018''')
-                    # and total_bolus_volume >= %s''', [min_bolus])
+                    and year(rtime) = 2018
+                    and total_bolus_volume >= %s''',
+                 [min_bolus])
 
     for row in curs.fetchall():
-        start = row
+        start_time = row['rtime']
+        print('start time: {}'.format(start_time))
+        # added condition that isf_trouble is null, so that we can filter out
+        # later rows, say that were merged or were outside grace periods and such
         curs.execute('''select rtime,corrective_insulin,bg,cgm,total_bolus_volume 
                         from insulin_carb_smoothed_2
-                        where rtime >= %s and rtime <= addtime(%s,'2:00')''',
-                     [start['rtime'], start['rtime']])
+                        where isf_trouble is null 
+                        and rtime >= %s and rtime <= addtime(%s,'2:00')''',
+                     [start_time, start_time])
         rows = curs.fetchall()
         first = rows[0]
         time = first['rtime'] 
@@ -122,30 +129,34 @@ def compute_isf_new(conn):
         isf_trouble = None
         isf_round = None
         
-        #if there is a bg value for the start use that 
-        if(first['bg']):
-            startbg = first['bg']
-        if(rows[24]['bg']):
-            endbg = rows[24]['bg'] 
+        #if there is a bg value for the start use that. These might be None
+        startbg = first['bg']
+        endbg = rows[24]['bg'] 
 
+        grace0 = start_time + timedelta(minutes=30)  # starting grace period
+        grace1 = start_time + timedelta(minutes=100) # ending grace period
         for r in rows:
 
-            #check if there was corrective insulin given within 30min of start time
+            #check if there was corrective insulin given within starting grace period
             if (r['corrective_insulin'] == 1 and
-                r['rtime'] > start['rtime'] and
-                r['rtime'] <= (start['rtime']+timedelta(minutes=30))):
+                start_time < r['rtime'] <= grace0):
                 #if so, adjust the time and total bolus given 
-                time = r['rtime']
+                # time = r['rtime']   # no, just the total bolus
                 total_bolus = total_bolus +  r['total_bolus_volume']
+                curs.execute('''UPDATE insulin_carb_smoothed_2 SET ISF_trouble = %s where rtime = %s''',
+                             ['grace0 insulin',r['rtime']])
 
-            #if there was corrective insulin given after 30min of start time,
+            #if there was corrective insulin given after starting grace but before ending grace
             # label as problem 
-            if (r['corrective_insulin'] == 1 and
-                r['rtime']> (start['rtime']+timedelta(minutes=30))):
+            if (r['corrective_insulin'] == 1 and grace0 < r['rtime'] < grace1):
+                curs.execute('''UPDATE insulin_carb_smoothed_2 SET ISF_trouble = %s where rtime = %s''',
+                             ['non-grace insulin',r['rtime']])
+                curs.execute('''UPDATE insulin_carb_smoothed_2 SET ISF_trouble = %s where rtime = %s''',
+                             ['non-grace insulin at time {}'.format(r['time']),start_time])
+                isf_trouble
                 #only trouble if corrective insulin was given after 30min
                 # from start time and before 20min from 2hr mark (100min = 1hr40min)
                 if( r['rtime'] < (start['rtime']+timedelta(minutes=100))): 
-                    curs.execute('''UPDATE insulin_carb_smoothed_2 SET ISF_trouble = %s where rtime = %s''',['extra insulin',start['rtime']])
                     isf_trouble ='yes';
                 else:
                     isf_round = True; 
@@ -238,10 +249,9 @@ if __name__ == '__main__':
     if len(sys.argv) < 2:
         print('Usage: {} new/old'.format(sys.argv[0]))
     elif sys.argv[1] == 'new':
-        compute_isf_new()
+        conn = get_conn()
+        compute_isf_new(conn)
     elif sys.argv[1] == 'old':
         compute_isf()
     else:
         print('Usage: {} new/old'.format(sys.argv[0]))
-
-        
