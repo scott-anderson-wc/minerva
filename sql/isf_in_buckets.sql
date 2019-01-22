@@ -29,9 +29,28 @@ select rtime,isf from insulin_carb_smoothed_2
        select rtime,isf_rounded as isf from insulin_carb_smoothed_2
        where isf_rounded is not null;
 
+select count(*) as 'total number of values' from isfvals;
+
 select time_bucket(rtime) as bucket,count(isf)
 from isfvals
 group by time_bucket(rtime)
 order by bucket;
 
+select rtime,isf,isf_rounded,isf_trouble
+from insulin_carb_smoothed_2
+where isf is not null
+and isf_rounded is not null;
 
+
+-- Changed the ISF calculations in isf.py:compute_isf to store info
+-- about the calculation (start/end bg and bolus into this table.
+
+drop table if exists isfcalcs;
+create table isfcalcs (
+       rtime datetime,
+       isf   float,
+       bg0   integer,
+       bg1   integer,
+       bolus float
+       , primary key (rtime)
+);
