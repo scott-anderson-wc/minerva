@@ -102,14 +102,24 @@ def compute_isf():
     curs.execute('''select rtime, total_bolus_volume from insulin_carb_smoothed_2 
                     where corrective_insulin = 1
                     and year(rtime) = 2018''')
+    rows = curs.fetchall()
 
-    for row in curs.fetchall():
+    # some stats
+    total = len(rows)
+    skipped_before = 0 # events skipped because of insulin in BEFORE period
+    skipped_small = 0  # events skipped because bolus too small
+    skipped_middle = 0 # events skipped because bolus during MIDDLE period
+    skipped_nobg = 0   # events skipped because start or end BG value missing (or both)
+    good_isf = 0       # events with good ISF value 
+
+    for row in rows:
         start = row
         t2 = start['rtime']
         t1 = t2 - timedelta(minutes=100)
 
         if any_bolus_in_time_span(conn, t1, t2 - timedelta(minutes=5)):
-            print 'skipping {} because of insulin in the BEFORE period: {} to {}'.format(t2,t1,t2)
+            # print 'skipping {} because of insulin in the BEFORE period: {} to {}'.format(t2,t1,t2)
+            skipped_before += 1
             curs.execute('''UPDATE insulin_carb_smoothed_2 SET ISF_trouble = %s where rtime = %s''',
                          ['insulin before', t2])
             continue
@@ -121,10 +131,14 @@ def compute_isf():
         bolus_sum, t3 = bolus_sum_during_start(rows,t2)
         if t3 != t2:
             # this is just informational. Can be deleted
-            print 'boluses in beginning from {} to {} sum to {}'.format(t2,t3,bolus_sum)
+            # print 'boluses in beginning from {} to {} sum to {}'.format(t2,t3,bolus_sum)
+            pass
 
         if bolus_sum < min_bolus:
-            print 'bolus sum {} is too small; skipping {}'.format(bolus_sum,t3)
+            # print 'bolus sum {} is too small; skipping {}'.format(bolus_sum,t3)
+            curs.execute('''UPDATE insulin_carb_smoothed_2 SET ISF_trouble = %s where rtime = %s''',
+                         ['bolus too small', t3])
+            skipped_small += 1
             continue
         
         # from now on, use t3 rather than t2, particularly for looking up BG
@@ -134,15 +148,17 @@ def compute_isf():
 
         # Check for no boluses in middle time
         if boluses_in_time_range(rows, t3+timedelta(minutes=5), t4):
-            print 'skipping {} because of insulin in the middle period'.format(t3)
+            # print 'skipping {} because of insulin in the middle period'.format(t3)
+            skipped_middle += 1
             curs.execute('''UPDATE insulin_carb_smoothed_2 SET ISF_trouble = %s where rtime = %s''',
                          ['insulin in middle', t3])
             continue
 
         # Check whether there were boluses in end time
-        boluses_in_end = boluses_in_time_range(rows, t4, t5)
+        boluses_in_end = boluses_in_time_range(rows, t4+timedelta(minutes=5), t5)
         if boluses_in_end:
-            print 'insulin in the end period'.format(t4,t5)
+            # print 'insulin in the end period: {} to {}'.format(t4,t5)
+            pass
             
         # Okay, ready for calculation.
         bg_at_t3 = bg_at_time(rows, t3)
@@ -150,7 +166,8 @@ def compute_isf():
 
         if bg_at_t3 and bg_at_t5:
             isf = (bg_at_t3 - bg_at_t5) / bolus_sum
-            print 'SCOTT isf {} to {} => ( {} - {} ) / {} => {} '.format(t3,t5,bg_at_t3, bg_at_t5, bolus_sum, isf)
+            print 'isf {} to {} => ( {} - {} ) / {} => {} '.format(t3,t5,bg_at_t3, bg_at_t5, bolus_sum, isf)
+            good_isf += 1
             if boluses_in_end:
                 curs.execute('''UPDATE insulin_carb_smoothed_2 SET ISF_trouble = %s, ISF_rounded = %s where rtime = %s''',
                              ['insulin at end', isf, t3])
@@ -160,12 +177,14 @@ def compute_isf():
             curs.execute('''insert into isf_details(rtime,isf,bg0,bg1,bolus) values (%s,%s,%s,%s,%s)''',
                          [t3, isf, bg_at_t3, bg_at_t5, bolus_sum])
         else:
+            skipped_nobg += 1
             if not bg_at_t3:
                 curs.execute('''UPDATE insulin_carb_smoothed_2 set ISF_trouble = %s where rtime = %s''',
                              [ 'nobg', t3]) # 'missing start BG value'
             if not bg_at_t5:
+                print 'nobg at end', t3
                 curs.execute('''UPDATE insulin_carb_smoothed_2 set ISF_trouble = %s where rtime = %s''',
-                             [ 'nobg', t5]) # 'missing end BG value'
+                             [ 'nobg', t3]) # 'missing end BG value'
         #print "start: ", startbg, "end: ", endbg
         # check if any additional insulin given within 30 minutes of start -- done 
         # check if any additional insulin given later in that time range -- done
@@ -175,7 +194,26 @@ def compute_isf():
         # compute ISF based on starting and ending CGM or BG
         # update database using start (the primary key for ICS2)
         #raw_input('another?')
+    # end of loop
+    print '''There were {} corrective insulin events in 2018. 
+{} events were skipped because of insulin before the START period
+{} events were skipped because the bolus was too small
+{} events were skipped because there was a bolus in the MIDDLE period
+{} events were skipped because either start or end BG was not available, leaving
+{} events with a good ISF
+{} skipped + {} good is {} total.'''.format(total, skipped_before, skipped_small, skipped_middle, skipped_nobg, good_isf,
+                                            (skipped_before + skipped_small + skipped_middle + skipped_nobg),
+                                            good_isf, total)
+                                            
 
+def get_first_corrective_insulin(year=2018):
+    conn = get_conn()
+    curs = conn.cursor(MySQLdb.cursors.DictCursor)
+    curs.execute('''SELECT min(rtime) as rtime from insulin_carb_smoothed_2 
+where corrective_insulin = 1 and year(rtime) = %s''',
+                 [year])
+    start = curs.fetchone()['rtime']
+    return start
 
 def get_isf(rtime):
     conn = get_conn()
@@ -184,15 +222,48 @@ def get_isf(rtime):
     start = curs.fetchone()['rtime']
 
     #get table from rtime
-    curs.execute('''SELECT rtime, corrective_insulin, bg, cgm, total_bolus_volume,ISF,ISF_rounded,ISF_trouble from insulin_carb_smoothed_2 where rtime>= %s and rtime<= addtime(%s,'2:00')''',[start,start])
+    curs.execute('''SELECT rtime, corrective_insulin, bg, cgm, total_bolus_volume,ISF,ISF_rounded,ISF_trouble 
+from insulin_carb_smoothed_2 
+where rtime>= %s and rtime<= addtime(%s,'2:00')''',
+                 [start,start])
     return curs.fetchall()
+
+def get_isf_at(conn,rtime):
+    curs = conn.cursor(MySQLdb.cursors.DictCursor)
+    # in case rtime is not exact, find the first value that is >= to the given string
+    curs.execute('''SELECT rtime from insulin_carb_smoothed_2 
+                    where corrective_insulin = 1 and rtime >= %s''',
+                 [rtime])
+    start = curs.fetchone()['rtime']
+
+    #get table from rtime
+    curs.execute('''SELECT rtime, corrective_insulin, bg, cgm, total_bolus_volume,ISF,ISF_rounded,ISF_trouble 
+                    from insulin_carb_smoothed_2 
+                    where rtime>= %s and rtime<= addtime(%s,'2:00')''',
+                 [start,start])
+    return curs.fetchall()
+
+def get_isf_next(conn,rtime):
+    '''returns the next ISF value after the given rtime; 
+this lets us implement the 'next" button'''
+    curs = conn.cursor(MySQLdb.cursors.DictCursor)
+    curs.execute('''SELECT rtime from insulin_carb_smoothed_2 
+                    where corrective_insulin = 1 and rtime > %s''',
+                 [rtime])
+    return curs.fetchone()['rtime']
+
+def get_isf_details(conn,rtime):
+    curs = conn.cursor(MySQLdb.cursors.DictCursor)
+    curs.execute('''SELECT rtime,isf,bg0,bg1,bolus from isf_details where rtime = %s''',
+                 [rtime])
+    return curs.fetchone()
 
 def get_all_isf_plus_buckets():
     conn = get_conn()
     curs = conn.cursor()
-    curs.execute('''SELECT isf from isfvals ''')
+    curs.execute('''SELECT isf from isf_details;''')
     allData = curs.fetchall()
-    curs.execute('''select time_bucket(rtime),isf from isfvals''')
+    curs.execute('''select time_bucket(rtime),isf from isf_details;''')
     bucketed = curs.fetchall()
     bucket_list = [ [ row[1] for row in bucketed if row[0] == b ]
                     for b in range(0,24,2) ]
