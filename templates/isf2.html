@@ -3,6 +3,8 @@
 {% block main_content %}
 <h1> Minerva Project </h1>
 
+<p>If you follow the "next" buttons, each page takes you to a corrective insulin event.</p>
+
 <h2> {{page_title}} </h2> 
 
 <form method = "POST" action = "{{script}}">
@@ -11,11 +13,21 @@
 
 {% if isf_trouble %}
 <div id = "error">
-  <p>There was some trouble calculating the ISF for this time period due to : {{isf_trouble}}</p>
+  <p>There was some trouble calculating the ISF for this time period due to: <strong>{{isf_trouble}}</strong></p>
 </div>
+
+{% else %}
+
+<h2>Calculation</h2>
+
+<p>start bg: <strong>{{details.bg0}}</strong></p>
+<p>end bg: <strong>{{details.bg1}}</strong></p>
+<p>total bolus: <strong>{{details.bolus}}</strong></p>
+<p>ISF: <strong>{{details.isf}}</strong></p>
 
 {% endif %}
   
+
 <div id = "table">
   <style scoped>
     .time { width: 20em; }

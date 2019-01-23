@@ -17,7 +17,7 @@ from datetime import datetime, timedelta
 import db
 import pandb
 from dbi import get_dsn, get_conn # connect to the database
-import isf
+import isf2 as isf
 import date_ui
 
 import json
@@ -328,7 +328,8 @@ def browse_isf(date=None):
 @app.route('/browseisf2/<date>/<time>', methods = ['GET','POST'])
 def browse_isf2(date=None,time=None):
     # not sufficiently general, but okay for now
-    first_date, first_time = '2018-01-01','05:50:00'
+    first = isf.get_first_corrective_insulin(year=2018)
+    first_date, first_time = (first.strftime('%Y-%m-%d'), first.strftime('%H:%M:%S'))
     if date == None:
         date,time = first_date,first_time
     elif time == None:
@@ -355,12 +356,15 @@ def browse_isf2(date=None,time=None):
         trouble = rows[0]['ISF_trouble']
         # convert 'ok' to empty
         trouble = '' if trouble == 'ok' else trouble
+        details = isf.get_isf_details(conn,rtime_dt)
         return render_template('isf2.html',
                                isf_trouble = trouble,
                                script = url_for('browse_isf2',
                                                 date = rtime_dt.strftime('%Y-%m-%d'),
                                                 time = rtime_dt.strftime('%H:%M:%S')),
                                rows = rows,
+                               details = details,
+                               # decoration
                                page_title = ('''ISF for {dt:%A}, 
                                                 {dt:%B} {dt.day}, {dt.year},
                                                 at {dt.hour}:{dt.minute:02d}'''
