@@ -166,7 +166,7 @@ def compute_isf():
 
         if bg_at_t3 and bg_at_t5:
             isf = (bg_at_t3 - bg_at_t5) / bolus_sum
-            print 'isf {} to {} => ( {} - {} ) / {} => {} '.format(t3,t5,bg_at_t3, bg_at_t5, bolus_sum, isf)
+            print 'isf {} to {} => ( {} - {} ) / {} => {:.2f} '.format(t3,t5,bg_at_t3, bg_at_t5, bolus_sum, isf)
             good_isf += 1
             if boluses_in_end:
                 curs.execute('''UPDATE insulin_carb_smoothed_2 SET ISF_trouble = %s, ISF_rounded = %s where rtime = %s''',
