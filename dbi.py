@@ -6,7 +6,7 @@ Conn = None
 def get_dsn():
     global DSN
     if DSN is None:
-        DSN = dbconn2.read_cnf()
+        DSN = dbconn2.read_cnf('/home/hugh9/.my.cnf')
     return DSN
 
 def get_conn(dsn=get_dsn()):
