@@ -10,5 +10,22 @@
   console.log('data is '+isfGraph.data)
   console.log('type is '+typeof(isfGraph))
   Plotly.plot('isfPlot', isfGraph.data, isfGraph.layout, {showLink: false});
- </script>
+ 
+</script>
+
+<div id="isf2014"></div>
+<script src = "https://cdn.plot.ly/plotly-latest.min.js"></script>
+<script>
+  var isfGraph2014 = {{graphJSON2 | safe}}
+  Plotly.plot('isf2014', isfGraph2014.data, isfGraph2014.layout, {showLink: false});
+  console.log("GRAPH: " +  isfGraph2014.layout)
+</script>
+
+<div id = "isf2016"></div>
+<script src = "https://cdn.plot.ly/plotly-latest.min.js"></script>
+<script>
+  var isfGraph2016 = {{graphJSON3 | safe }}
+  Plotly.plot ('isf2016',isfGraph2016.data, isfGraph2016.layout, {showLink: false});
+</script>
+							 
 {% endblock %}
