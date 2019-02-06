@@ -145,6 +145,8 @@ def compute_isf():
         t2 = start['rtime']
         t1 = t2 - timedelta(minutes=100)
 
+        prior_insulin = any_bolus_in_time_span(conn, t1, t2 - timedelta(hours=4))
+
         if any_bolus_in_time_span(conn, t1, t2 - timedelta(minutes=5)):
             # print 'skipping {} because of insulin in the BEFORE period: {} to {}'.format(t2,t1,t2)
             skipped_before += 1
