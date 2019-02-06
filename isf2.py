@@ -23,6 +23,7 @@ Implemented by Scott 1/22/2019
 import MySQLdb
 import dbconn2
 import csv
+import math
 import itertools
 from datetime import datetime, timedelta
 import decimal                  # some MySQL types are returned as type decimal
@@ -93,6 +94,32 @@ whose time is equal to or within 10 minutes of the given time. Returns None if n
     # raise Exception('Never found a useable BG or CGM value')
     return None
 
+def bg_at_time_extended(rows,time):
+    '''search for the first non-empty BG (preferred) or CGM (acceptable) vaue from a row
+whose time is within 10min before or 45min after the given time. Returns None if none
+found'''
+    base_index = 0
+    for r in rows:
+        if r['rtime'] == time:
+            break
+        base_index += 1
+    for delta in [0,1,-1,2,-2,3,4,5,6,7,8,9]:
+        row = rows[base_index + delta]
+        if row['bg']: 
+            return row['bg']
+        if row['cgm']:
+            return row['cgm']
+    return None 
+    
+def get_bg_time_window(curs, time):
+    '''retrieve data from 10 min before to 45min after the given time ''' 
+    start_time = time - timedelta(minutes=10)
+    curs.execute('''select rtime, corrective_insulin, bg,cgm, total_bolus_volume from
+    insulin_carb_smoothed_2 where rtime >= %s and rtime<=addtime(%s,'0:45')''',
+                 [start_time,time])
+    rows = curs.fetchall()
+    return rows
+
 def compute_isf():
     conn = get_conn()
     curs = conn.cursor(MySQLdb.cursors.DictCursor)
@@ -100,8 +127,8 @@ def compute_isf():
     curs.execute('delete from isfvals') # make sure table is initially empty
     curs.execute('delete from isf_details') # make sure table is initially empty
     curs.execute('''select rtime, total_bolus_volume from insulin_carb_smoothed_2 
-                    where corrective_insulin = 1
-                    and year(rtime) = 2018''')
+                    where corrective_insulin = 1 ''')
+                   # and year(rtime) = 2018''')
     rows = curs.fetchall()
 
     # some stats
@@ -109,7 +136,8 @@ def compute_isf():
     skipped_before = 0 # events skipped because of insulin in BEFORE period
     skipped_small = 0  # events skipped because bolus too small
     skipped_middle = 0 # events skipped because bolus during MIDDLE period
-    skipped_nobg = 0   # events skipped because start or end BG value missing (or both)
+    skipped_nobg_beg = 0   # events skipped because start or end BG value missing (or both)
+    skipped_nobg_end = 0
     good_isf = 0       # events with good ISF value 
 
     for row in rows:
@@ -147,7 +175,7 @@ def compute_isf():
         t5 = t4 + timedelta(minutes=20)
 
         # Check for no boluses in middle time
-        if boluses_in_time_range(rows, t3+timedelta(minutes=5), t4):
+        if boluses_in_time_range(rows, t3+timedelta(minutes=5), t4-timedelta(minutes=5)):
             # print 'skipping {} because of insulin in the middle period'.format(t3)
             skipped_middle += 1
             curs.execute('''UPDATE insulin_carb_smoothed_2 SET ISF_trouble = %s where rtime = %s''',
@@ -155,18 +183,21 @@ def compute_isf():
             continue
 
         # Check whether there were boluses in end time
-        boluses_in_end = boluses_in_time_range(rows, t4+timedelta(minutes=5), t5)
+        boluses_in_end = boluses_in_time_range(rows, t4, t5)
+        #boluses_in_time_range(rows, t4+timedelta(minutes=5), t5)
         if boluses_in_end:
             # print 'insulin in the end period: {} to {}'.format(t4,t5)
             pass
             
         # Okay, ready for calculation.
         bg_at_t3 = bg_at_time(rows, t3)
-        bg_at_t5 = bg_at_time(rows, t5)
+        bg_rows = get_bg_time_window(curs,t5)
+        bg_at_t5 = bg_at_time_extended(bg_rows,t5)
+        #bg_at_t5 = bg_at_time(rows, t5)
 
         if bg_at_t3 and bg_at_t5:
             isf = (bg_at_t3 - bg_at_t5) / bolus_sum
-            print 'isf {} to {} => ( {} - {} ) / {} => {:.2f} '.format(t3,t5,bg_at_t3, bg_at_t5, bolus_sum, isf)
+            #print 'isf {} to {} => ( {} - {} ) / {} => {:.2f} '.format(t3,t5,bg_at_t3, bg_at_t5, bolus_sum, isf)
             good_isf += 1
             if boluses_in_end:
                 curs.execute('''UPDATE insulin_carb_smoothed_2 SET ISF_trouble = %s, ISF_rounded = %s where rtime = %s''',
@@ -177,12 +208,16 @@ def compute_isf():
             curs.execute('''insert into isf_details(rtime,isf,bg0,bg1,bolus) values (%s,%s,%s,%s,%s)''',
                          [t3, isf, bg_at_t3, bg_at_t5, bolus_sum])
         else:
-            skipped_nobg += 1
+            #skipped_bg += 1
+            skipped = False  
             if not bg_at_t3:
+                skipped_nobg_beg += 1
+                skipped = True
                 curs.execute('''UPDATE insulin_carb_smoothed_2 set ISF_trouble = %s where rtime = %s''',
                              [ 'nobg', t3]) # 'missing start BG value'
-            if not bg_at_t5:
-                print 'nobg at end', t3
+            if not bg_at_t5 and not skipped:
+                skipped_nobg_end += 1
+                #print 'nobg at end', t3
                 curs.execute('''UPDATE insulin_carb_smoothed_2 set ISF_trouble = %s where rtime = %s''',
                              [ 'nobg', t3]) # 'missing end BG value'
         #print "start: ", startbg, "end: ", endbg
@@ -195,14 +230,15 @@ def compute_isf():
         # update database using start (the primary key for ICS2)
         #raw_input('another?')
     # end of loop
-    print '''There were {} corrective insulin events in 2018. 
+    print '''There were {} corrective insulin events from 2014 -  2018. 
 {} events were skipped because of insulin before the START period
 {} events were skipped because the bolus was too small
 {} events were skipped because there was a bolus in the MIDDLE period
-{} events were skipped because either start or end BG was not available, leaving
+{} events were skipped because start BG was not available, 
+{} events were skipped because end BG was not available, leaving
 {} events with a good ISF
-{} skipped + {} good is {} total.'''.format(total, skipped_before, skipped_small, skipped_middle, skipped_nobg, good_isf,
-                                            (skipped_before + skipped_small + skipped_middle + skipped_nobg),
+{} skipped + {} good is {} total.'''.format(total, skipped_before, skipped_small, skipped_middle, skipped_nobg_beg,skipped_nobg_end,good_isf,
+                                            (skipped_before + skipped_small + skipped_middle + skipped_nobg_beg + skipped_nobg_end),
                                             good_isf, total)
                                             
 
@@ -269,6 +305,47 @@ def get_all_isf_plus_buckets():
                     for b in range(0,24,2) ]
     return(allData,bucket_list)
 
+def get_isf_for_years(start_year,end_year):
+    conn = get_conn()
+    curs = conn.cursor()
+    curs.execute('''SELECT isf from isf_details where year(rtime) >= %s and year(rtime)<= %s''',[start_year, end_year])
+    allData = curs.fetchall()
+
+    curs.execute('''SELECT time_bucket(rtime), isf from isf_details where year(rtime)>= %s and year(rtime) <= %s''',
+                 [start_year, end_year])
+    bucketed = curs.fetchall()
+    bucket_list = [[ row[1] for row in bucketed if row[0] == b ]for b in range(0,24,2)]
+
+    return (allData, bucket_list)
+                   
+def get_tvalue():
+    conn = get_conn()
+    curs = conn.cursor(MySQLdb.cursors.DictCursor)
+
+    curs.execute('''SELECT AVG(isf), COUNT(isf), STD(isf) from isf_details where year(rtime) >= 2014 and year(rtime)<=2016''')
+    first = curs.fetchone()
+
+    curs.execute('''SELECT AVG(isf), COUNT(isf), STD(isf) from isf_details where year(rtime) >= 2016 and year(rtime)<=2018''')
+    second = curs.fetchone()
+
+    #print first
+    
+    average14 = first['AVG(isf)']
+    count14 = first['COUNT(isf)']
+    std14 = first['STD(isf)']
+
+    average18 = second['AVG(isf)']
+    count18 = second['COUNT(isf)']
+    std18 = second['STD(isf)']
+
+    se1 = (std14 ** 2)/count14
+    se2 = (std18 ** 2)/count18
+    denom = math.sqrt(se1+se2)
+    numerator = average14-average18
+
+    tval = numerator/denom
+
+    print "T-VALUE : ", tval
 # new code to recompute ISF values from command line
 if __name__ == '__main__':
     compute_isf()
