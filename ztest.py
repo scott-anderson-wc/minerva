@@ -8,7 +8,7 @@ def ztest(condition):
     curs.execute('''
 select {cond} as grp, avg(isf) as mean, stddev(isf) as sd,count(isf) as n
 from isf_details
-where year(rtime)=2018
+where year(rtime) >= 2017
 group by {cond}
     '''.format(cond=condition))
     (grp1, mean1, sd1, n1) = curs.fetchone()
@@ -23,6 +23,7 @@ group by {cond}
     return (mean1, mean2, diff, sp, t)
 
 if __name__ == '__main__':
-    print ztest('month(rtime)<6')
+    # print ztest('year(rtime) < 2017')
+    print ztest('bg0 > 200')
                  
     
