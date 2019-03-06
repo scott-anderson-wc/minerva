@@ -586,8 +586,108 @@ def isf_compare():
                            graphJSON_8pm = graphJSON8pm,
                            graphJSON_10pm = graphJSON10pm) 
                      
-    
+@app.route('/isfcompareBG/')
+def isf_compare_bg():
+    (less_than, greater_than) = isf.get_isf_for_bg('200')
 
+    less_than_1 = go.Box(y = less_than[0], name = "bg<200")
+    less_than_2 = go.Box(y = less_than[1], name = "bg<200")
+    less_than_3 = go.Box(y = less_than[2], name = "bg<200")
+    less_than_4 = go.Box(y = less_than[3], name = "bg<200")
+    less_than_5 = go.Box(y = less_than[4], name = "bg<200")
+    less_than_6 = go.Box(y = less_than[5], name = "bg<200")
+    less_than_7 = go.Box(y = less_than[6], name = "bg<200")
+    less_than_8 = go.Box(y = less_than[7], name = "bg<200")
+    less_than_9 = go.Box(y = less_than[8], name = "bg<200")
+    less_than_10 = go.Box(y = less_than[9], name = "bg<200")
+    less_than_11 = go.Box(y = less_than[10], name = "bg<200")
+    less_than_12 = go.Box(y = less_than[11], name = "bg<200")
+
+    greater_than_1 = go.Box(y = greater_than[0], name = "bg>200")
+    greater_than_2 = go.Box(y = greater_than[1], name = "bg>200")
+    greater_than_3 = go.Box(y = greater_than[2], name = "bg>200")
+    greater_than_4 = go.Box(y = greater_than[3], name = "bg>200")
+    greater_than_5 = go.Box(y = greater_than[4], name = "bg>200")
+    greater_than_6 = go.Box(y = greater_than[5], name = "bg>200")
+    greater_than_7 = go.Box(y = greater_than[6], name = "bg>200")
+    greater_than_8 = go.Box(y = greater_than[7], name = "bg>200")
+    greater_than_9 = go.Box(y = greater_than[8], name = "bg>200")
+    greater_than_10 = go.Box(y = greater_than[9], name = "bg>200")
+    greater_than_11 = go.Box(y = greater_than[10], name = "bg>200")
+    greater_than_12 = go.Box(y = greater_than[11], name = "bg>200")
+
+    yaxis_dict = dict(title = "mgdl/unit",
+                      zeroline = True,
+                      zerolinecolor = '#800000',
+                      showline = False,
+                      rangemode = 'tozero')
+
+    layout_0am = go.Layout(title = ('isf values from 0am-2am'), width = 1000, height = 800, yaxis = yaxis_dict)
+    graph_0am = go.Figure(data = [less_than_1, greater_than_1], layout = layout_0am)
+    graphJSON0am = json.dumps(graph_0am,  cls= plotly.utils.PlotlyJSONEncoder)
+
+    layout_2am = go.Layout(title = ('isf values from 2am-4am'), width = 1000, height = 800, yaxis = yaxis_dict)
+    graph_2am = go.Figure(data = [less_than_2, greater_than_2], layout = layout_2am)
+    graphJSON2am = json.dumps(graph_2am, cls = plotly.utils.PlotlyJSONEncoder)
+
+    layout_4am = go.Layout(title = ('isf values from 4am-6am'), width = 1000, height = 800, yaxis = yaxis_dict)
+    graph_4am = go.Figure(data = [less_than_3, greater_than_3], layout = layout_4am)
+    graphJSON4am = json.dumps(graph_4am, cls = plotly.utils.PlotlyJSONEncoder)
+
+    layout_6am = go.Layout(title = ('isf values from 6am-8am'), width = 1000, height = 800, yaxis = yaxis_dict)
+    graph_6am = go.Figure(data = [less_than_4, greater_than_4], layout = layout_6am)
+    graphJSON6am = json.dumps(graph_6am, cls = plotly.utils.PlotlyJSONEncoder)
+
+    layout_8am =  go.Layout(title = ('isf values from 8am-10am'), width = 1000,height= 800, yaxis = yaxis_dict)
+    graph_8am = go.Figure(data = [less_than_5, greater_than_5], layout = layout_8am)
+    graphJSON8am = json.dumps(graph_8am, cls = plotly.utils.PlotlyJSONEncoder) 
+
+    layout_10am = go.Layout (title = ('isf values from 10am-12pm'), width = 1000, height = 800, yaxis = yaxis_dict)
+    graph_10am = go.Figure (data = [less_than_6, greater_than_6], layout = layout_10am)
+    graphJSON10am = json.dumps (graph_10am, cls = plotly.utils.PlotlyJSONEncoder)
+
+    layout_12pm = go.Layout(title = ('isf values from 12pm-2pm'), width = 1000, height = 800, yaxis = yaxis_dict)
+    graph_12pm = go.Figure(data = [less_than_7, greater_than_7], layout = layout_12pm)
+    graphJSON12pm = json.dumps(graph_12pm, cls = plotly.utils.PlotlyJSONEncoder)
+
+    layout_2pm = go.Layout(title = ('isf values from 2pm-4pm'), width = 1000, height = 800, yaxis = yaxis_dict)
+    graph_2pm = go.Figure(data = [less_than_8, greater_than_8], layout = layout_2pm)
+    graphJSON2pm = json.dumps (graph_2pm, cls = plotly.utils.PlotlyJSONEncoder)
+
+    layout_4pm = go.Layout(title = ('isf values from 4pm-6pm'), width = 1000, height = 800, yaxis = yaxis_dict)
+    graph_4pm = go.Figure(data = [less_than_9, greater_than_9], layout = layout_4pm)
+    graphJSON4pm = json.dumps(graph_4pm, cls = plotly.utils.PlotlyJSONEncoder)
+
+    layout_6pm = go.Layout(title = ('isf values from 6pm-8pm'), width = 1000, height = 800, yaxis = yaxis_dict)
+    graph_6pm = go.Figure(data = [less_than_10, greater_than_10], layout = layout_6pm)
+    graphJSON6pm = json.dumps (graph_6pm, cls = plotly.utils.PlotlyJSONEncoder)
+
+    layout_8pm = go.Layout(title = ('isf values from 8pm-10pm'), width = 1000, height = 800, yaxis = yaxis_dict)
+    graph_8pm = go.Figure(data = [less_than_11, greater_than_12], layout = layout_8pm)
+    graphJSON8pm = json.dumps(graph_8pm,cls=plotly.utils.PlotlyJSONEncoder)
+
+    layout_10pm = go.Layout(title = ('isf values from 10pm-12am'), width = 1000, height = 800, yaxis = yaxis_dict)
+    graph_10pm = go.Figure(data = [less_than_12, greater_than_12], layout = layout_10pm)
+    graphJSON10pm = json.dumps(graph_10pm, cls = plotly.utils.PlotlyJSONEncoder)
+
+    return render_template('isfcompare.html',
+                            version = app.config['VERSION'],
+                            page_title = 'Minerva Compare ISF Values',
+                            graphJSON_0am = graphJSON0am,
+                            graphJSON_2am = graphJSON2am,
+                            graphJSON_4am = graphJSON4am,
+                            graphJSON_6am = graphJSON6am,
+                            graphJSON_8am = graphJSON8am,
+                            graphJSON_10am = graphJSON10am,
+                            graphJSON_12pm = graphJSON12pm,
+                            graphJSON_2pm = graphJSON2pm,
+                            graphJSON_4pm = graphJSON4pm,
+                            graphJSON_6pm = graphJSON6pm,
+                            graphJSON_8pm = graphJSON8pm,
+                            graphJSON_10pm = graphJSON10pm) 
+
+     
+     
 @app.teardown_appcontext
 def teardown_db(exception):
     conn = getattr(g, 'conn', None)
