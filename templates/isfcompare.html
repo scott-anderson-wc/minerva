@@ -1,0 +1,93 @@
+{% extends "b.html" %}
+
+{% block main_content %}
+
+<div id="isfPlot0am"></div>
+<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+
+<script>
+  var isfGraph0am = {{graphJSON_0am | safe}}
+  Plotly.plot('isfPlot0am', isfGraph0am.data,isfGraph0am.layout, {showLink: false});
+</script>
+
+<div id="isfPlot2am"></div>
+<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+<script>
+  var isfGraph2am = {{graphJSON_2am | safe}}
+  Plotly.plot('isfPlot2am', isfGraph2am.data, isfGraph2am.layout, {showLink: false});
+</script>
+
+<div id="isfPlot4am"></div>
+<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+<script>
+  var isfGraph4am = {{graphJSON_4am | safe}}
+  Plotly.plot('isfPlot4am', isfGraph4am.data, isfGraph4am.layout, {showLink: false});
+</script>
+
+<div id="isfPlot6am"></div>
+<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+<script>
+  var isfGraph6am = {{graphJSON_6am | safe}}
+  Plotly.plot('isfPlot6am', isfGraph6am.data, isfGraph6am.layout, {showLink: false});
+</script>
+
+<div id="isfPlot0\8am"></div>
+<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+<script>
+  var isfGraph8am = {{graphJSON_8am | safe}}
+  Plotly.plot('isfPlot8am', isfGraph8am.data, isfGraph8am.layout, {showLink: false});
+</script>
+
+<div id="isfPlot10am"></div>
+<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+<script>
+  var isfGraph10am = {{graphJSON_10am | safe}}
+  Plotly.plot('isfPlot10am', isfGraph10am.data, isfGraph10am.layout, {showLink: false});
+</script>
+
+<div id="isfPlot12pm"></div>
+<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+<script>
+  var isfGraph12pm = {{graphJSON_12pam | safe}}
+  Plotly.plot('isfPlot12pm', isfGraph12pm.data, isfGraph12pm.layout, {showLink: false});
+</script>
+
+<div id="isfPlot2pm"></div>
+<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+<script>
+  var isfGraph2pm = {{graphJSON_2pm | safe}}
+  Plotly.plot('isfPlot2pm', isfGraph2pm.data, isfGraph2pm.layout, {showLink: false});
+</script>
+
+<div id="isfPlot4pm"></div>
+<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+<script>
+  var isfGraph4pm = {{graphJSON_4pm | safe}}
+  Plotly.plot('isfPlot4pm', isfGraph4pm.data, isfGraph4pm.layout, {showLink: false});
+</script>
+
+<div id="isfPlot6pm"></div>
+<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+<script>
+  var isfGraph6pm = {{graphJSON_6pm | safe}}
+  Plotly.plot('isfPlot6pm', isfGraph6pm.data, isfGraph6pm.layout, {showLink: false});
+</script>
+
+<div id="isfPlot8pm"></div>
+<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+<script>
+  var isfGraph8pm = {{graphJSON_8pm | safe}}
+  Plotly.plot('isfPlot8pm', isfGraph8pm.data, isfGraph8pm.layout, {showLink: false});
+</script>
+
+<div id="isfPlot10pm"></div>
+<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+<script>
+  var isfGraph10pm = {{graphJSON_10pm | safe}}
+  Plotly.plot('isfPlot10pm', isfGraph10pm.data, isfGraph10pm.layout, {showLink: false});
+</script>
+
+
+
+
+{% endblock %}

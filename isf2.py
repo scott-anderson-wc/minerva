@@ -26,7 +26,7 @@ import dbconn2
 import csv
 import math
 import itertools
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta,date
 import decimal                  # some MySQL types are returned as type decimal
 from dbi import get_dsn, get_conn # connect to the database
 import date_ui
@@ -144,15 +144,16 @@ def compute_isf():
     skipped_nobg_beg = 0   # events skipped because start or end BG value missing (or both)
     skipped_nobg_end = 0
     good_isf = 0       # events with good ISF value 
-
+    insulin_before = 0 #events with insulin 4 hours prior to the event 
+    
     for row in rows:
         start = row
         t2 = start['rtime']
         t1 = t2 - timedelta(minutes=100)
 
-        prior_insulin = any_bolus_in_time_span(conn, t1, t2 - timedelta(hours=4))
+        prior_insulin = any_bolus_in_time_span(conn, t2 - timedelta(hours=4),t1)
 
-        if any_bolus_in_time_span(conn, t1, t2 - timedelta(minutes=5)):
+        if any_bolus_in_time_span(conn, t1,t2 - timedelta(minutes=5)):
             # print 'skipping {} because of insulin in the BEFORE period: {} to {}'.format(t2,t1,t2)
             skipped_before += 1
             curs.execute('''UPDATE insulin_carb_smoothed_2 SET ISF_trouble = %s where rtime = %s''',
@@ -203,9 +204,9 @@ def compute_isf():
         bg_at_t3 = bg_at_time(rows, t3)
         bg_rows = get_bg_time_window(curs,t5)
         bg_at_t5 = bg_at_time_extended(bg_rows,t5)
-        #bg_at_t5 = bg_at_time(rows, t5)
-
         if bg_at_t3 and bg_at_t5:
+            if prior_insulin:
+                insulin_before += 1
             isf = (bg_at_t3 - bg_at_t5) / bolus_sum
             #print 'isf {} to {} => ( {} - {} ) / {} => {:.2f} '.format(t3,t5,bg_at_t3, bg_at_t5, bolus_sum, isf)
             good_isf += 1
@@ -215,8 +216,9 @@ def compute_isf():
             else: 
                 curs.execute('''UPDATE insulin_carb_smoothed_2 SET isf = %s where rtime = %s''', [isf, t3])
             # New: record details of the calc in the isfvals table. [Scott 12/13/2019]
-            curs.execute('''insert into isf_details(rtime,isf,bg0,bg1,bolus) values (%s,%s,%s,%s,%s)''',
-                         [t3, isf, bg_at_t3, bg_at_t5, bolus_sum])
+            #curs.execute('''insert into isf_details(rtime,isf,bg0,bg1,bolus) values (%s,%s,%s,%s,%s)''',
+                        # [t3, isf, bg_at_t3, bg_at_t5, bolus_sum])
+            curs.execute('''insert into isf_details(rtime,isf,bg0,bg1,bolus,prior_insulin) values (%s,%s,%s,%s,%s,%s)''',[t3,isf,bg_at_t3,bg_at_t5, bolus_sum,prior_insulin])
         else:
             #skipped_bg += 1
             skipped = False  
@@ -246,10 +248,11 @@ def compute_isf():
 {} events were skipped because there was a bolus in the MIDDLE period
 {} events were skipped because start BG was not available, 
 {} events were skipped because end BG was not available, leaving
-{} events with a good ISF
-{} skipped + {} good is {} total.'''.format(total, skipped_before, skipped_small, skipped_middle, skipped_nobg_beg,skipped_nobg_end,good_isf,
+{} events with a good ISF and 
+{} good events with insulin within 4 hours before event 
+{} skipped + {} good is {} total.'''.format(total, skipped_before, skipped_small, skipped_middle, skipped_nobg_beg,skipped_nobg_end,good_isf,insulin_before,
                                             (skipped_before + skipped_small + skipped_middle + skipped_nobg_beg + skipped_nobg_end),
-                                            good_isf, total)
+                                            good_isf,total)
                                             
 
 def get_first_corrective_insulin(year=2018):
@@ -328,34 +331,43 @@ def get_isf_for_years(start_year,end_year):
 
     return (allData, bucket_list)
                    
-def get_tvalue():
+
+def get_isf_for_bg (bg_value):
     conn = get_conn()
-    curs = conn.cursor(MySQLdb.cursors.DictCursor)
+    curs = conn.cursor()
 
-    curs.execute('''SELECT AVG(isf), COUNT(isf), STD(isf) from isf_details where year(rtime) >= 2014 and year(rtime)<=2016''')
-    first = curs.fetchone()
+    curs.execute('''SELECT time_bucket(rtime), isf from isf_details where bg0 < %s ''', [bg_value])
+    less_than = curs.fetchall()
+    less_than_list = [ [ row[1] for row in less_than if row[0] == b] for b in range(0,24,2)]
 
-    curs.execute('''SELECT AVG(isf), COUNT(isf), STD(isf) from isf_details where year(rtime) >= 2016 and year(rtime)<=2018''')
-    second = curs.fetchone()
+    curs.execute('''SELECT time_bucket(rtime), isf from isf_details where bg0 > %s ''', [bg_value])
+    greater_than = curs.fetchall()
+    greater_than_list = [[row[1] for row in greater_than if row[0] == b] for b in range(0,24,2)]
 
-    #print first
     
-    average14 = first['AVG(isf)']
-    count14 = first['COUNT(isf)']
-    std14 = first['STD(isf)']
+    return (less_than_list, greater_than_list) 
+    
+def getRecentISF (time_bucket, num_weeks, min_data):
+    print num_weeks
+    #time_end = date.today() - timedelta(weeks = num_weeks)
+    time_end = datetime.strptime("18/09/10", '%y/%m/%d') - timedelta(weeks = num_weeks)
+    print time_end
+    conn = get_conn ()
+    curs = conn.cursor()
 
-    average18 = second['AVG(isf)']
-    count18 = second['COUNT(isf)']
-    std18 = second['STD(isf)']
+    curs.execute ('''SELECT isf FROM isf_details where time_bucket(rtime) = %s and rtime > %s ''', [time_bucket, time_end])
 
-    se1 = (std14 ** 2)/count14
-    se2 = (std18 ** 2)/count18
-    denom = math.sqrt(se1+se2)
-    numerator = average14-average18
+    if (curs.rowcount >= min_data):
+        results = curs.fetchall()
+        isf = [result[0] for result in results]
+        isf = sorted(isf)
+        #print num_weeks, isf 
+        return num_weeks,isf
+    else: 
+        num_weeks = num_weeks * 2 
+        return getRecentISF(time_bucket, num_weeks, min_data)
+    
 
-    tval = numerator/denom
-
-    print "T-VALUE : ", tval
 # new code to recompute ISF values from command line
 if __name__ == '__main__':
     compute_isf()
