@@ -1,11 +1,13 @@
 import os
 from flask import (Flask, render_template, make_response, request, redirect, url_for,
                    session, flash, send_from_directory, g)
+from flask import jsonify
 from werkzeug import secure_filename
 
 import time
 import logging
 import random
+import math
 
 LOGFILE='app.log'
 LOGLEVEL=logging.DEBUG
@@ -687,7 +689,29 @@ def isf_compare_bg():
                             graphJSON_10pm = graphJSON10pm) 
 
      
-     
+@app.route ('/getRecentISF/<time_bucket>/<num_weeks>/<min_data>/')
+def getRecentISF(time_bucket,num_weeks, min_data):
+
+    num_weeks = int(num_weeks) 
+    num_weeks, isf_vals = isf.getRecentISF(int(time_bucket),num_weeks,int( min_data))
+    num_data = len(isf_vals)
+    
+    q1_index = ((num_data +1)/4)-1
+    q1 = isf_vals[int(math.floor(q1_index))] + .5 * (isf_vals[int(math.ceil(q1_index)) - int(math.floor(q1_index))])
+
+    q2_index = (((num_data +1)/4)-1) * 2
+    q2 = isf_vals[int(math.floor(q2_index))] + .5 * (isf_vals[int(math.ceil(q2_index)) - int(math.floor(q2_index))])
+
+    q3_index = (((num_data +1)/4)-1) * 3
+    q3 = isf_vals[int(math.floor(q3_index))] + .5 * (isf_vals[int(math.ceil(q3_index)) - int(math.floor(q3_index))])
+
+    current_time = datetime.now().strftime('%A, %d %B %Y')
+    
+    return jsonify(Q1 = q1, Q2 = q2, Q3 = q3, time_bucket = time_bucket, weeks_of_data = num_weeks, number_of_data = num_data, min_number_of_data = min_data, timestamp_of_calculation = current_time)
+
+
+    
+    
 @app.teardown_appcontext
 def teardown_db(exception):
     conn = getattr(g, 'conn', None)

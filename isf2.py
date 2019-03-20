@@ -25,7 +25,7 @@ import dbconn2
 import csv
 import math
 import itertools
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta,date
 import decimal                  # some MySQL types are returned as type decimal
 from dbi import get_dsn, get_conn # connect to the database
 import date_ui
@@ -339,6 +339,27 @@ def get_isf_for_bg (bg_value):
     
     return (less_than_list, greater_than_list) 
     
+def getRecentISF (time_bucket, num_weeks, min_data):
+    print num_weeks
+    #time_end = date.today() - timedelta(weeks = num_weeks)
+    time_end = datetime.strptime("18/09/10", '%y/%m/%d') - timedelta(weeks = num_weeks)
+    print time_end
+    conn = get_conn ()
+    curs = conn.cursor()
+
+    curs.execute ('''SELECT isf FROM isf_details where time_bucket(rtime) = %s and rtime > %s ''', [time_bucket, time_end])
+
+    if (curs.rowcount >= min_data):
+        results = curs.fetchall()
+        isf = [result[0] for result in results]
+        isf = sorted(isf)
+        #print num_weeks, isf 
+        return num_weeks,isf
+    else: 
+        num_weeks = num_weeks * 2 
+        return getRecentISF(time_bucket, num_weeks, min_data)
+    
+
 # new code to recompute ISF values from command line
 if __name__ == '__main__':
     compute_isf()
