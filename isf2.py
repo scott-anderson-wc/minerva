@@ -1,3 +1,4 @@
+
 '''Iterate over ICS2 and compute ISF values'''
 
 '''This newer version attempts to be more clear about the different criteria
@@ -60,14 +61,18 @@ def any_bolus_in_time_span(conn,start,end):
 def bolus_sum_during_start(rows, t2):
     t3 = t2
     bolus_sum = 0
+    bolus_count = 0
     end_time = t2 + timedelta(minutes=30)
     # print 'end_time',end_time
     for row in rows:
         # print row['rtime'], row['total_bolus_volume']
         if row['rtime'] == end_time:
+            if bolus_count > 2:
+                print 'summed {} corrections!!'.format(bolus_count)
             return bolus_sum, t3
         tbv = row['total_bolus_volume'] 
         if tbv > 0: 
+            bolus_count += 1
             bolus_sum += tbv
             t3 = row['rtime']
     raise Exception('this should not happen')
@@ -182,6 +187,9 @@ def compute_isf():
             skipped_middle += 1
             curs.execute('''UPDATE insulin_carb_smoothed_2 SET ISF_trouble = %s where rtime = %s''',
                          ['insulin in middle', t3])
+            if t2 != t3:
+                curs.execute('''UPDATE insulin_carb_smoothed_2 SET ISF_trouble = %s where rtime = %s''',
+                             ['insulin in middle', t2])
             continue
 
         # Check whether there were boluses in end time
