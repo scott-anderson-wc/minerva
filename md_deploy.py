@@ -50,7 +50,7 @@ app.secret_key = os.urandom(24)
 mysql = MySQL()
 mysql.init_app(app)
 
-@app.route('/displayRecentISF')
+@app.route('/displayRecentISF/')
 def displayRecentISF():
     '''This just displays the page; all the data is gotten by Ajax. See below.'''
     return render_template('isf-display.html')
