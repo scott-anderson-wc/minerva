@@ -1,13 +1,15 @@
 import os
 from flask import (Flask, render_template, make_response, request, redirect, url_for,
                    session, flash, send_from_directory, g)
+from flask import jsonify
 from werkzeug import secure_filename
 
 import time
 import logging
 import random
+import math
 
-LOGFILE='app.log'
+LOGFILE='md_deploy.log'
 LOGLEVEL=logging.DEBUG
 
 from logging.handlers import RotatingFileHandler
@@ -56,11 +58,11 @@ def displayRecentISF():
 @app.route('/getRecentISF/<int:bucket>/<int:weeks>/<int:min_data>/')
 def getRecentISF(bucket,weeks,min_data):
     val = {'Q1': 4, 'Q2': 24, 'Q3': 48,
-           time_bucket: bucket,
-           weeks_of_data: weeks,
-           number_of_data: 55,
-           min_number_of_data: min_data,
-           timestamp_of_calculation: None}
+           'time_bucket': bucket,
+           'weeks_of_data': weeks,
+           'number_of_data': 55,
+           'min_number_of_data': min_data,
+           'timestamp_of_calculation': None}
     return jsonify(val)
 
 
@@ -98,70 +100,10 @@ def isfplots():
                              ,layout = layout)
     graphJSON = json.dumps( graph, cls=plotly.utils.PlotlyJSONEncoder)
 
-    (all_before, bucket_list_before) = isf.get_isf_for_years('2014','2016')
-    all_before_data = [data[0] for data in all_before if data[0]]
-
-    all_before_whisker = go.Box(y = all_before_data, name = 'all isf 2014-2016')
-    bucket14_1 = go.Box(y = bucket_list_before[0], name = '0am-2am')
-    bucket14_2 = go.Box(y = bucket_list_before[1], name ='2am-4am')
-    bucket14_3 = go.Box(y = bucket_list_before[2], name = '4am-6am')
-    bucket14_4 = go.Box(y = bucket_list_before[3], name = '6am-8am')
-    bucket14_5 = go.Box(y = bucket_list_before[4], name = '8am-10am')
-    bucket14_6 = go.Box(y = bucket_list_before[5], name = '10am-12pm')
-    bucket14_7 = go.Box(y = bucket_list_before[6], name = '12pm-14pm')
-    bucket14_8 = go.Box(y = bucket_list_before[7], name = '14pm-16pm')
-    bucket14_9 = go.Box(y = bucket_list_before[8], name = '16pm-18pm')
-    bucket14_10 = go.Box(y = bucket_list_before[9], name = '18pm-20pm')
-    bucket14_11 = go.Box(y = bucket_list_before[10], name = '20pm-22pm')
-    bucket14_12 = go.Box(y = bucket_list_before[11], name = '22pm-24am')
-    
-    layout2 = go.Layout(title = ('isf values from 2014-2016'), width=1500, height= 1000,
-                       yaxis = dict(title='mgdl/unit',
-                                    zeroline = True,
-                                    zerolinecolor='#800000',
-                                    zerolinewidth = 2,
-                                    showline =False,
-                                    rangemode='tozero')
-                       )
-    graph_before = go.Figure(data = [all_before_whisker,bucket14_1,bucket14_2,bucket14_3,bucket14_4,bucket14_5,bucket14_6,bucket14_7,bucket14_8,bucket14_9,bucket14_10,bucket14_11,bucket14_12],layout=layout2)
-    graphJSON2 = json.dumps(graph_before, cls=plotly.utils.PlotlyJSONEncoder)
-
-    (all_after, bucket_list_after) = isf.get_isf_for_years('2016','2018')
-    all_after_data = [data[0] for data in all_after if data[0]]
-    
-    all_after_whisker = go.Box(y = all_after_data, name = 'all isf 2016-2018')
-    bucket16_1 = go.Box(y = bucket_list_after[0], name = '0am-2am')
-    bucket16_2 = go.Box(y = bucket_list_after[1], name = '2am-4am')
-    bucket16_3 = go.Box(y = bucket_list_after[2], name = '4am-6am')
-    bucket16_4 = go.Box(y = bucket_list_after[3], name = '6am-8am')
-    bucket16_5 = go.Box(y = bucket_list_after[4], name = '8am-10am')
-    bucket16_6 = go.Box(y = bucket_list_after[5], name = '10am-12pm')
-    bucket16_7 = go.Box(y = bucket_list_after[6], name = '12pm-14pm')
-    bucket16_8 = go.Box(y = bucket_list_after[7], name = '14pm-16pm')
-    bucket16_9 = go.Box(y = bucket_list_after[8], name = '16pm-18pm')
-    bucket16_10 = go.Box(y= bucket_list_after[9], name = '18pm-20pm')
-    bucket16_11 = go.Box(y = bucket_list_after[10], name = '20pm-22pm')
-    bucket16_12 = go.Box(y = bucket_list_after[11], name = '22pm-24pm')
-    
-    layout3 = go.Layout(title = ('isf vales from 2016-2018'), width = 1500, height = 1000,
-                        yaxis = dict(title = 'mgdl/unit',
-                                     zeroline = True,
-                                     zerolinecolor = '#800000',
-                                     zerolinewidth = 2,
-                                     showline = False,
-                                     rangemode = 'tozero')
-                        )
-
-    graph_after = go.Figure(data = [all_after_whisker, bucket16_1,bucket16_2,bucket16_3,bucket16_4,bucket16_5,bucket16_6,bucket16_7,bucket16_8,bucket16_9,bucket16_10,bucket16_11,bucket16_12], layout = layout3)
-    graphJSON3 = json.dumps(graph_after, cls=plotly.utils.PlotlyJSONEncoder)
-
-    isf.get_tvalue() 
     return render_template('isfplots.html',
                            version = app.config['VERSION'],
                            page_title='Minerva ISF values',
-                           graphJSON = graphJSON,
-                           graphJSON2 = graphJSON2,
-                           graphJSON3= graphJSON3)
+                           graphJSON = graphJSON)
 
 
 @app.teardown_appcontext
