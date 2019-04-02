@@ -374,6 +374,48 @@ def browse_isf2(date=None,time=None):
     
 @app.route('/isfplots/')
 def isfplots():
+    '''shows all ISF data, by bucket'''
+    (all, bucket_list) = isf.get_all_isf_plus_buckets()
+    allData = [data[0] for data in all if data[0]]
+
+    all_whisker = go.Box( y = allData, name = 'all isf')
+    bucket0 = go.Box(y = bucket_list[0], name = '0am-2am')
+    bucket1 = go.Box(y = bucket_list[1], name = '2am-4am')
+    bucket2 = go.Box(y = bucket_list[2], name = '4am-6am')
+    bucket3 = go.Box(y = bucket_list[3], name = '6am-8am')
+    bucket4 = go.Box(y = bucket_list[4], name = '8am-10am')
+    bucket5 = go.Box(y = bucket_list[5], name = '10am-12pm')
+    bucket6 = go.Box(y = bucket_list[6], name = '12pm-14pm')
+    bucket7 = go.Box(y = bucket_list[7], name = '14pm-16pm')
+    bucket8 = go.Box(y = bucket_list[8], name = '16pm-18pm')
+    bucket9 = go.Box(y = bucket_list[9], name = '18pm-20pm')
+    bucket10 = go.Box(y = bucket_list[10], name = '20pm-22pm')
+    bucket11 = go.Box(y = bucket_list[11], name = '22pm-24pm')
+    layout = go.Layout( title = ('isf values'), width = 1500,height = 1000,
+                        yaxis = dict(title='mgdl/unit',
+                                     # the y zeroline is the line where y=0
+                                     zeroline=True,
+                                     zerolinecolor='#800000',
+                                     zerolinewidth=2,
+                                     # this is the vertical line at the left edge
+                                     showline=False,
+                                     rangemode='tozero')
+                        )
+    graph = go.Figure(data = [all_whisker,bucket0,bucket1,bucket2,bucket3
+                              ,bucket4,bucket5
+                              ,bucket6,bucket7,bucket8,bucket9,bucket10,bucket11]
+                             ,layout = layout)
+    graphJSON = json.dumps( graph, cls=plotly.utils.PlotlyJSONEncoder)
+
+    return render_template('isfplots.html',
+                           version = app.config['VERSION'],
+                           page_title='Minerva ISF values',
+                           graphJSON = graphJSON)
+
+
+@app.route('/isfplotsEarlyLate/')
+def isfplotsEarlyLate():
+    '''compares 2014-16 to 2017-2018'''
     (all, bucket_list) = isf.get_all_isf_plus_buckets()
     allData = [data[0] for data in all if data[0]]
 
@@ -471,8 +513,10 @@ def isfplots():
                            graphJSON2 = graphJSON2,
                            graphJSON3= graphJSON3)
 
-@app.route('/isfcompare/')
+@app.route('/isfcompareEarlyLate/')
 def isf_compare():
+    '''shows 2014-2016 versus 2017-2018 but each time bucket is its own plot
+so the early/late distributions can be easily compared.'''
     (all_before, bucket_list_before) = isf.get_isf_for_years('2014', '2016')
     allData_before = [data[0] for data in all_before if data[0]]
 
@@ -689,6 +733,11 @@ def isf_compare_bg():
                             graphJSON_10pm = graphJSON10pm) 
 
      
+@app.route('/displayRecentISF/')
+def displayRecentISF():
+    '''This just displays the page; all the data is gotten by Ajax. See below.'''
+    return render_template('isf-display.html')
+
 @app.route ('/getRecentISF/<time_bucket>/<num_weeks>/<min_data>/')
 def getRecentISF(time_bucket,num_weeks, min_data):
 
