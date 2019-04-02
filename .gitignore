@@ -10,12 +10,15 @@
 # ignore Python byte-compiled files
 *.pyc
 
-# ignore log files
+# ignore log files and other output
 *.log
 *.csv
+*.tsv
 *.output
 *.sh_output
 *.zip
+*.out
+*.txt
 
 venv
 dumps/
