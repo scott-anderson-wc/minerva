@@ -10,46 +10,50 @@
       h1, h2 { display: inline; }
       #box { 
         width: 50%; 
+        min-height: 50%; 
         height: 50%; 
-        margin: auto; 
         background-color: #ccccff; 
-        border: 3px solid blue; 
         position: relative; 
+        margin: 32px auto; /* 32px because hoping the max font size for Q1 and Q3 are 64px */
       }
       #Q1, #Q2, #Q3 {
         position: absolute;
       }
       #Q2 {
-        font-size: 5em;
+        font-size: 3em;
       }
       #Q1, #Q3 {
-        font-size: 3em;
+        font-size: 2em;
       }
       .main-content {
         font-family: Verdana;
         font-size: 2em;
       }
-      #weeks_of_data, #number_of_data {
+      #weeks_of_data, #number_of_data, #time_bucket, #bucket_description, #min_number_of_data, #min_weeks_of_data {
           font-weight: bold;
           font-size: 110%;
       }
+      button, select { border: 1px solid blue; border-radius: 1ex }
       
     </style>
   </head>
   <body>
     <header class="main-header logo-text">
       <h1 title="Minerva Diabetes">MD</h1>
-      <h2>ISF Display</h2>
+      <h2>ISF</h2>
     </header>
     <main class="main-content">
-    <div id="box"><span id="Q3"></span><span id="Q2"></span><span id="Q1"></span></div>
-    <p>Quartiles based on
+      <section id="box_container">
+	<div id="box"><span id="Q3"></span><span id="Q2"></span><span id="Q1"></span></div>
+      </section>
+      <section class="controls">
+	<p>Quartiles based on
       <span id="number_of_data"></span>
       values from the last
       <span id="weeks_of_data"></span>
-      weeks of data for the time_bucket of
-      <span id="time_bucket"></span>
-      (<span id="bucket_description"></span>).</p>
+      weeks of data for time bucket
+      <span id="time_bucket"></span>:
+      <span id="bucket_description"></span></p>
     <p>You requested a minimum of
       <button id="min_number_of_data"></button>
       <input type=number id="input_min_number_of_data" placeholder="min number of data">
@@ -57,9 +61,9 @@
       <button id="min_weeks_of_data"></button>
       <input type=number id="input_min_weeks_of_data" placeholder="min weeks of data">
       weeks of data.</p>
-    <p>These quartiles were last refreshed <span id="timestamp_of_calculation"></span>. 
-    <button id="refresh">refresh now</button> </p>
+    <p>Last <button id="refresh">refresh</button>: <span id="timestamp_of_calculation"></span>.</p>
     <p><form action="{{url_for('isfplots')}}"><button>full ISF display</button></form></p>
+    </section>
     </main>
     <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
     <script>

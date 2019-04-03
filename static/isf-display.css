@@ -29,7 +29,7 @@ p { margin: 0.5em 0px 0px 0px; }
 body {
   display: flex;
   flex-direction: column;
-  font-size: 62.5%;
+  font-size: 50%; /* was 62.5%; */
   background: rgb(149, 194, 215);
 }
 
@@ -46,7 +46,7 @@ a[href='#'] {
   text-align: center;
   text-transform: uppercase;
   font-family: lakeshore;
-  font-size: 3.7em;
+  font-size: 3em;
 }
 
 .main-content {
@@ -56,3 +56,17 @@ a[href='#'] {
   padding: 2ex 1em;
 }
 
+.main-content {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  padding: 2ex 1em;
+}
+
+.main-content section {
+    flex: 1 1 auto;
+}
+
+#box_container {
+    min-height: 50%;
+}
