@@ -7,9 +7,10 @@ var example_ajax_response = {
     Q2: 24,
     Q3: 48,
     time_bucket: 0,
-    weeks_of_data: 4,
+    weeks_of_data: 5,
+    min_weeks_of_data: 4,
     number_of_data: 55,
-    min_number_of_data: 50,
+    min_number_of_data: 40,
     timestamp_of_calculation: null
 };
 var ajax_response = example_ajax_response;
@@ -18,36 +19,36 @@ function updatePage(data) {
     for (let p in data) {
         // the element ids have to match the keys above! 
         let elt = document.getElementById(p);
-        elt.textContent = data[p];
+	if(elt) {
+            elt.textContent = data[p];
+	} else {
+	    console.log('No element with id '+p);
+	}
     }
     $("#input_min_number_of_data").val(ajax_response.min_number_of_data);
+    $("#input_min_weeks_of_data").val(ajax_response.min_weeks_of_data);
     placeQuartiles();
 }
 var load_time_of_data = null;
 
 function loadData() {
-    if (true) {
+    let get_real_data = true;
+    if (get_real_data) {
         let bucket = ajax_response.time_bucket;
-        let weeks = ajax_response.weeks_of_data;
+        let weeks = ajax_response.min_weeks_of_data;
         let min_data = ajax_response.min_number_of_data;
-        let URL_plus = `${URL}${bucket}/${weeks}/${min_data}`;
+        let URL_plus = `${URL}${bucket}/${weeks}/${min_data}/`;
         console.log(URL_plus);
         $.get(URL_plus, function (data) {
 	    ajax_response = data;
 	    data.Q1 = data.Q1.toPrecision(2);
 	    data.Q2 = data.Q2.toPrecision(2);
 	    data.Q3 = data.Q3.toPrecision(2);
+	    data.timestamp_of_calculation = niceDateTimeStr(new Date());
 	    updatePage(data);
 	});
     }
-    else {
-        load_time_of_data = new Date();
-        ajax_response.timestamp_of_calculation = niceDateTimeStr(load_time_of_data);
-        // don't need this, because the back-end can't change the time_bucket, right?
-        // ajax_response.bucket_description = bucketTime(ajax_response.time_bucket);
-        updatePage(ajax_response);
-        placeQuartiles();
-    }
+    updatePage(ajax_response);
 }
 
 function dateStr(d) {
@@ -57,8 +58,8 @@ function dateStr(d) {
     return `${yyyy}-${mm}-${dd}`;
 }
 
-function fullStr(d) {
-    return d.toDateString() + ' ' + d.toTimeString();
+function addTimeString(datestr,d) {
+    return datestr + ' ' + d.toLocaleTimeString();
 }
 
 function niceDateTimeStr(d) {
@@ -68,13 +69,13 @@ function niceDateTimeStr(d) {
     // last day of the previous month.
     yesterday.setDate(yesterday.getDate() - 1);
     if (dateStr(now) === dateStr(d)) {
-        return "Today at " + d.toTimeString();
+        return addTimeString("Today at",d)
     }
     else if (dateStr(yesterday) === dateStr(d)) {
-        return "Yesterday at " + d.toTimeString();
+        return addTimeString("Yesterday at",d)
     }
     else {
-        return fullStr(d);
+        return addTimeString(d.toLocaleDateString(),d);
     }
 }
 
@@ -141,30 +142,35 @@ $("#input_min_number_of_data").on('change', function(event) {
         $("#input_min_number_of_data").val(ajax_response.min_number_of_data);
     }
     ajax_response.min_number_of_data = num;
-    $("#min_number_of_data").text(num);
+    $("#min_number_of_data").text(num).show();
     $("#input_min_number_of_data").blur().hide();
+    loadData();
 });
 $("#min_number_of_data").on('click', function(event) {
     $("#input_min_number_of_data").show().focus();
+    $("#min_number_of_data").hide();
 });
 
-$("#input_weeks_of_data").hide().on('change', function(event) {
+$("#input_min_weeks_of_data").hide().on('change', function(event) {
     event.preventDefault();
-    var str = $("#input_weeks_of_data").val();
+    var str = $("#input_min_weeks_of_data").val();
+    console.log('min weeks to '+str);
     try {
         var num = parseInt(str, 10);
     }
     catch (err) {
         console.log(`Not a Number: ${str} error is ` + err);
         // restore old value
-        $("#input_weeks_of_data").val(ajax_response.weeks_of_data);
+        $("#input_min_weeks_of_data").val(ajax_response.weeks_of_data);
     }
-    ajax_response.weeks_of_data = num;
-    $("#weeks_of_data").text(num);
-    $("#input_weeks_of_data").blur().hide();
+    ajax_response.min_weeks_of_data = num;
+    $("#min_weeks_of_data").text(num).show();
+    $("#input_min_weeks_of_data").blur().hide();
+    loadData();
 });
-$("#weeks_of_data").on('click', function(event) {
-    $("#input_weeks_of_data").show().focus();
+$("#min_weeks_of_data").on('click', function(event) {
+    $("#input_min_weeks_of_data").show().focus();
+    $("#min_weeks_of_data").hide();
 });
 
 function setupTimeBucketMenu() {
@@ -191,6 +197,7 @@ function setupTimeBucketMenu() {
         }
         ajax_response.time_bucket = num;
         $("#time_bucket").text(num);
+	loadData();
     });
     $("#bucket_description").html($select);
 }

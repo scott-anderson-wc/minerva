@@ -29,6 +29,10 @@
         font-family: Verdana;
         font-size: 2em;
       }
+      #weeks_of_data, #number_of_data {
+          font-weight: bold;
+          font-size: 110%;
+      }
       
     </style>
   </head>
@@ -39,13 +43,20 @@
     </header>
     <main class="main-content">
     <div id="box"><span id="Q3"></span><span id="Q2"></span><span id="Q1"></span></div>
-    <p>Quartiles based on <span id="number_of_data"></span> values 
-    from the last <button id="weeks_of_data"></button> 
-    <input type=number id="input_weeks_of_data" placeholder="weeks of data">weeks of data</p>
-    <p>for the time_bucket of <span id="time_bucket"></span>
-    (<span id="bucket_description"></span>).</p>
-    <p>You set a minimum of <button id="min_number_of_data"></button> 
-    <input type=number id="input_min_number_of_data" placeholder="min number of data"> data values. </p>
+    <p>Quartiles based on
+      <span id="number_of_data"></span>
+      values from the last
+      <span id="weeks_of_data"></span>
+      weeks of data for the time_bucket of
+      <span id="time_bucket"></span>
+      (<span id="bucket_description"></span>).</p>
+    <p>You requested a minimum of
+      <button id="min_number_of_data"></button>
+      <input type=number id="input_min_number_of_data" placeholder="min number of data">
+      data values from a minimum of
+      <button id="min_weeks_of_data"></button>
+      <input type=number id="input_min_weeks_of_data" placeholder="min weeks of data">
+      weeks of data.</p>
     <p>These quartiles were last refreshed <span id="timestamp_of_calculation"></span>. 
     <button id="refresh">refresh now</button> </p>
     <p><form action="{{url_for('isfplots')}}"><button>full ISF display</button></form></p>

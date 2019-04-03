@@ -348,10 +348,8 @@ def get_isf_for_bg (bg_value):
     return (less_than_list, greater_than_list) 
     
 def getRecentISF (time_bucket, num_weeks, min_data):
-    print num_weeks
     #time_end = date.today() - timedelta(weeks = num_weeks)
     time_end = datetime.strptime("18/09/10", '%y/%m/%d') - timedelta(weeks = num_weeks)
-    print time_end
     conn = get_conn ()
     curs = conn.cursor()
 

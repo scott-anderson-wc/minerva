@@ -55,14 +55,39 @@ def displayRecentISF():
     '''This just displays the page; all the data is gotten by Ajax. See below.'''
     return render_template('isf-display.html')
 
-@app.route('/getRecentISF/<int:bucket>/<int:weeks>/<int:min_data>/')
-def getRecentISF(bucket,weeks,min_data):
-    val = {'Q1': 4, 'Q2': 24, 'Q3': 48,
-           'time_bucket': bucket,
-           'weeks_of_data': weeks,
-           'number_of_data': 55,
-           'min_number_of_data': min_data,
-           'timestamp_of_calculation': None}
+@app.route ('/getRecentISF/<int:time_bucket>/<int:min_weeks>/<int:min_data>/')
+def getRecentISF(time_bucket,min_weeks, min_data):
+    return_example_result = False
+    if return_example_result:
+        val = {'Q1': 4, 'Q2': 24, 'Q3': 48,
+               'time_bucket': time_bucket,
+               'weeks_of_data': 5,
+               'number_of_data': 55,
+               'min_number_of_data': min_data,
+               'min_weeks_of_data': min_weeks,
+               'timestamp_of_calculation': None}
+    else:
+        weeks_of_data, isf_vals = isf.getRecentISF(int(time_bucket),min_weeks,int( min_data))
+        num_data = len(isf_vals)
+    
+        q1_index = ((num_data +1)/4)-1
+        q1 = isf_vals[int(math.floor(q1_index))] + .5 * (isf_vals[int(math.ceil(q1_index)) - int(math.floor(q1_index))])
+
+        q2_index = (((num_data +1)/4)-1) * 2
+        q2 = isf_vals[int(math.floor(q2_index))] + .5 * (isf_vals[int(math.ceil(q2_index)) - int(math.floor(q2_index))])
+
+        q3_index = (((num_data +1)/4)-1) * 3
+        q3 = isf_vals[int(math.floor(q3_index))] + .5 * (isf_vals[int(math.ceil(q3_index)) - int(math.floor(q3_index))])
+
+        current_time = datetime.now().strftime('%A, %d %B %Y')
+    
+        val = dict(Q1 = q1, Q2 = q2, Q3 = q3,
+                   time_bucket = time_bucket,
+                   weeks_of_data = weeks_of_data,
+                   number_of_data = num_data,
+                   min_number_of_data = min_data,
+                   min_weeks_of_data = min_weeks,
+                   timestamp_of_calculation = current_time)
     return jsonify(val)
 
 
