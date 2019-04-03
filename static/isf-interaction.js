@@ -1,7 +1,6 @@
 // JavaScript File
 
 /* global $ */
-var URL = '/getRecentISF/';
 var example_ajax_response = {
     Q1: 4,
     Q2: 24,
@@ -37,7 +36,8 @@ function loadData() {
         let bucket = ajax_response.time_bucket;
         let weeks = ajax_response.min_weeks_of_data;
         let min_data = ajax_response.min_number_of_data;
-        let URL_plus = `${URL}${bucket}/${weeks}/${min_data}/`;
+	let URL_prefix = URL.substring(0,URL.length-6);
+        let URL_plus = `${URL_prefix}${bucket}/${weeks}/${min_data}/`;
         console.log(URL_plus);
         $.get(URL_plus, function (data) {
 	    ajax_response = data;
