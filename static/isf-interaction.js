@@ -203,6 +203,3 @@ function setupTimeBucketMenu() {
 }
 setupTimeBucketMenu();
 
-// Check on height allocation
-(function () {
-    
