@@ -7,6 +7,39 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/normalize/3.0.3/normalize.min.css">
     <link rel="stylesheet" href="{{url_for('static',filename='isf-display.css')}}">
     <style>
+
+/* this causes trouble on iphones, it seems. I'd rather scroll than have #box collapse
+/*
+html, body {
+  height: 100%;
+}
+*/
+
+p { margin: 0.5em 0px 0px 0px; }
+
+body {
+  display: flex;
+  flex-direction: column;
+  font-size: 50%; /* was 62.5%; */
+  background: rgb(149, 194, 215);
+}
+
+a[href='#'] {
+  text-decoration: none;
+}
+
+.main-header {
+  flex: 0 1 auto;
+}
+
+.logo-text {
+  background: white;
+  text-align: center;
+  text-transform: uppercase;
+  font-family: lakeshore;
+  font-size: 3em;
+}
+
       h1, h2 { display: inline; }
       #box { 
         width: 50%; 
@@ -35,6 +68,42 @@
       }
       button, select { border: 1px solid blue; border-radius: 1ex }
       
+/* main page layout is header / main { 2 sections } */
+
+.main-content {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  padding: 2ex 1em;
+  height: 90%;
+}
+
+/* both children of .main-content */
+.main-content section {
+    flex: 1 1 auto;
+}
+
+section#box_container {
+    height: 250px;
+    min-height: 250px;
+}
+
+/* to define height, have to go all way to the top */
+@media all and (orientation: landscape) {
+
+body, html, main { height: 100%; }
+
+     .main-content {
+        flex-direction: row;
+      }
+.main-content section {
+width: 50%;
+
+}
+section#box_container {
+    height: 100%;
+    min-height: 100%;
+}
     </style>
   </head>
   <body>

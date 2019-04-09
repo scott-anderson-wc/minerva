@@ -202,3 +202,7 @@ function setupTimeBucketMenu() {
     $("#bucket_description").html($select);
 }
 setupTimeBucketMenu();
+
+// Check on height allocation
+(function () {
+    
