@@ -348,6 +348,7 @@ def get_isf_for_bg (bg_value):
     return (less_than_list, greater_than_list) 
     
 def getRecentISF (time_bucket, num_weeks, min_data):
+
     #time_end = date.today() - timedelta(weeks = num_weeks)
     time_end = datetime.strptime("18/09/10", '%y/%m/%d') - timedelta(weeks = num_weeks)
     conn = get_conn ()
@@ -356,16 +357,29 @@ def getRecentISF (time_bucket, num_weeks, min_data):
     curs.execute ('''SELECT isf FROM isf_details where time_bucket(rtime) = %s and rtime > %s ''', [time_bucket, time_end])
 
     if (curs.rowcount >= min_data):
-        results = curs.fetchall()
-        isf = [result[0] for result in results]
-        isf = sorted(isf)
-        #print num_weeks, isf 
-        return num_weeks,isf
+        return getISF(num_weeks/2, time_bucket, min_data)
     else: 
         num_weeks = num_weeks * 2 
         return getRecentISF(time_bucket, num_weeks, min_data)
-    
 
+def getISF (min_weeks, time_bucket, min_data):
+
+    #time_end = date.tody() - timedelta(weeks = min_weeks)
+    time_end = datetime.strptime("18/09/10", "%y/%m/%d") - timedelta(weeks = min_weeks)
+    conn = get_conn()
+    curs = conn.cursor()
+
+    curs.execute('''SELECT isf FROM isf_details where time_bucket(rtime) = %s and rtime > %s''',[time_bucket, time_end])
+
+    if(curs.rowcount >= min_data):
+        results = curs.fetchall()
+        isf = [result[0] for result in results]
+        isf = sorted(isf)
+        return min_weeks, isf
+    else:
+        min_weeks = min_weeks + 1
+        return getISF(min_weeks,time_bucket, min_data)
+    
 # new code to recompute ISF values from command line
 if __name__ == '__main__':
     compute_isf()
