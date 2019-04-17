@@ -9,7 +9,7 @@ functools32==3.2.3.post2
 idna==2.7
 ipython-genutils==0.2.0
 itsdangerous==1.1.0
-Jinja2==2.10
+Jinja2==2.10.1
 jsonschema==2.6.0
 jupyter-core==4.4.0
 MarkupSafe==1.0
