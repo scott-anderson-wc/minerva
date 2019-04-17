@@ -347,40 +347,51 @@ def get_isf_for_bg (bg_value):
     
     return (less_than_list, greater_than_list) 
     
-def getRecentISF (time_bucket, num_weeks, min_data):
-
-    #time_end = date.today() - timedelta(weeks = num_weeks)
-    time_end = datetime.strptime("18/09/10", '%y/%m/%d') - timedelta(weeks = num_weeks)
+def getRecentISF (time_bucket, num_weeks, min_data, debug=False):
     conn = get_conn ()
     curs = conn.cursor()
 
-    curs.execute ('''SELECT isf FROM isf_details where time_bucket(rtime) = %s and rtime > %s ''', [time_bucket, time_end])
+    def try_weeks(num_weeks):
+        time_end = datetime.strptime("18/09/10", '%y/%m/%d') - timedelta(weeks = num_weeks)
+        curs.execute ('''SELECT isf FROM isf_details where time_bucket(rtime) = %s and rtime > %s ''',
+                      [time_bucket, time_end])
 
-    if (curs.rowcount >= min_data):
-        return getISF(num_weeks/2, time_bucket, min_data)
-    else: 
-        num_weeks = num_weeks * 2 
-        return getRecentISF(time_bucket, num_weeks, min_data)
+    def doubling_up(min_weeks):
+        if debug:
+            print('doubling up ',min_weeks)
+        try_weeks(min_weeks)
+        if curs.rowcount >= min_data:
+            return recur(int(min_weeks/2), min_weeks)
+        else:
+            return doubling_up(min_weeks*2)
 
-def getISF (min_weeks, time_bucket, min_data):
+    def recur(min_weeks, max_weeks):
+        mid = int((min_weeks+max_weeks)/2)
+        if debug:
+            print('recur ',min_weeks, mid, max_weeks)
+        try_weeks(mid)
+        if max_weeks == min_weeks + 1:
+            # done, so either use min or max
+            if (curs.rowcount < min_data):
+                min_weeks = max_weeks
+                try_weeks(min_weeks)
+            # base case: 
+            results = curs.fetchall()
+            isf = [result[0] for result in results]
+            isf = sorted(isf)
+            return min_weeks, isf
+        elif curs.rowcount >= min_data:
+            # try lower half
+            return recur(min_weeks,mid)
+        else: 
+            # try upper half
+            return recur(mid,max_weeks)
 
-    #time_end = date.tody() - timedelta(weeks = min_weeks)
-    time_end = datetime.strptime("18/09/10", "%y/%m/%d") - timedelta(weeks = min_weeks)
-    conn = get_conn()
-    curs = conn.cursor()
+    return doubling_up(num_weeks)
 
-    curs.execute('''SELECT isf FROM isf_details where time_bucket(rtime) = %s and rtime > %s''',[time_bucket, time_end])
-
-    if(curs.rowcount >= min_data):
-        results = curs.fetchall()
-        isf = [result[0] for result in results]
-        isf = sorted(isf)
-        return min_weeks, isf
-    else:
-        min_weeks = min_weeks + 1
-        return getISF(min_weeks,time_bucket, min_data)
     
 # new code to recompute ISF values from command line
 if __name__ == '__main__':
-    compute_isf()
-    
+    # compute_isf()
+    print(getRecentISF(0,4,40,debug=True))
+    print(getRecentISF(0,4,50,debug=True))
