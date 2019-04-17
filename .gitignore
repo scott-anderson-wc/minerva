@@ -19,6 +19,8 @@
 *.zip
 *.out
 *.txt
+# .bak files produced by 2to3:
+*.bak
 
 venv
 dumps/

@@ -16,7 +16,7 @@ dt_format = '%Y%m%d%H%M'        # the format for date_time in the database, for 
 def debug(*args):
     s = ' '.join(map(str,args))
     if app.debug:
-        print "debug: "+s
+        print("debug: "+s)
     else:
         app.logger.debug(s)
 

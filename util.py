@@ -1,8 +1,6 @@
 # some utility functions
-import pandas
 import math
 import datetime
-import numpy
 import flask
 import dbconn2
 import json
@@ -36,12 +34,6 @@ def floaty(str):
     else:
         return float(str)
 
-def nan2blank(x):
-    if type(x)==numpy.float64 and math.isnan(x):
-        return '&nbsp;'
-    else:
-        return x
-
 def iso_to_readable(val_str):
     isoformat = '%Y-%m-%dT%H:%M:%S'
     readable = '%I:%M %p'
@@ -61,8 +53,6 @@ def render1(sym_value_list):
         sym_value_list.append('<p>Float {symbol}: {val}</p>'.format(symbol=sym,val=val))
     elif val is None:
         sym_value_list.append('<p>{symbol}: None</p>'.format(symbol=sym))
-    elif type(val) == numpy.float64:
-        sym_value_list.append('<p>Float {symbol}: {val}</p>'.format(symbol=sym,val=val))
     elif type(val) == type(True):
         sym_value_list.append('<p>Boolean {symbol}: {val}</p>'.format(symbol=sym,val=val))
     elif type(val) == list:
@@ -72,7 +62,7 @@ def render1(sym_value_list):
         elif type(val[0]) == type({}):
             # assume a list of dictionaries, format as a table
             table = ['<table class="bordered">']
-            cols = val[0].keys()
+            cols = list(val[0].keys())
             table.append('<tr>')
             table.append(''.join(['<th>{head}</th>'.format(head=c)
                                   for c in cols]))
@@ -85,25 +75,6 @@ def render1(sym_value_list):
             table.append('</table>')
             sym_value_list.append('<p>{symbol}: {val}</p>'.format(symbol=sym,
                                                                   val=''.join(table)))
-    elif type(val) == type(pandas.to_datetime('3/4/16')):
-        sym_value_list.append(('<p>Datetime {symbol}: {val}</p>'
-                               .format(symbol=sym,val=val.strftime('%m/%d/%y %H:%M'))))
-    elif type(val) == type(pandas.Timedelta(hours=1)):
-        sym_value_list.append('<p>Timedelta {symbol}: {val}'.format(symbol=sym, val=val.__str__()))
-    elif type(val) == type(pandas.DataFrame()):
-        print('rendering dataframe named {s} of size {n}'.format(s=sym,n=len(val)))
-        table = ['<table class="bordered">']
-        table.append( '<tr>' )
-        table.append( ''.join(['<th>{head}</th>'.format(head=c) for c in val.columns ]) )
-        table.append( '</tr>\n' )
-        for i in range(len(val)):
-            table.append( '<tr>' )
-            table.append( ''.join(['<td>{data}</td>'.format(data=nan2blank(val[c][i]))
-                                   for c in val.columns ]) )
-            table.append( '</tr>' )
-        # after the rows
-        table.append('</table>')
-        sym_value_list.append('<h3>Dataframe {head}</h3>\n'.format(head=sym) + ''.join(table))
     elif type(val) == type({}):
         # punt with JSON for now
         sym_value_list.append(json.dumps(val))
@@ -113,7 +84,7 @@ def render1(sym_value_list):
 def render(alist):
     '''Takes an association list, like the 'steps' key in 'addstep', and 
 appends a rendering (to HTML) to each sublist'''
-    print('rendering an alist of length %s' % len(alist))
+    print(('rendering an alist of length %s' % len(alist)))
     for sublist in alist:
         render1(sublist)
             
@@ -128,7 +99,7 @@ def addstep(steps, sym, val):
     steps['steps'].append(sublist)
     if sym in steps:
         raise ValueError('''You already have a step called {sym}'''.format(sym=sym))
-    print('adding step ',sym,' with value ',val)
+    print(('adding step ',sym,' with value ',val))
     steps[sym] = val
     return val
 

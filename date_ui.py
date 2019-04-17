@@ -33,9 +33,9 @@ time can be omitted, defaulting to 00:00:00 and can omit seconds, defaulting to 
 if __name__ == '__main__':
     def test(d,t):
         try:
-            print('{} {} \t=> {}'.format(d,t,to_datestr(d,t)))
+            print(('{} {} \t=> {}'.format(d,t,to_datestr(d,t))))
         except:
-            print('{} {} \traises an exception'.format(d,t))
+            print(('{} {} \traises an exception'.format(d,t)))
     to_datestr('2018-01-01','05:50:00')
     test('2018-01-01','05:50:00')
     test('2018-01-01','05:50')
@@ -43,13 +43,13 @@ if __name__ == '__main__':
     test('2018-01-01','05:65')
     test('2018-15-01','05:55')
     x,y = to_datestr('2018-01-01','05:50:00')
-    print 'y is ',y
+    print('y is ',y)
     page_title = ('''ISF for {dt:%A}, {dt:%B} {dt.day}, {dt.year},
                      at {dt.hour}:{dt.minute:02d}'''
                   .format(dt=y))
-    print x, page_title
+    print(x, page_title)
     # ================================================================
-    print 'testing conversions to/from mysql and python'
+    print('testing conversions to/from mysql and python')
     d1 = mysql_datetime_to_python_datetime('2019-01-22 13:24:00')
-    print d1, python_datetime_to_mysql_datetime(d1)
+    print(d1, python_datetime_to_mysql_datetime(d1))
     

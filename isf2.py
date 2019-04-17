@@ -68,7 +68,7 @@ def bolus_sum_during_start(rows, t2):
         # print row['rtime'], row['total_bolus_volume']
         if row['rtime'] == end_time:
             if bolus_count > 2:
-                print 'summed {} corrections!!'.format(bolus_count)
+                print('summed {} corrections!!'.format(bolus_count))
             return bolus_sum, t3
         tbv = row['total_bolus_volume'] 
         if tbv > 0: 
@@ -242,7 +242,7 @@ def compute_isf():
         # update database using start (the primary key for ICS2)
         #raw_input('another?')
     # end of loop
-    print '''There were {} corrective insulin events from 2014 -  2018. 
+    print('''There were {} corrective insulin events from 2014 -  2018. 
 {} events were skipped because of insulin before the START period
 {} events were skipped because the bolus was too small
 {} events were skipped because there was a bolus in the MIDDLE period
@@ -252,7 +252,7 @@ def compute_isf():
 {} good events with insulin within 4 hours before event 
 {} skipped + {} good is {} total.'''.format(total, skipped_before, skipped_small, skipped_middle, skipped_nobg_beg,skipped_nobg_end,good_isf,insulin_before,
                                             (skipped_before + skipped_small + skipped_middle + skipped_nobg_beg + skipped_nobg_end),
-                                            good_isf,total)
+                                            good_isf,total))
                                             
 
 def get_first_corrective_insulin(year=2018):
@@ -358,7 +358,7 @@ def getRecentISF (time_bucket, num_weeks, min_data, debug=False):
 
     def doubling_up(min_weeks):
         if debug:
-            print('doubling up ',min_weeks)
+            print(('doubling up ',min_weeks))
         try_weeks(min_weeks)
         if curs.rowcount >= min_data:
             return recur(int(min_weeks/2), min_weeks)
@@ -368,7 +368,7 @@ def getRecentISF (time_bucket, num_weeks, min_data, debug=False):
     def recur(min_weeks, max_weeks):
         mid = int((min_weeks+max_weeks)/2)
         if debug:
-            print('recur ',min_weeks, mid, max_weeks)
+            print(('recur ',min_weeks, mid, max_weeks))
         try_weeks(mid)
         if max_weeks == min_weeks + 1:
             # done, so either use min or max
@@ -394,5 +394,5 @@ def getRecentISF (time_bucket, num_weeks, min_data, debug=False):
 # new code to recompute ISF values from command line
 if __name__ == '__main__':
     # compute_isf()
-    print(getRecentISF(0,4,40,debug=True))
-    print(getRecentISF(0,4,50,debug=True))
+    print((getRecentISF(0,4,40,debug=True)))
+    print((getRecentISF(0,4,50,debug=True)))

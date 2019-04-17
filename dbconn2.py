@@ -96,9 +96,9 @@ def connect(dsn):
         conn = MySQLdb.connect( use_unicode=True, charset='utf8', **dsn )
         # so each modification takes effect automatically
         conn.autocommit(True)
-    except MySQLdb.Error, e:
-        print ("Couldn't connect to database. MySQL error %d: %s" %
-               (e.args[0], e.args[1]))
+    except MySQLdb.Error as e:
+        print(("Couldn't connect to database. MySQL error %d: %s" %
+               (e.args[0], e.args[1])))
         raise
     return conn
 
@@ -110,12 +110,12 @@ def checkDSN(dsn):
     return True
 
 if __name__ == '__main__':
-    print 'starting test code'
+    print('starting test code')
     import sys
     if len(sys.argv) < 2:
-        print('''Usage: {cmd} cnf_file
+        print(('''Usage: {cmd} cnf_file
 test dbconn by giving the name of a cnf_file on the command line'''
-              .format(cmd=sys.argv[0]))
+              .format(cmd=sys.argv[0])))
         sys.exit(1)
     cnf_file = sys.argv[1]
     DSN = read_cnf(cnf_file)
@@ -125,14 +125,14 @@ test dbconn by giving the name of a cnf_file on the command line'''
     curs = c.cursor(MySQLdb.cursors.DictCursor) # results as Dictionaries
     curs.execute('select user() as user, database() as db')
     row = curs.fetchone()
-    print('connected to {db} as {user}'
-          .format(db=row['db'],user=row['user']))
+    print(('connected to {db} as {user}'
+          .format(db=row['db'],user=row['user'])))
     curs.execute('select nm,name,birthdate from person limit 3')
     print('first three people')
     for row in curs.fetchall():
-        print row
+        print(row)
     curs.execute('select nm,name,birthdate from person where name like %s',
                  ['%george%'])
     print('names like george')
     for row in curs.fetchall():
-        print row
+        print(row)
