@@ -389,7 +389,8 @@ def getRecentISF (time_bucket, num_weeks, min_data, debug=False):
 
     return doubling_up(num_weeks)
 
-    
+# hi there!
+
 # new code to recompute ISF values from command line
 if __name__ == '__main__':
     # compute_isf()
