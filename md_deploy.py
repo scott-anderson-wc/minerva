@@ -9,6 +9,8 @@ import logging
 import random
 import math
 
+'''Deployed app'''
+
 LOGFILE='md_deploy.log'
 LOGLEVEL=logging.DEBUG
 
