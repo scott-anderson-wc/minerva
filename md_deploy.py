@@ -1,4 +1,4 @@
-import os
+import os, sys
 from flask import (Flask, render_template, make_response, request, redirect, url_for,
                    session, flash, send_from_directory, g)
 from flask import jsonify
@@ -53,6 +53,15 @@ mysql.init_app(app)
 def displayRecentISF():
     '''This just displays the page; all the data is gotten by Ajax. See below.'''
     return render_template('isf-display.html')
+
+@app.route('/info')
+def info():
+    '''Info about the app deployment'''
+    flash('Python version is {}'.format(sys.version))
+    for p in sys.path:
+        flash('Path has {}'.format(p))
+    return render_template('b.html')
+
 
 @app.route ('/getRecentISF/<int:time_bucket>/<int:min_weeks>/<int:min_data>/')
 def getRecentISF(time_bucket,min_weeks, min_data):
