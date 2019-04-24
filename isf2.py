@@ -308,6 +308,7 @@ def get_isf_details(conn,rtime):
     return curs.fetchone()
 
 def get_all_isf_plus_buckets():
+    ''' Returns all good isf values and all isf values in 2-hour time buckets'''
     conn = get_conn()
     curs = conn.cursor()
     curs.execute('''SELECT isf from isf_details;''')
@@ -319,6 +320,7 @@ def get_all_isf_plus_buckets():
     return(allData,bucket_list)
 
 def get_isf_for_years(start_year,end_year):
+    '''returns all isf values and all isf values in 2-hour time buckets for a specific time period (in years) '''
     conn = get_conn()
     curs = conn.cursor()
     curs.execute('''SELECT isf from isf_details where year(rtime) >= %s and year(rtime)<= %s''',[start_year, end_year])
@@ -333,6 +335,7 @@ def get_isf_for_years(start_year,end_year):
                    
 
 def get_isf_for_bg (bg_value):
+    ''' returns isf values and isf values in 2-hour time buckets for a specific starting bg value'''
     conn = get_conn()
     curs = conn.cursor()
 
@@ -348,6 +351,7 @@ def get_isf_for_bg (bg_value):
     return (less_than_list, greater_than_list) 
     
 def getRecentISF (time_bucket, num_weeks, min_data, debug=False):
+    '''returns at least min_data isf values for a specific 2-hour time bucket looking back num_weeks (or more depending on available data points)  '''
     conn = get_conn ()
     curs = conn.cursor()
 
