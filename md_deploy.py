@@ -67,6 +67,7 @@ def info():
 
 @app.route ('/getRecentISF/<int:time_bucket>/<int:min_weeks>/<int:min_data>/')
 def getRecentISF(time_bucket,min_weeks, min_data):
+    '''Returns the first, second, and thrid quartile isf information given a time bucket and number of weeks and data points to look back. '''
     return_example_result = False
     if return_example_result:
         val = {'Q1': 4, 'Q2': 24, 'Q3': 48,
@@ -103,6 +104,7 @@ def getRecentISF(time_bucket,min_weeks, min_data):
 
 @app.route('/isfplots/')
 def isfplots():
+    '''A box-and-whisker plot with isf data sorted in 2-hr time buckets '''
     (all, bucket_list) = isf.get_all_isf_plus_buckets()
     allData = [data[0] for data in all if data[0]]
 

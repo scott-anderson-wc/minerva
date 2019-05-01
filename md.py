@@ -291,6 +291,7 @@ def compute_data_range():
 @app.route('/browseisf/')
 @app.route('/browseisf/<date>/', methods = ['GET','POST'])
 def browse_isf(date=None):
+    '''Displays information (bg,cgm,bolus) for the 2.5hr span after corrective insulin given '''
     if request.method == "GET": 
         if date == None:
             dtime = '2018-01-01 05:50'
@@ -494,6 +495,7 @@ so the early/late distributions can be easily compared.'''
                      
 @app.route('/isfcompareBG/')
 def isf_compare_bg():
+    '''Displays ISF data in a box-and-whisker plot comparing data with starting BG less than 200 and starting BG greater than 200 '''
     (less_than, greater_than) = isf.get_isf_for_bg('200')
 
     less_than_1 = go.Box(y = less_than[0], name = "bg<200")
