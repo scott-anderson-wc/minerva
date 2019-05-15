@@ -30,7 +30,8 @@ import plotly.graph_objs as go
 
 import util
 
-import builtins
+
+# import builtins
 
 def debug(*args):
     s = ' '.join(map(str,args))
@@ -41,7 +42,7 @@ def debug(*args):
 
 app = Flask(__name__)
 
-builtins.app = app           # so it's available to other modules.
+# builtins.app = app           # so it's available to other modules.
 
 app.config.from_object('config')
 os.environ['FLASK_SETTINGS'] = '/home/hugh9/settings.cfg'
