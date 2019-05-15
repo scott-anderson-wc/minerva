@@ -78,17 +78,21 @@ def getRecentISF(time_bucket,min_weeks, min_data):
                'min_weeks_of_data': min_weeks,
                'timestamp_of_calculation': None}
     else:
+        #get the number of weeks of data and isf data for recent ISF values 
         weeks_of_data, isf_vals = isf.getRecentISF(int(time_bucket),min_weeks,int( min_data))
         num_data = len(isf_vals)
-    
+
+        #calculae the index and value of first quartile 
         q1_index = ((num_data +1)/4)-1
-        q1 = isf_vals[int(math.floor(q1_index))] + .5 * (isf_vals[int(math.ceil(q1_index)) - int(math.floor(q1_index))])
+        q1 = isf_vals[int(math.floor(q1_index))] + .5 * (isf_vals[int(math.ceil(q1_index))] - isf_vals[int(math.floor(q1_index))])
 
+        #calcilate the index and value of second quartile 
         q2_index = (((num_data +1)/4)-1) * 2
-        q2 = isf_vals[int(math.floor(q2_index))] + .5 * (isf_vals[int(math.ceil(q2_index)) - int(math.floor(q2_index))])
+        q2 = isf_vals[int(math.floor(q2_index))] + .5 * (isf_vals[int(math.ceil(q2_index))] - isf_vals[int(math.floor(q2_index))])
 
+        #calcularte the index and value of third quartile 
         q3_index = (((num_data +1)/4)-1) * 3
-        q3 = isf_vals[int(math.floor(q3_index))] + .5 * (isf_vals[int(math.ceil(q3_index)) - int(math.floor(q3_index))])
+        q3 = isf_vals[int(math.floor(q3_index))] + .5 * (isf_vals[int(math.ceil(q3_index))] - isf_vals[int(math.floor(q3_index))])
 
         current_time = datetime.now().strftime('%A, %d %B %Y')
     
@@ -141,6 +145,202 @@ def isfplots():
                            version = app.config['VERSION'],
                            page_title='Minerva ISF values',
                            graphJSON = graphJSON)
+
+
+@app.route('/isfcompareYears/')
+def isf_compare_year():
+    #get data for each year
+    (all_2014, bucket_list_2014) = isf.get_isf_for_years('2014', '2014')
+    (all_2015, bucket_list_2015) = isf.get_isf_for_years('2015', '2015')
+    (all_2016, bucket_list_2016) = isf.get_isf_for_years('2016', '2016')
+    (all_2017, bucket_list_2017) = isf.get_isf_for_years('2017', '2017')
+    (all_2018, bucket_list_2018) = isf.get_isf_for_years('2018', '2018')
+
+    #get non-bucketed data for each year
+    allData_2014 = [data[0] for data in all_2014 if data[0]]
+    allData_2015 = [data[0] for data in all_2015 if data[0]]
+    allData_2016 = [data[0] for data in all_2016 if data[0]]
+    allData_2017 = [data[0] for data in all_2017 if data[0]]
+    allData_2018 = [data[0] for data in all_2018 if data[0]]
+
+    #layout dict
+    yaxis_dict = dict(title = 'mgdl/unit',
+                      zeroline = True,
+                      zerolinecolor = '#800000',
+                      showline = False,
+                      rangemode = 'tozero')
+
+    #create plot for non-bucketed data
+    allWhisker_2014 = go.Box(y = allData_2014,name = '2014')
+    allWhisker_2015 = go.Box(y = allData_2015,name = '2015')
+    allWhisker_2016 = go.Box(y = allData_2016,name = '2016')
+    allWhisker_2017 = go.Box(y = allData_2017,name = '2017')
+    allWhisker_2018 = go.Box(y = allData_2018,name = '2018')
+    layout_allWhisker = go.Layout(title = ('All ISF values for each yaer'), width = 1000, height = 800,
+                                  yaxis = yaxis_dict)
+    graph_all = go.Figure(data = [allWhisker_2014, allWhisker_2015,allWhisker_2016,allWhisker_2017,allWhisker_2018], layout = layout_allWhisker)
+    graphJSON_all = json.dumps(graph_all, cls= plotly.utils.PlotlyJSONEncoder)
+
+    #create plot for 0-2am time bucket
+    plot14_0 = go.Box(y = bucket_list_2014[0], name = '2014')
+    plot15_0 = go.Box(y = bucket_list_2015[0], name = '2015')
+    plot16_0 = go.Box(y = bucket_list_2016[0], name = '2016')
+    plot17_0 = go.Box(y = bucket_list_2017[0], name = '2017')
+    plot18_0 = go.Box(y = bucket_list_2018[0], name = '2018')
+    layout_0am = go.Layout(title = ('ISF values for 0am-2am time bucket'), width = 1000,height = 800,
+                           yaxis=yaxis_dict)
+    graph_0am = go.Figure(data = [plot14_0,plot15_0,plot16_0,plot17_0,plot18_0], layout=layout_0am)
+    graphJSON_0am = json.dumps(graph_0am,cls= plotly.utils.PlotlyJSONEncoder)
+
+    #create plot for 2-4am time bucket
+    plot14_1 = go.Box(y = bucket_list_2014[1], name = '2014')
+    plot15_1 = go.Box(y = bucket_list_2015[1], name = '2015')
+    plot16_1 = go.Box(y = bucket_list_2016[1], name = '2016')
+    plot17_1 = go.Box(y = bucket_list_2017[1], name = '2017')
+    plot18_1 = go.Box(y = bucket_list_2018[1], name = '2018')
+    layout_2am = go.Layout(title = ('ISF values for 2am-4am time bucket'), width = 1000,height = 800,
+                           yaxis=yaxis_dict)
+    graph_2am = go.Figure(data = [plot14_1,plot15_1,plot16_1,plot17_1,plot18_1], layout=layout_2am)
+    graphJSON_2am = json.dumps(graph_2am,cls= plotly.utils.PlotlyJSONEncoder)
+
+    #create plot for 4-6am time bucket
+    plot14_2 = go.Box(y = bucket_list_2014[2], name = '2014')
+    plot15_2 = go.Box(y = bucket_list_2015[2], name = '2015')
+    plot16_2 = go.Box(y = bucket_list_2016[2], name = '2016')
+    plot17_2 = go.Box(y = bucket_list_2017[2], name = '2017')
+    plot18_2 = go.Box(y = bucket_list_2018[2], name = '2018')
+    layout_4am = go.Layout(title = ('ISF values for 4am-6am time bucket'), width = 1000,height = 800,
+                           yaxis=yaxis_dict)
+    graph_4am = go.Figure(data = [plot14_2,plot15_2,plot16_2,plot17_2,plot18_2], layout=layout_4am)
+    graphJSON_4am = json.dumps(graph_4am,cls= plotly.utils.PlotlyJSONEncoder)
+
+    #create plot for 6am-8am time bucket
+    plot14_3 = go.Box(y = bucket_list_2014[3], name = '2014')
+    plot15_3 = go.Box(y = bucket_list_2015[3], name = '2015')
+    plot16_3 = go.Box(y = bucket_list_2016[3], name = '2016')
+    plot17_3 = go.Box(y = bucket_list_2017[3], name = '2017')
+    plot18_3 = go.Box(y = bucket_list_2018[3], name = '2018')
+
+    layout_6am = go.Layout(title = ('ISF values for 6am-8am time bucket'), width = 1000,height = 800,
+                           yaxis=yaxis_dict)
+
+    graph_6am = go.Figure(data = [plot14_3,plot15_3,plot16_3,plot17_3,plot18_3], layout=layout_6am)
+    graphJSON_6am = json.dumps(graph_6am,cls= plotly.utils.PlotlyJSONEncoder)
+
+    #create plot for 8am-10am time bucket
+    plot14_4 = go.Box(y = bucket_list_2014[4], name = '2014')
+    plot15_4 = go.Box(y = bucket_list_2015[4], name = '2015')
+    plot16_4 = go.Box(y = bucket_list_2016[4], name = '2016')
+    plot17_4 = go.Box(y = bucket_list_2017[4], name = '2017')
+    plot18_4 = go.Box(y = bucket_list_2018[4], name = '2018')
+
+    layout_8am = go.Layout(title = ('ISF values for 8am-10am time bucket'), width = 1000,height = 800,
+                            yaxis=yaxis_dict)
+
+    graph_8am = go.Figure(data = [plot14_4,plot15_4,plot16_4,plot17_4,plot18_4], layout=layout_8am)
+    graphJSON_8am = json.dumps(graph_8am,cls= plotly.utils.PlotlyJSONEncoder)
+
+    #create plot for 10am-12pm time bucket
+    plot14_5 = go.Box(y = bucket_list_2014[5], name = '2014')
+    plot15_5 = go.Box(y = bucket_list_2015[5], name = '2015')
+    plot16_5 = go.Box(y = bucket_list_2016[5], name = '2016')
+    plot17_5 = go.Box(y = bucket_list_2017[5], name = '2017')
+    plot18_5 = go.Box(y = bucket_list_2018[5], name = '2018')
+
+    layout_10am = go.Layout(title = ('ISF values for 10am-12pm time bucket'), width = 1000,height = 800,
+                            yaxis=yaxis_dict)
+    graph_10am = go.Figure(data = [plot14_5,plot15_5,plot16_5,plot17_5,plot18_5], layout=layout_10am)
+    graphJSON_10am = json.dumps(graph_10am,cls= plotly.utils.PlotlyJSONEncoder)
+
+    #create plot for 12pm-2pm time bucket
+    plot14_6 = go.Box(y = bucket_list_2014[6], name = '2014')
+    plot15_6 = go.Box(y = bucket_list_2015[6], name = '2015')
+    plot16_6 = go.Box(y = bucket_list_2016[6], name = '2016')
+    plot17_6 = go.Box(y = bucket_list_2017[6], name = '2017')
+    plot18_6 = go.Box(y = bucket_list_2018[6], name = '2018')
+
+    layout_12pm = go.Layout(title = ('ISF values for 12pm-2pm time bucket'), width = 1000,height = 800,
+                            yaxis=yaxis_dict)
+    graph_12pm = go.Figure(data = [plot14_6,plot15_6,plot16_6,plot17_6,plot18_6], layout=layout_12pm)
+    graphJSON_12pm = json.dumps(graph_12pm,cls= plotly.utils.PlotlyJSONEncoder)
+
+    #create plot for 2pm-4pm time bucket
+    plot14_7 = go.Box(y = bucket_list_2014[7], name = '2014')
+    plot15_7 = go.Box(y = bucket_list_2015[7], name = '2015')
+    plot16_7 = go.Box(y = bucket_list_2016[7], name = '2016')
+    plot17_7 = go.Box(y = bucket_list_2017[7], name = '2017')
+    plot18_7 = go.Box(y = bucket_list_2018[7], name = '2018')
+
+    layout_2pm = go.Layout(title = ('ISF values for 2pm-4pm time bucket'), width = 1000,height = 800,
+                           yaxis=yaxis_dict)
+    graph_2pm = go.Figure(data = [plot14_7,plot15_7,plot16_7,plot17_7,plot18_7], layout=layout_2pm)
+    graphJSON_2pm = json.dumps(graph_2pm,cls= plotly.utils.PlotlyJSONEncoder)
+         
+
+    #create plot for 4pm-6pm time bucket
+    plot14_8 = go.Box(y = bucket_list_2014[8], name = '2014')
+    plot15_8 = go.Box(y = bucket_list_2015[8], name = '2015')
+    plot16_8 = go.Box(y = bucket_list_2016[8], name = '2016')
+    plot17_8 = go.Box(y = bucket_list_2017[8], name = '2017')
+    plot18_8 = go.Box(y = bucket_list_2018[8], name = '2018')
+
+    layout_4pm = go.Layout(title = ('ISF values for 4pm-6pm time bucket'), width = 1000,height = 800,
+                            yaxis=yaxis_dict)
+    graph_4pm = go.Figure(data = [plot14_8,plot15_8,plot16_8,plot17_8,plot18_8], layout=layout_4pm)
+    graphJSON_4pm = json.dumps(graph_4pm,cls= plotly.utils.PlotlyJSONEncoder)
+
+    #create plot for 6pm-8pm time bucket
+    plot14_9 = go.Box(y = bucket_list_2014[9], name = '2014')
+    plot15_9 = go.Box(y = bucket_list_2015[9], name = '2015')
+    plot16_9 = go.Box(y = bucket_list_2016[9], name = '2016')
+    plot17_9 = go.Box(y = bucket_list_2017[9], name = '2017')
+    plot18_9 = go.Box(y = bucket_list_2018[9], name = '2018')
+
+    layout_6pm = go.Layout(title = ('ISF values for 6pm-8pm time bucket'), width = 1000,height = 800,
+                            yaxis=yaxis_dict)
+    graph_6pm = go.Figure(data = [plot14_9,plot15_9,plot16_9,plot17_9,plot18_9], layout=layout_6pm)
+    graphJSON_6pm = json.dumps(graph_6pm,cls= plotly.utils.PlotlyJSONEncoder)
+
+    #create plot for 8pm-10pm time bucket
+    plot14_10 = go.Box(y = bucket_list_2014[10], name = '2014')
+    plot15_10 = go.Box(y = bucket_list_2015[10], name = '2015')
+    plot16_10 = go.Box(y = bucket_list_2016[10], name = '2016')
+    plot17_10 = go.Box(y = bucket_list_2017[10], name = '2017')
+    plot18_10 = go.Box(y = bucket_list_2018[10], name = '2018')
+
+    layout_8pm = go.Layout(title = ('ISF values for 8pm-10pm time bucket'), width = 1000,height = 800,
+                            yaxis=yaxis_dict)
+    graph_8pm = go.Figure(data = [plot14_10,plot15_10,plot16_10,plot17_10,plot18_10], layout=layout_8pm)
+    graphJSON_8pm = json.dumps(graph_8pm,cls= plotly.utils.PlotlyJSONEncoder)
+
+    #create plot for 10pm-12am time bucket
+    plot14_11 = go.Box(y = bucket_list_2014[11], name = '2014')
+    plot15_11 = go.Box(y = bucket_list_2015[11], name = '2015')
+    plot16_11 = go.Box(y = bucket_list_2016[11], name = '2016')
+    plot17_11 = go.Box(y = bucket_list_2017[11], name = '2017')
+    plot18_11 = go.Box(y = bucket_list_2018[11], name = '2018')
+
+    layout_10pm = go.Layout(title = ('ISF values for 10pm-12am time bucket'), width = 1000,height = 800,
+                           yaxis=yaxis_dict)
+    graph_10pm = go.Figure(data = [plot14_11,plot15_11,plot16_11,plot17_11,plot18_11], layout=layout_10pm)
+    graphJSON_10pm = json.dumps(graph_10pm,cls= plotly.utils.PlotlyJSONEncoder)
+        
+    return render_template('isfYear.html',
+                           version = app.config['VERSION'],
+                           page_title = 'Minerva Compare ISF Values',
+                           graphJSON_all = graphJSON_all,
+                           graphJSON_0am = graphJSON_0am,
+                           graphJSON_2am = graphJSON_2am,
+                           graphJSON_4am = graphJSON_4am,
+                           graphJSON_6am = graphJSON_6am,
+                           graphJSON_8am = graphJSON_8am,
+                           graphJSON_10am = graphJSON_10am,
+                           graphJSON_12pm = graphJSON_12pm,
+                           graphJSON_2pm = graphJSON_2pm,
+                           graphJSON_4pm = graphJSON_4pm,
+                           graphJSON_6pm = graphJSON_6pm,
+                           graphJSON_8pm = graphJSON_8pm,
+                           graphJSON_10pm = graphJSON_10pm)
 
 
 @app.teardown_appcontext
