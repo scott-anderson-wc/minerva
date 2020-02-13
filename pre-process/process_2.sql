@@ -15,6 +15,9 @@
 
 use janice;
 
+-- named date5f() because this does a "floor" to the most recent 5 minute mark
+-- should use this from now on, rather than date5()
+
 drop function if exists date5f;
 create function  date5f( d datetime )
 returns  datetime  deterministic
