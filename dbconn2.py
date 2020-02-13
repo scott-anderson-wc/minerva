@@ -119,7 +119,6 @@ test dbconn by giving the name of a cnf_file on the command line'''
         sys.exit(1)
     cnf_file = sys.argv[1]
     DSN = read_cnf(cnf_file)
-    DSN['db']='wmdb'
     c = connect(DSN)
     print('successfully connected')
     curs = c.cursor(MySQLdb.cursors.DictCursor) # results as Dictionaries
@@ -127,12 +126,3 @@ test dbconn by giving the name of a cnf_file on the command line'''
     row = curs.fetchone()
     print(('connected to {db} as {user}'
           .format(db=row['db'],user=row['user'])))
-    curs.execute('select nm,name,birthdate from person limit 3')
-    print('first three people')
-    for row in curs.fetchall():
-        print(row)
-    curs.execute('select nm,name,birthdate from person where name like %s',
-                 ['%george%'])
-    print('names like george')
-    for row in curs.fetchall():
-        print(row)
