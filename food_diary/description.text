@@ -1,0 +1,18 @@
+Field	Type	Null	Key	Default	Extra
+user	text	NO		NULL	
+date	varchar(20)	NO		NULL	
+real_date	text	NO		NULL	
+date_time	varchar(14)	NO		NULL	
+meal	varchar(10)	NO		NULL	
+item1	text	NO		NULL	
+item2	text	NO		NULL	
+item3	text	NO		NULL	
+item4	text	NO		NULL	
+item5	text	NO		NULL	
+item6	text	NO		NULL	
+item7	text	NO		NULL	
+item8	text	NO		NULL	
+item9	text	NO		NULL	
+exercise	varchar(7)	NO		NULL	
+meal_size	varchar(6)	NO		NULL	
+rec_num	int(10)	NO	PRI	NULL	auto_increment

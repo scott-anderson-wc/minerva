@@ -1,0 +1,33 @@
+Field	Type	Null	Key	Default	Extra
+user	varchar(20)	YES		NULL	
+rtime	datetime	NO	PRI	NULL	
+basal_amt	float	YES		NULL	
+basal_gap	tinyint(4)	YES		0	
+basal_amt_12	float	YES		NULL	
+total_bolus_volume	float	YES		NULL	
+normal_insulin_bolus_volume	float	YES		NULL	
+combination_insulin_bolus_volume	float	YES		NULL	
+carbs	float	YES		NULL	
+notes	text	YES		NULL	
+minutes_since_last_meal	mediumint(9)	YES		NULL	
+minutes_since_last_bolus	mediumint(9)	YES		NULL	
+carb_code	enum('before6','breakfast','lunch','dinner','snack','after9','rescue')	YES		NULL	
+real_row	tinyint(4)	YES		0	
+rescue_carbs	tinyint(4)	YES		0	
+corrective_insulin	tinyint(4)	YES		0	
+ISF	float	YES		NULL	
+Predicted_BG	float	YES		NULL	
+ISF_trouble	varchar(50)	YES		NULL	
+tags	varchar(50)	YES		NULL	
+cgm	mediumint(8) unsigned	YES		NULL	
+bg	mediumint(8) unsigned	YES		NULL	
+cgm_slope_10	float	YES		NULL	
+cgm_slope_30	float	YES		NULL	
+cgm_slope_45	float	YES		NULL	
+cgm_derivative_10	float	YES		NULL	
+cgm_derivative_30	float	YES		NULL	
+cgm_derivative_45	float	YES		NULL	
+dynamic_carbs	float	YES		NULL	
+dynamic_insulin	float	YES		0	
+rec_nums	varchar(50)	YES		NULL	
+ISF_rounded	float	YES		NULL	
