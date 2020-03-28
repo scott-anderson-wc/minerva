@@ -1,0 +1,52 @@
+BODY {
+   font-family: Verdana, Arial, sans-serif;
+   font-size:  medium;
+   width: auto;
+   max-width: 55em;
+   }
+
+@media print {
+BODY {
+   font-family: "Times New Roman", "Times", serif;
+   font-size:  10pt;
+   width: auto;
+   }
+}
+
+H1, H2, H3, H4, H5, H6 {
+    font-family: Verdana, Arial, sans-serif;
+    color: teal;
+    }
+
+H1 { font-size: xx-large; }
+
+H2 { font-size: x-large; font-weight: bold; border-bottom: 1px solid teal }
+
+H3 { font-size: large; font-weight: bold }
+
+H4 { font-size: large; font-style: italic }
+
+H5 { font-size: medium; font-weight: bold }
+
+H6 { font-size: medium; font-style: italic }
+     
+/* Modify the LI tag so that there's a little bit of space after each list
+item, except when the list is "class=compact." */
+
+OL LI, UL LI { margin-top: 5pt }
+
+OL.compact LI, UL.compact LI { margin-top: 0pt }
+
+table.bordered {
+    border-collapse: collapse;
+}
+
+.bordered td, .bordered th {
+    border: 1px solid black;
+    padding: 5px;
+}
+    
+#messages {
+    color: red;
+    font-weight: bold;
+}

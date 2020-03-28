@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+
+{% block main_content %}
+<div id="mealPlot"></div>
+<p>{{table1 | safe}}</p>
+<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+<script>
+  var mealGraph = {{graphJSON | safe}}
+  console.log('data is '+mealGraph.data)
+  console.log('type is '+typeof(mealGraph))
+  Plotly.plot('mealPlot', mealGraph.data, mealGraph.layout, {showLink: false});
+ 
+</script>
+
+{% endblock %}
