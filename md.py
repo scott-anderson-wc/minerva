@@ -29,18 +29,18 @@ import plotly.graph_objs as go
 
 import util
 
-import __builtin__
+import builtins
 
 def debug(*args):
     s = ' '.join(map(str,args))
     if app.debug:
-        print ("debug: "+s)
+        print(("debug: "+s))
     else:
         app.logger.debug(s)
 
 app = Flask(__name__)
 
-__builtin__.app = app           # so it's available to other modules.
+builtins.app = app           # so it's available to other modules.
 
 app.config.from_object('config')
 os.environ['FLASK_SETTINGS'] = '/home/hugh9/settings.cfg'
@@ -66,7 +66,7 @@ def browsenextmonth(year,month):
 @app.route('/browseym/<year>/<month>')
 def browseym(year=2017,month=2):
     data = pandb.get_data_json(year,month)
-    print('len(data) is ',len(data))
+    print(('len(data) is ',len(data)))
     return render_template('browse.html',
                            version = app.config['VERSION'],
                            display_date = str(month)+'/'+str(year),
@@ -127,7 +127,7 @@ def plot2(datestr=None):
     curs = mysql.connection.cursor()
     calcs = pandb.compute_ic_and_excess_bg_for_date(date, conn=mysql.connection)
     print('back from pandb, calculated the following values:')
-    print(calcs.keys())
+    print((list(calcs.keys())))
     # mysql.connection.close()
     dateObj = datetime.strptime(datestr, '%Y-%m-%d')
     datePretty = dateObj.strftime('%A, %B %d, %Y')
@@ -136,7 +136,7 @@ def plot2(datestr=None):
     tomorrow = datetime.strftime(dateObj+timedelta(+1,0,0), '%Y-%m-%d')
     url_tomorrow = url_for('plot2',datestr=tomorrow)
     if 'initial_ic' in calcs:
-        print('in plot2, I:C is %s' % str(calcs['initial_ic']))
+        print(('in plot2, I:C is %s' % str(calcs['initial_ic'])))
     else:
         print("in plot2, I:C couldn't be calculated")
 
@@ -342,13 +342,13 @@ def browse_isf2(date=None,time=None):
     except:
         flash('invalid date: {} {}'.format(date,time))
         return redirect(url_for('browse_isf2'))
-    print('browsing w/ start time = {}'.format(rtime_str))
+    print(('browsing w/ start time = {}'.format(rtime_str)))
 
     if request.method == "POST":
         # POST almost certainly means the user clicked the "next" button
         # we'll assume that
         conn = get_conn()
-        print('getting next ISF after {}'.format(rtime_str))
+        print(('getting next ISF after {}'.format(rtime_str)))
         start_dt = isf.get_isf_next(conn,rtime_str)
         return redirect(url_for('browse_isf2',
                                 date=start_dt.strftime('%Y-%m-%d'),

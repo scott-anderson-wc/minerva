@@ -31,7 +31,8 @@ def print_dates(date_seq):
         print(d.strftime('%m/%d/%Y'))
 
 def get_meal_dates(conn, date1, date2, meal_kind,
-                   food_items_include, food_items_exclude):
+                   food_items_include, food_items_exclude,
+                   debug=False):
     '''return a list of meal_dates between date1 and date2 (both either
 datetime objects or strings in MySQL syntax) where the meal_kind is
 breakfast/lunch/dinner and the meal contains all the items in the
@@ -42,6 +43,8 @@ food_items_include list and none of the excluded ones.
     date2 = make_date(date2)
     if meal_kind not in ['breakfast','lunch','dinner']:
         raise ValueError('not a meal kind')
+    assert isinstance(food_items_include, list)
+    assert isinstance(food_items_exclude, list)
     
     def meal_includes_clause(item):
         '''This should use a regexp to check that the item only contains letters and spaces'''
@@ -60,20 +63,29 @@ food_items_include list and none of the excluded ones.
     if len(food_items_include) > 0:
         in_clause = ' and '.join([ meal_includes_clause(item)
                                    for item in food_items_include])
-    # print('in_clause '+in_clause)
+    if debug:
+        print('in_clause '+in_clause)
     out_clause = ' False '
     if len(food_items_exclude) > 0:
         out_clause = ' and not '.join([ meal_includes_clause(item)
                                         for item in food_items_exclude])
     
-    # print('out_clause '+out_clause)
+    if debug:
+        print('out_clause '+out_clause)
     stmt = '''SELECT date FROM food_diary_2
               WHERE date BETWEEN cast('{}' as date) and cast('{}' as date)
               AND meal = '{}' AND {} AND NOT {}
            '''.format(date1,date2,meal_kind,in_clause,out_clause)
-    # print('stmt '+stmt)
+    if debug:
+        print('stmt '+stmt)
     curs = conn.cursor()
-    curs.execute(stmt)
+    try:
+        curs.execute(stmt)
+    except MySQLdb.ProgrammingError as err:
+        print('SQL error: includes is {includes} and excludes is {excludes}'.format(includes=food_items_include,excludes=food_items_exclude))
+        print('Complete SQL statement')
+        print(stmt)
+        raise err
     # I don't think duplicates are possible, so we'll skip that.
     dates = [ row[0] for row in curs.fetchall() ]
     print('found {} meals with {} and excluding {}'
@@ -100,6 +112,9 @@ def get_complement_dates(conn, date1, date2, meal_kind, date_list):
     '''Returns a list of dates between date1 and date2 of meal_kind where
 the dates are *not* in the date_list. Return type is date object
     '''
+    if len(date_list) == 0:
+        # no dates in the main group, so return a list of all the dates
+        return all_dates(conn, date1, date2, meal_kind)
     ## do the complement by string construction. Ick. Since they are known to be
     ## date objects, this is safe
     ## wrapping the string quotes is necessary
@@ -121,14 +136,17 @@ the dates are *not* in the date_list. Return type is date object
 
 if __name__ == '__main__':
     if len(sys.argv) == 1:
-        print('usage: script date1 date2 meal_kind include_food_item...')
-        print('''try: script '2016-04-02' '2016-05-03' dinner avocado ''')
+        print('usage: script date1 date2 meal_kind include_food_items exclude_food_items')
+        print('the food items are quoted with commas')
+        print('''try: script '2016-04-02' '2016-05-03' dinner avocado '' ''')
         sys.exit()
     conn = dbi.get_conn()
 
-    date1,date2,meal = sys.argv[1:4]
+    date1,date2,meal,includes,excludes = sys.argv[1:6]
     date1 = make_date(date1)
     date2 = make_date(date2)
+    includes = includes.split(',')
+    excludes = excludes.split(',')
 
     ## the between operator is <= on both sides
     group0 = all_dates(conn,date1,date2,meal)
@@ -136,16 +154,21 @@ if __name__ == '__main__':
     print('all dates in food_diary_2 in that range with that meal')
     print_dates(group0)
 
-    # the function handles two lists, possibly empty. Let's try all five possibilities up to length 2
-    group1 = get_meal_dates(conn, date1, date2, meal, [], [])
-    group1 = get_meal_dates(conn, date1, date2, meal, ['avocado'], [])
-    group1 = get_meal_dates(conn, date1, date2, meal, ['avocado','pasta'], [])
-    group1 = get_meal_dates(conn, date1, date2, meal, ['avocado'], ['bean'])
-    group1 = get_meal_dates(conn, date1, date2, meal, ['avocado','pasta'], ['bean','rice'])
+    if False:
+        # the function handles two lists, possibly empty.
+        # Let's try all five possibilities up to length 2
+        group1 = get_meal_dates(conn, date1, date2, meal, [], [])
+        group1 = get_meal_dates(conn, date1, date2, meal, ['avocado'], [])
+        group1 = get_meal_dates(conn, date1, date2, meal, ['avocado','pasta'], [])
+        group1 = get_meal_dates(conn, date1, date2, meal, ['avocado'], ['bean'])
+        group1 = get_meal_dates(conn, date1, date2, meal, ['avocado','pasta'], ['bean','rice'])
 
-    print('group1 dates: meals with avocado and pasta and without beans and without rice')
+        print('group1 dates: meals with avocado and pasta and without beans and without rice')
+        print_dates(group1)
+
+        group2 = get_complement_dates(conn, date1, date2, meal, group1)
+        print('complement dates')
+        print_dates(group2)
+    group1 = get_meal_dates(conn, date1, date2, meal, includes, excludes, debug=True)
+    print('group1 dates: meals with {includes} and without {excludes}'.format(includes=includes,excludes=excludes))
     print_dates(group1)
-
-    group2 = get_complement_dates(conn, date1, date2, meal, group1)
-    print('complement dates')
-    print_dates(group2)

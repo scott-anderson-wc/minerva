@@ -1,18 +1,17 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import sys
-import dbconn2
-import MySQLdb
+import cs304dbi as dbi
 from datetime import datetime, timedelta
 
 def get_dsn():
-    return dbconn2.read_cnf()
+    return dbi.cache_cnf()
 
 def get_conn(dsn=get_dsn()):
-    return dbconn2.connect(dsn)
+    return dbi.connect(dsn)
 
 def row_generator(query,conn=get_conn()):
-    curs = conn.cursor(MySQLdb.cursors.DictCursor) # results as Dictionaries
+    curs = dbi.dict_cursor(conn)
     curs.execute(query)
     while True:
         row = curs.fetchone()
@@ -20,14 +19,14 @@ def row_generator(query,conn=get_conn()):
             return
         yield row
 
-def no_basal_changes(time_delay=timedelta(hours=12),update=False):
+def no_basal_changes(time_delay=timedelta(hours=12), update=False):
     gaps = []
     num_gaps = 0
     prev = None
     if not update:
-        print 'Gaps between non-null values of basal_amt of more than {} in insulin_carb_2'.format(time_delay)
-        print 'gap |   rec_nums   | later timestamp - earlier timestamp | time diffence'
-        print '123 | 12345678 | 123456789012345 - 12345678901234567 | 1234567890123'
+        print('Gaps between non-null values of basal_amt of more than {} in insulin_carb_2'.format(time_delay))
+        print('gap |   rec_nums   | later timestamp - earlier timestamp | time diffence')
+        print('123 | 12345678 | 123456789012345 - 12345678901234567 | 1234567890123')
     conn = get_conn()
     curs2 = conn.cursor()
     for row in row_generator('SELECT basal_amt, date_time, rec_num FROM insulin_carb_2 ORDER BY date_time ASC'):
@@ -41,22 +40,22 @@ def no_basal_changes(time_delay=timedelta(hours=12),update=False):
             gaps.append(prev)
             num_gaps += 1
             if not update:
-                print '{} | {} {} | {} - {} = {}'.format(
+                print('{} | {} {} | {} - {} = {}'.format(
                     ('%3s' % num_gaps),
                     ('%8d' % prev['rec_num']),
                     ('%8d' % row['rec_num']),
                     row['date_time'], prev['date_time'],
-                    row['date_time'] - prev['date_time'])
+                    row['date_time'] - prev['date_time']))
             else:
                 curs2.execute('UPDATE insulin_carb_2 SET basal_gap = 1 WHERE rec_num = %s',[prev['rec_num']])
         prev = row
     return gaps
 
 def usage():
-    print '''usage: {} report|update timedelta
+    print('''usage: {} report|update timedelta
 example: {} report 24
 report finds gaps where there are no basal change for N hours, default 24
-update modifies the insulin_carb_2 table to mark the gaps'''.format(sys.argv[0],sys.argv[0])
+update modifies the insulin_carb_2 table to mark the gaps'''.format(sys.argv[0],sys.argv[0]))
 
 if __name__ == '__main__':
     if len(sys.argv) < 2:

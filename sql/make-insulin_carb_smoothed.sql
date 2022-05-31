@@ -1,3 +1,34 @@
+/* Revisions on 12/23/2021
+
+* I added a field bolus_type which is an Enum:
+   normal, combination from the old Diasend data, and
+   
+   S, E, DS, DE from the new Autoapp data.
+
+   The E and DE values are actually augmented with DE-start and
+   E-start. Since the Autoapp charts the extended insulin (a change to
+   the basal rate) at the *end* of the time, and we are interested in
+   it at the *start*, we'll go back and add the -start entries as part
+   of migrating the data from autoapp. See Mileva's code.
+
+   I also changed the user column to varchar(50) to be compatible with
+   the autoapp entry, even though, in practice, it'll be 'Hugh' or 'HughKB'
+
+*/
+
+/* Revisions on 1/7/2022.
+
+* I added fields. see Google doc for further description. I added these at the end of this file, using ALTER TABLE.
+
+  prime, double
+  refill, double
+  temp_basal_percent, int
+  temp_basal_in_progress, enum(Y,N)
+  temp_basal_hours, int
+  basal_event
+*/
+
+
 /* This is the table we actually use for display and calculations.
 
 insulin_carb  is the original raw data, 
@@ -63,11 +94,13 @@ carbs_on_board:   average of carb input weighted by Carb Action Curve (CAC) that
 
 drop table if exists `insulin_carb_grouped`;
 CREATE TABLE `insulin_carb_grouped` ( 
-    `user` varchar(20) DEFAULT NULL,
+    `user` varchar(50) DEFAULT NULL, -- changed to 50 because of autoapp
     `rtime` datetime primary key NOT NULL,   -- for rounded time, though it's really floored
     `basal_amt` float DEFAULT NULL,
     `basal_gap` tinyint default 0, /* 1 iff this row begins a gap */
     `basal_amt_12` float DEFAULT NULL,
+    `bolus_type` enum ('Combination','DE','DE-start','DS','DS-start','E','Normal','S'),  -- added this because of autoapp
+    `extended_bolus_amt_12` float default null,
     `total_bolus_volume` float default null,
     `normal_insulin_bolus_volume` float DEFAULT NULL,
     `combination_insulin_bolus_volume` float DEFAULT NULL,
@@ -102,8 +135,8 @@ insulin_carb_2 group by user,rtime;
 select count(*) as 'all rtime values in insulin_carb_2'
 from (select rtime from insulin_carb_2 group by rtime) as T;
 
-select count(*) as 'all rtime values in ics'
-from ics;
+select count(*) as 'count all rtime values in insulin_carb_grouped'
+from insulin_carb_grouped;
 
 -- from now on, we only update
 
@@ -155,14 +188,14 @@ update insulin_carb_grouped as icg, (select rtime,sum(bolus_volume) as nibv
              from insulin_carb_2
 	     where bolus_type = 'Normal'
 	     group by rtime) as T
-set icg.normal_insulin_bolus_volume = T.nibv
+set icg.bolus_type = 'Normal', icg.normal_insulin_bolus_volume = T.nibv
 where icg.rtime = T.rtime;
 
 update insulin_carb_grouped as icg, (select rtime,sum(bolus_volume) as cibv
              from insulin_carb_2
 	     where bolus_type = 'Combination'
 	     group by rtime) as T
-set icg.combination_insulin_bolus_volume = T.cibv
+set icg.bolus_type = 'Combination', icg.combination_insulin_bolus_volume = T.cibv
 where icg.rtime = T.rtime;
 
 -- check the bolus_volume sums
@@ -182,7 +215,7 @@ where icg.rtime = T.rtime;
 
 -- check the carbs
 select sum(carbs) as 'carb sum from insulin_carb_2' from insulin_carb_2;
-select sum(carbs) as 'carb sum from ics' from insulin_carb_grouped;
+select sum(carbs) as 'carb sum from insulin_carb_grouped' from insulin_carb_grouped;
 
 -- next, notes and rec_nums. concatenate these.
 
@@ -192,16 +225,57 @@ from insulin_carb_2 group by rtime) as T
 set icg.notes = T.notes, icg.rec_nums = T.rec_nums
 where icg.rtime = T.rtime;
 
+select count(rtime) as 'rows in ICG' from insulin_carb_grouped;
+
 drop table if exists insulin_carb_smoothed;
+select 'creating insulin_carb_smoothed';
 create table insulin_carb_smoothed like insulin_carb_grouped;
+
+select 'creating insulin_carb_smoothed_2';
+
+-- the _2 version adds columns 
 
 drop table if exists insulin_carb_smoothed_2;
 create table insulin_carb_smoothed_2 like insulin_carb_grouped;
 
--- Added these two columns to compute ISF
-alter table insulin_carb_smoothed_2 add column ISF float after corrective_insulin;
-alter table remove column ISF_trouble;
-alter table insulin_carb_smoothed_2 add column ISF_trouble varchar(50) after ISF;
+select 'adding ISF column';
 
+-- Added these columns to store ISF values computed by compute_isf in isf2.py
+
+-- I'd love to have an "if exists" clause here, but since the table is
+-- re-created, we can assume the columns don't exist.
+
+alter table insulin_carb_smoothed_2 add column ISF float after corrective_insulin;
+select 'adding ISF_trouble column';
+alter table insulin_carb_smoothed_2 add column ISF_trouble varchar(50) after ISF;
+select 'adding ISF_rounded column';
+
+-- the ISF_rounded is when there's a bolus in the last 20 minutes. Currently
+-- those values are not used, except for display. 
+-- I'd love to get rid of this column
+
+alter table insulin_carb_smoothed_2 add column ISF_rounded float after ISF_trouble;
+
+-- Added this at some point. It's for the predictive model and is computed by isf2.compute_predicted_bg()
+
+alter table insulin_carb_smoothed_2 add column Predicted_BG float default NULL after bg;
+
+-- Columns added for autoapp data. 
+
+-- Default is to add columns at the end, which makes this easier:
+
+-- insulin_carb_smoothed_2
+
+alter table insulin_carb_smoothed_2 add prime double;
+alter table insulin_carb_smoothed_2 add refill double;
+alter table insulin_carb_smoothed_2 add temp_basal_percent mediumint;
+alter table insulin_carb_smoothed_2 add temp_basal_in_progress enum('N','Y');
+alter table insulin_carb_smoothed_2 add temp_basal_hours int;
+alter table insulin_carb_smoothed_2 add basal_event set('set_basal', 'set_temp_basal', 'suspend_start', 'suspend_stop');
 
 select 'all done with make-insulin_carb_smoothed.sql';
+
+drop table insulin_carb_grouped;
+drop table insulin_carb_smoothed;
+create or replace view ics as
+select * from insulin_carb_smoothed_2;

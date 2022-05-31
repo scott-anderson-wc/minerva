@@ -1,6 +1,7 @@
 # Python module to act as our database interface
-import MySQLdb
-import dbconn2
+# Updated to use cs304dbi
+
+import cs304dbi as dbi
 from datetime import datetime, timedelta
 
 import json
@@ -16,14 +17,14 @@ dt_format = '%Y%m%d%H%M'        # the format for date_time in the database, for 
 def debug(*args):
     s = ' '.join(map(str,args))
     if app.debug:
-        print("debug: "+s)
+        print(("debug: "+s))
     else:
         app.logger.debug(s)
 
 def dictCursor():
-    dsn = dbconn2.read_cnf('/home/hugh9/.my.cnf')
-    conn = dbconn2.connect(dsn)
-    curs = conn.cursor(MySQLdb.cursors.DictCursor)
+    dsn = dbi.read_cnf('/home/hugh9/.my.cnf')
+    conn = dbi.connect(dsn)
+    curs = dbi.dict_cursor(conn)
     return curs
 
 def cgm_data_range(curs=dictCursor()):

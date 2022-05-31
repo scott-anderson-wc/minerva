@@ -2,7 +2,7 @@
 element of a Unix pipeline: reading from its arg (an iterator) and
 generating elements.'''
 
-from __future__ import print_function
+
 import functools
 from itertools import islice, count
 
@@ -63,19 +63,21 @@ def exhaust(source,progress=None):
             n += 1
             if progress is not None and n % progress == 0:
                 print('progress: {n}'.format(n=n))
-            source.next()
+            next(source)
     except StopIteration:
-        return 'Iteration is exhausted'
+        return 'Iteration is Exhausted'
         
-def more(source,page=20,printer=print):
+# The 2to3 tool can't handle print as a value 
+
+def more(source, page=20, printer=print):
     i = 1
     print('print function is ',printer)
     try:
         while True:
             while i<page:
                 i += 1
-                printer(source.next())
-            ans = raw_input('more? y/n ')
+                printer(next(source))
+            ans = input('more? y/n ')
             if ans != 'y':
                 break
             i = 1
@@ -100,12 +102,12 @@ def average(seq):
     return sum(seq)/len(seq)
 
 def shift(elts,new):
-    for i in xrange(len(elts)-1):
+    for i in range(len(elts)-1):
         elts[i] = elts[i+1]
     elts[len(elts)-1] = new
 
 def shiftdown(elts,new):
-    for i in xrange(len(elts)-1):
+    for i in range(len(elts)-1):
         elts[i+1] = elts[i]
     elts[0] = new
 
@@ -126,14 +128,17 @@ def test_shift():
 def do_window(rows, size=5):
     win = []
     while len(win) < size:
-        win.append(rows.next())
+        win.append(next(rows))
     while True:
         avg = average(win)
-        shift(win,rows.next())
+        shift(win,next(rows))
         yield avg
 
 # ================================================================
 
+
+def myprint(x):
+    print(x)
 
 def test1():
     exhaust(printall(islice(count(1), 20)))

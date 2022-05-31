@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-'''Compute insulion on board (IOB) from insulin inputs and the insulin action curve.
+'''Compute insulin on board (IOB) from insulin inputs and the insulin action curve.
 
 This is the version running on hughnew. It uses different table names
 versus the one on tempest, specifically insulin_carb_2 rather than insulin_carb.
@@ -8,8 +8,7 @@ versus the one on tempest, specifically insulin_carb_2 rather than insulin_carb.
 '''
 
 from copy import copy
-import MySQLdb
-import dbconn2
+import cs304dbi as dbi
 import csv
 import itertools
 from collections import deque
@@ -31,10 +30,10 @@ IOB_KEYS = ICS_KEYS[:]
 IOB_KEYS.extend(['active_insulin','rescue_carbs','corrective_insulin','tags'])
 
 def get_dsn():
-    return dbconn2.read_cnf()
+    return dbi.read_cnf()
 
 def get_conn(dsn=get_dsn()):
-    return dbconn2.connect(dsn)
+    return dbi.connect(dsn)
 
 def csv_values():
     with open(CSVfilename, 'rU') as csvfile:
@@ -52,9 +51,9 @@ def csv_dict_generator(csvfilename):
     '''returns an iterator that yields rows from the given CSV file as dictionaries'''
     with open(csvfilename, 'rU') as csvfile:
         reader = csv.reader(csvfile) # default format is Excel
-        header = reader.next()
+        header = next(reader)
         for row in reader:
-            yield dict(zip(header,row))
+            yield dict(list(zip(header,row)))
 
 key_defaults = {'user': None,
                 'Basal_amt': 0.0,
@@ -78,13 +77,13 @@ def format_elt(elt,key):
         return elt
     elif type(elt) == int:
         return elt
-    elif type(elt) == long:
+    elif type(elt) == int:
         return elt
     elif type(elt) == decimal.Decimal:
         return float(elt)
     elif type(elt) == bool:
         return 1 if elt else 0
-    elif type(elt) == str or type(elt) == unicode:
+    elif type(elt) == str or type(elt) == str:
         return elt
     else:
         raise TypeError('no format for type {t} with value {v}'.format(t=type(elt), v=elt))
@@ -105,8 +104,8 @@ def csv_output_all(rows, CSVfilename):
     '''Write the rows (can be an iterable) to the given filename; first line of output is all the keys in the first row.'''
     with open(CSVfilename, 'wb') as csvfile:
         writer = csv.writer(csvfile) # default format is Excel
-        row1 = rows.next()
-        writer.writerow(row1.keys())
+        row1 = next(rows)
+        writer.writerow(list(row1.keys()))
         for row in itertools.chain([row1],rows):
             writer.writerow(listify_row(row,keys))
 
@@ -120,7 +119,7 @@ def prefix(iterable,n=10):
     i = 0
     while i < n:
         i += 1
-        yield iterable.next()
+        yield next(iterable)
 
 def prefix_list(iterable,n=10):
     return list(prefix(iterable,n))
@@ -133,7 +132,7 @@ def print_rows(rows):
         return "{key}: {val}".format(key=k,val=v)
 
     for (i,r) in enumerate(rows):
-        print(str(i)+': '+', '.join([ kv_to_str(k,v) for k,v in r.items() ]))
+        print((str(i)+': '+', '.join([ kv_to_str(k,v) for k,v in list(r.items()) ])))
 
 def count(iterator):
     n = 0
@@ -148,12 +147,12 @@ def printIt(iterator,limit=None):
         i += 1
         if limit is not None and i >= limit:
             return
-        print i, elt
+        print(i, elt)
 
 def float_or_none(x):
-    if (type(x) == unicode or type(x) == str) and len(x) > 0:
+    if (type(x) == str or type(x) == str) and len(x) > 0:
         return float(x)
-    elif x == '' or x == u'':
+    elif x == '' or x == '':
         return None
     elif type(x) == decimal.Decimal:
         return float(x)
@@ -162,10 +161,10 @@ def float_or_none(x):
     else:
         raise TypeError("Don't know how to coerce {x} of type {t}".format(x=x,t=type(x)))
 
-    return float(x) if (type(x) == unicode or type(x) == str) and len(x) > 0 else None
+    return float(x) if (type(x) == str or type(x) == str) and len(x) > 0 else None
 
 def float_or_zero(x):
-    if (type(x) == unicode or type(x) == str) and len(x) > 0:
+    if (type(x) == str or type(x) == str) and len(x) > 0:
         return float(x)
     elif type(x) == float:
         return x
@@ -238,12 +237,12 @@ cursor_columns = None
 
 def row_get(row,key):
     if cursor_columns is None:
-        raise 'Forgot to set cursor columns!'
+        raise Exception('Forgot to set cursor columns!')
     return row[cursor_columns.index(key)]
 
 def row_set(row,key,val):
     if cursor_columns is None:
-        raise 'Forgot to set cursor columns!'
+        raise Exception('Forgot to set cursor columns!')
     row[cursor_columns.index(key)] = val
     return row
 
@@ -335,8 +334,8 @@ def gen_insulin_carb_vrows(conn=get_conn(),rows=None, pipeIn=None):
     # curr <= vrow < next. When vrow catches up to next, discard curr,
     # make curr be next, and get another next. If timestamp of new next is
     # equal to curr, merge them and get another next.
-    curr_row = rows.next()
-    next_row = rows.next()
+    curr_row = next(rows)
+    next_row = next(rows)
     curr_time = compute_rtime(curr_row)
     next_time = compute_rtime(next_row)
     if curr_time == next_time:
@@ -358,14 +357,14 @@ def gen_insulin_carb_vrows(conn=get_conn(),rows=None, pipeIn=None):
                 while True:
                     curr_row = next_row
                     curr_time = next_time
-                    next_row = rows.next()
+                    next_row = next(rows)
                     next_time = compute_rtime(next_row)
                     if debug:
-                        print('advance to ({ct} {ctr} and {nt} {ntr}) {diff}'
+                        print(('advance to ({ct} {ctr} and {nt} {ntr}) {diff}'
                               .format(ct=curr_time,nt=next_time,
                                       ctr=curr_row['rec_num'],
                                       ntr=next_row['rec_num'],
-                                      diff='greater' if next_time > curr_time else 'merge!'))
+                                      diff='greater' if next_time > curr_time else 'merge!')))
                     if next_time > curr_time:
                         break
                     # merge from curr into next, since the top of the
@@ -377,7 +376,7 @@ def gen_insulin_carb_vrows(conn=get_conn(),rows=None, pipeIn=None):
             if debug:
                 # print('vrow_time',vrow_time,'curr_time',curr_time)
                 if vrow_time == curr_time:
-                    print 'match! copy from ',curr_row
+                    print('match! copy from ',curr_row)
             for key in ['carbs', 'Basal_amt', 'bolus_volume','rec_num']:
                 if vrow_time == curr_time:
                     # print 'real row, key {k} is {v}'.format(k=key,v=curr_row[key])
@@ -390,10 +389,10 @@ def gen_insulin_carb_vrows(conn=get_conn(),rows=None, pipeIn=None):
             vrow_time = vrow_time + delta5
             yield vrow
     except StopIteration:
-        print '''Done generating virtual rows. End time is {end}
+        print('''Done generating virtual rows. End time is {end}
 and end rec_num is {r} and we merged {nmerge} rows'''.format(end=curr_row['rtime'],
                                                              r=curr_row['rec_num'],
-                                      nmerge=len(merged_rows))
+                                      nmerge=len(merged_rows)))
 
 def gen_all_rows_basals(conn=get_conn(),rows=None,pipeIn=None):
     '''This version generates virtual rows, with timestamps at 5 minute
@@ -427,15 +426,15 @@ def read_insulin_action_curve(col=CSVcolumn,test=True):
     index into the row, and the default value, 6, is the scaled Bernstein
     curve.'''
     if test:
-        print 'USING TEST IAC'
+        print('USING TEST IAC')
         return [ 0, 0.5, 1.0, 0.75, 0.5, 0.25, 0 ]
     else:
-        print 'USING REAL IAC'
+        print('USING REAL IAC')
         with open(CSVfilename, 'rU') as csvfile:
             reader = csv.reader(csvfile) # default format is Excel
-            headers = reader.next()
-            print('CSV headers are '+str(headers))
-            print('Using column {n} labeled {x}'.format(n=col,x=headers[col]))
+            headers = next(reader)
+            print(('CSV headers are '+str(headers)))
+            print(('Using column {n} labeled {x}'.format(n=col,x=headers[col])))
             vals = [ row[col] for row in reader ]
             # skip first row, which is the header
             return [ float(x) for x in vals]
@@ -490,7 +489,7 @@ def compute_insulin_on_board(rows=None,test_data=True,showCalc=True,test_iac=Tru
     lastrows = []
     if rows is None:
         rows = read_insulin_carb_smoothed(test=test_data)
-    print('showCalc is {sc}'.format(sc=showCalc))
+    print(('showCalc is {sc}'.format(sc=showCalc)))
     for row in rows:
         # print('row1',row)
         row['active_insulin'] = 0.0
@@ -505,7 +504,7 @@ def compute_insulin_on_board(rows=None,test_data=True,showCalc=True,test_iac=Tru
         # ================================================================
         # the previous lines are for all rows, including the first N-1 rows
         incr = 0
-        for i in xrange(min(N,len(lastrows))):
+        for i in range(min(N,len(lastrows))):
             prevrow = lastrows[i]
             ins_act = IAC[i]
             if showCalc:
@@ -523,10 +522,16 @@ def compute_insulin_on_board(rows=None,test_data=True,showCalc=True,test_iac=Tru
     for last in lastrows:
         yield last
     
+## This is the main computation of Dynamic Insulin. the `rows`
+## argument is the rows to computer DI on. It can be a sequence of
+## test data (a generator) or if None, the real data will be read from
+## the database using read_insulin_carb_smoothed(). You can also pass
+## in a test value for IAC.
+
 def compute_active_insulin(rows=None,test_data=False,showCalc=False,test_iac=False):
     '''read rows from insulin_carb table convolve the insulin values with
     insulin_action_curve (IAC) to get active_insulin (AI), now called
-    dynamic_insulin. Yields the data as a generator.
+    dynamic_insulin (DI). Yields the data as a generator.
     '''
     # should update this to the shiftdown() technique; saves a lot of consing
     IAC = read_insulin_action_curve(test=test_iac)
@@ -534,7 +539,7 @@ def compute_active_insulin(rows=None,test_data=False,showCalc=False,test_iac=Fal
     lastrows = []
     if rows is None:
         rows = read_insulin_carb_smoothed(test=test_data)
-    print('showCalc is {sc}'.format(sc=showCalc))
+    print(('showCalc is {sc}'.format(sc=showCalc)))
     for row in rows:
         # print('row1',row)
         row_set(row,'active_insulin', 0.0)
@@ -544,7 +549,7 @@ def compute_active_insulin(rows=None,test_data=False,showCalc=False,test_iac=Fal
         # ================================================================
         # the previous lines are for all rows, including the first N-1 rows
         incr = 0
-        for i in xrange(min(N,len(lastrows))):
+        for i in range(min(N,len(lastrows))):
             prevrow = lastrows[i]
             ins_act = IAC[i]
             ins_in = (row_get(prevrow,'basal_amt_12') +
@@ -564,19 +569,30 @@ def compute_active_insulin(rows=None,test_data=False,showCalc=False,test_iac=Fal
     for last in lastrows:
         yield last
     
-def main():
-    dsn = dbconn2.read_cnf()
-    dbconn2.connect(dsn)
-    compute_insulin_on_board(conn)
-    
+def test_compute_dynamic_insulin1():
+    '''Test code 5/16/2021. Want to see whether the computation assumes
+that IAC peaks at 100% or at some arbitrary units of
+delta_cgm/unit_insulin. This is to prepare to replace our old IAC with
+Mileva's empirically determined IAC curve.
+    See gdoc on Using RIAC
 '''
+    # tbd
+    pass
+
+
+def main():
+    dsn = dbi.read_cnf()
+    dbi.connect(dsn)
+    compute_insulin_on_board(conn)
+
+    '''
 def test_iob():
     global N, iac, first60
     iac = read_insulin_action_curve()
     print('insulin_action_curve',iac)
     N = len(iac)
-    dsn = dbconn2.read_cnf()
-    conn = dbconn2.connect(dsn)
+    dsn = dbi.read_cnf()
+    conn = dbi.connect(dsn)
     first60 = first_insulin_rows(conn,len(iac))
     print('first {n}'.format(n=N))
     print_rows(first60)
@@ -624,13 +640,13 @@ def find_rescue_events(rows=None):
         return row
 
     while len(window) < winsize:
-        window.append(initRow(rows.next()))
+        window.append(initRow(next(rows)))
     middle = int(winsize/2)
     after = row_get(window[winsize-1],'rtime')
     before = row_get(window[0],'rtime')
-    print('window temporal size is {after} - {before} = {diff}'.format(after=after,
+    print(('window temporal size is {after} - {before} = {diff}'.format(after=after,
                                                                        before=before,
-                                                                       diff=(after-before)))
+                                                                       diff=(after-before))))
     def anyCarbs(seq):
         for s in seq:
             if row_get(s,'carbs') > 0:
@@ -665,12 +681,12 @@ def find_rescue_events(rows=None):
                 addTag(mid,'corrective_insulin')
                 row_set(mid,'corrective_insulin', 1)
             out = window[0]
-            pipe.shift(window,initRow(rows.next()))
+            pipe.shift(window,initRow(next(rows)))
             yield out
     except StopIteration:
-        print 'found {x} rescue_carb events and {y} corrective_insulin_events'.format(
+        print('found {x} rescue_carb events and {y} corrective_insulin_events'.format(
             x=rescue_carb_events,
-            y=corrective_insulin_events)
+            y=corrective_insulin_events))
         for r in window:
             yield r
 
@@ -716,13 +732,13 @@ def categorize_carbs(rows=None):
         return row
 
     while len(window) < winsize:
-        window.append(initRow(rows.next()))
+        window.append(initRow(next(rows)))
     middle = int(winsize/2)
     after = row_get(window[winsize-1],'rtime')
     before = row_get(window[0],'rtime')
-    print('window temporal size is {after} - {before} = {diff}'.format(after=after,
+    print(('window temporal size is {after} - {before} = {diff}'.format(after=after,
                                                                        before=before,
-                                                                       diff=(after-before)))
+                                                                       diff=(after-before))))
     def anyCarbs(seq):
         for s in seq:
             if row_get(s,'carbs') > 0:
@@ -758,7 +774,7 @@ def categorize_carbs(rows=None):
                     name = meal_name(row_get(mid,'rtime'))
                     mealcounts[name] += 1
                     if name == 'before6' or name == 'after9':
-                        print name
+                        print(name)
                     addTag(mid,name)
                 else:
                     # print('FOUND RESCUE CARBS! at ',mid['rtime'])
@@ -772,13 +788,13 @@ def categorize_carbs(rows=None):
                 addTag(mid,'corrective_insulin')
                 row_set(mid,'corrective_insulin', 1)
             out = window[0]
-            pipe.shift(window,initRow(rows.next()))
+            pipe.shift(window,initRow(next(rows)))
             yield out
     except StopIteration:
-        print 'found {x} rescue_carb events and {y} corrective_insulin_events'.format(
+        print('found {x} rescue_carb events and {y} corrective_insulin_events'.format(
             x=rescue_carb_events,
-            y=corrective_insulin_events)
-        print 'meal counts',mealcounts
+            y=corrective_insulin_events))
+        print('meal counts',mealcounts)
         for r in window:
             yield r
 
@@ -795,17 +811,17 @@ def db_output(rows, tablename, keys):
         table=tablename,
         cols=','.join(keys),
         vals=','.join(['%s' for k in keys]))
-    print('insert using ',sql)
+    print(('insert using ',sql))
     insert_count = 0
     for row in rows:
         # wow, this is a lot of consing; hopefully GC can keep up
-        if len(row.keys()) != len(keys):
+        if len(list(row.keys())) != len(keys):
             for k in keys:
                 if k not in row:
                     raise Exception('row is missing some keys, including',k)
         insert_count += 1
         if insert_count % 1000 == 0:
-            print str(insert_count)+' '
+            print(str(insert_count)+' ')
         curs.execute(sql,listify_row(row,keys))
 
 
@@ -821,14 +837,14 @@ def db_update(rows, tablename, keys):
     sql = 'update {table} set {settings} where rec_num = %s'.format(
         table=tablename,
         settings = settings)
-    print('update using ',sql)
+    print(('update using ',sql))
     insert_count = 0
     for row in rows:
         if len(row) != len(cursor_columns):
             raise Exception('row has wrong length')
         insert_count += 1
         if insert_count % 1000 == 0:
-            print str(insert_count)+' '
+            print(str(insert_count)+' ')
         data = list(row)
         data.append(row_get(row,'rec_num')) # extra occurrence for the key
         curs.execute(sql,data)
@@ -851,12 +867,12 @@ def run_ics(test=True):
 def ic_test_data1():
     '''Test data for smoothing. An initial bolus with no basal, then a basal, and then both'''
     for row in [
-        {'epoch': '2016-08-08 07:00:00', 'Basal_amt': u'0.0', 'bolus_volume': u'0.0'}, # start at zero
-        {'epoch': '2016-08-08 08:00:00', 'Basal_amt': u'0.0', 'bolus_volume': u'2.0'}, # bolus
-        {'epoch': '2016-08-08 09:00:00', 'Basal_amt': u'2.4', 'bolus_volume': u'0.0'}, # basal at 0.2 per 5' interval
-        {'epoch': '2016-08-08 10:00:00', 'Basal_amt': u'2.4', 'bolus_volume': u'2.0'}, # both
-        {'epoch': '2016-08-08 11:00:00', 'Basal_amt': u'0.0', 'bolus_volume': u'0.0'}, # neither
-        {'epoch': '2016-08-08 12:00:00', 'Basal_amt': u'0.0', 'bolus_volume': u'0.0'}, # last row
+        {'epoch': '2016-08-08 07:00:00', 'Basal_amt': '0.0', 'bolus_volume': '0.0'}, # start at zero
+        {'epoch': '2016-08-08 08:00:00', 'Basal_amt': '0.0', 'bolus_volume': '2.0'}, # bolus
+        {'epoch': '2016-08-08 09:00:00', 'Basal_amt': '2.4', 'bolus_volume': '0.0'}, # basal at 0.2 per 5' interval
+        {'epoch': '2016-08-08 10:00:00', 'Basal_amt': '2.4', 'bolus_volume': '2.0'}, # both
+        {'epoch': '2016-08-08 11:00:00', 'Basal_amt': '0.0', 'bolus_volume': '0.0'}, # neither
+        {'epoch': '2016-08-08 12:00:00', 'Basal_amt': '0.0', 'bolus_volume': '0.0'}, # last row
         ]:
         print('draw from ic_test_data1')
         yield row
@@ -910,7 +926,7 @@ def format_real_row(row):
     return '['+','.join([ str(e) for e in listify_row(row,REAL_KEYS)])+']'
 
 def print_row(row):
-    print(format_row(row))
+    print((format_row(row)))
 
 def pipe1(test=False):
     if test:
@@ -985,11 +1001,11 @@ def pipe4(test=False):
 
 def test_data2():
     for row in [
-        {'epoch': '2016-08-08 07:00:00', 'Basal_amt': u'0.0', 'bolus_volume': u'0.0'}, # start at zero
-        {'epoch': '2016-08-08 08:00:00', 'Basal_amt': u'0.0', 'bolus_volume': u'2.0'}, # rescue insulin
-        {'epoch': '2016-08-08 09:00:00', 'Basal_amt': u'0.0', 'bolus_volume': u'2.0', 'carbs': 3.0}, # not rescue carbs or insulin
-        {'epoch': '2016-08-08 10:00:00', 'Basal_amt': u'0.0', 'bolus_volume': u'0.0', 'carbs': 3.0}, # rescue carbs
-        {'epoch': '2016-08-08 11:00:00', 'Basal_amt': u'0.0', 'bolus_volume': u'0.0'}, # last row
+        {'epoch': '2016-08-08 07:00:00', 'Basal_amt': '0.0', 'bolus_volume': '0.0'}, # start at zero
+        {'epoch': '2016-08-08 08:00:00', 'Basal_amt': '0.0', 'bolus_volume': '2.0'}, # rescue insulin
+        {'epoch': '2016-08-08 09:00:00', 'Basal_amt': '0.0', 'bolus_volume': '2.0', 'carbs': 3.0}, # not rescue carbs or insulin
+        {'epoch': '2016-08-08 10:00:00', 'Basal_amt': '0.0', 'bolus_volume': '0.0', 'carbs': 3.0}, # rescue carbs
+        {'epoch': '2016-08-08 11:00:00', 'Basal_amt': '0.0', 'bolus_volume': '0.0'}, # last row
 
         ]:
         print('draw from test data')
@@ -1031,7 +1047,7 @@ def pipe_count_carbs():
                    )
     # pipe.more(g(None))
     pipe.exhaust(g(None),progress=1000)
-    print 'carb_count',carb_count
+    print('carb_count',carb_count)
 
 
 def pipe_update_ics(test=False):
@@ -1073,7 +1089,7 @@ def csv_dump(table,CSVfilename):
     curs = conn.cursor(MySQLdb.cursors.DictCursor) # results as Dictionaries
     curs.execute('select * from {table} limit 1'.format(table=table))
     row = curs.fetchone()
-    keys = row.keys()
+    keys = list(row.keys())
     curs = conn.cursor() # results as lists
     curs.execute('select * from {table}'.format(table=table))
     with open(CSVfilename, 'wb') as csvfile:
@@ -1107,14 +1123,14 @@ def regularize_cgm():
             c = curs.fetchone()[0]
             if c == 1:
                 num_conflict += 1
-                print('rounding {dt} will conflict with {reg}'.format(dt=dt,reg=reg))
+                print(('rounding {dt} will conflict with {reg}'.format(dt=dt,reg=reg)))
             else:
                 # print('rounding {dt} to {reg}'.format(dt=dt,reg=reg))
                 num_rounded += 1
                 curs2.execute('update cgm_2 set date_time = %s where date_time = %s',
                               [reg,dt])
-    print('num rounded',num_rounded)
-    print('num conflicts',num_conflicts)
+    print(('num rounded',num_rounded))
+    print(('num conflicts',num_conflicts))
 
 ## ================================================================
 ## Updating ics with the cgm data

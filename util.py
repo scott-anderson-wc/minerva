@@ -2,26 +2,26 @@
 import math
 import datetime
 import flask
-import dbconn2
+import cs304dbi as dbi
 import json
 
 DSN = None
 
 def get_dsn(file='/home/hugh9/.my.cnf'):
     if DSN is None:
-        DSN = dbconn2.read_cnf('/home/hugh9/.my.cnf')
+        DSN = dbi.read_cnf('/home/hugh9/.my.cnf')
     return DSN
 
 def get_db_connection():
     g = flask.g
     conn = getattr(g, 'conn', None)
     if conn is None:
-        conn = g.conn = dbconn2.connect(get_dsn())
+        conn = g.conn = dbi.connect(get_dsn())
     return conn
 
 def get_dict_cursor():
     conn = get_db_connection()
-    return conn.cursor(MySQLdb.cursors.DictCursor)
+    return dbi.dict_cursor(conn)
     
 def dict2str(a_dict):
     '''returns a string for a dictionary-like object'''

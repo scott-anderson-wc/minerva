@@ -49,9 +49,14 @@ def post_meal_cgm_traces_for_dates(conn, dates, meal, duration):
 
 def average_cgm_trace(traces):
     '''Compute and return average CGM value from a list of traces.'''
+    if len(traces) == 0:
+        # no traces, so just return None
+        return None
     average = []
     lens = [ len(trace) for trace in traces ]
     n = min(lens)
+    if n == 0:
+        raise ValueError('zero length trace!')
     if n != max(lens):
         print('different length traces; skipping average')
         return None
@@ -94,14 +99,26 @@ TODO need to update and improve this docstring'''
     traces_with = post_meal_cgm_traces_for_dates(conn, group_with, meal, duration)
     traces_comp = post_meal_cgm_traces_for_dates(conn, group_comp, meal, duration)
     print('num traces in complement: {}'.format(len(traces_comp)))
+    if len(trace
     avg_with = average_cgm_trace(traces_with)
     avg_comp = average_cgm_trace(traces_comp)
-    print('date type: ',type(group_with[0]))
-    print('date_compe type: ',type(group_comp[0]))
+    print('date type: ', None if len(group_with)==0 else type(group_with[0]))
+    print('date_comp type: ',None if len(group_with)==0 else type(group_comp[0]))
     print('dates_with',[str(d) for d in group_with])
     print('dates_comp',[str(d) for d in group_comp])
     return avg_with, avg_comp, traces_with, traces_comp, group_with, group_comp
 
 if __name__ == '__main__':
-    post_meal_cgm_traces_between_dates(
-        '2016-04-02', '2016-05-02', 'dinner', 3*60, ['avocado'], [])
+    if False:
+        post_meal_cgm_traces_between_dates(
+            '2016-04-02', '2016-05-02', 'dinner', 3*60, ['avocado'], [])
+    # new bug that Phil report on 6/16/2020
+    val = post_meal_cgm_traces_between_dates('2020-03-09', '2020-03-11', 'dinner', 3*60, [], [])
+    (avg_with, avg_comp, traces_with, traces_comp, dates_with, dates_comp) = val
+    print('avg_with: {}'.format(avg_with))
+    print('avg_comp: {}'.format(avg_comp))
+    print('traces_with: {}'.format(traces_with))
+    print('traces_comp: {}'.format(traces_comp))
+    print('dates_with: {}'.format(dates_with))
+    print('dates_comp: {}'.format(dates_comp))
+    

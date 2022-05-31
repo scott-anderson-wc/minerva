@@ -23,6 +23,7 @@
 *.bak
 
 venv
+venv369
 dumps/
 exports/
 pre-process/logs/

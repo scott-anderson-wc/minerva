@@ -24,11 +24,11 @@ import plotly.graph_objs as go
 
 import util
 
-import __builtin__
+import builtins
 
 app = Flask(__name__)
 
-__builtin__.app = app           # so its available to other modules.
+builtins.app = app           # so its available to other modules.
 
 app.config.from_object('config')
 app.config.from_envvar('FLASK_SETTINGS')
@@ -191,7 +191,7 @@ def compute_data_range():
 def debug(*args):
     s = ' '.join(map(str,args))
     if app.debug:
-        print "debug: "+s
+        print("debug: "+s)
     else:
         app.logger.debug(s)
 

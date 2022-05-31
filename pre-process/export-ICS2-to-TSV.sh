@@ -1,6 +1,6 @@
 #!/bin/bash
 
-dir="$HOME/scott/devel/exports"
+dir="$HOME/scott/devel3/exports"
 
 filename=`date +${dir}/ics2-%F.csv`
 

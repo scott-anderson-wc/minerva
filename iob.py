@@ -6,8 +6,7 @@ versus the one on tempest, specifically insulin_carb_2 rather than insulin_carb.
 '''
 
 from copy import copy
-import MySQLdb
-import dbconn2
+import cs304dbi as dbi
 import csv
 import itertools
 from collections import deque
@@ -26,10 +25,10 @@ IOB_KEYS = ICS_KEYS[:]
 IOB_KEYS.append('iob')
 
 def get_dsn():
-    return dbconn2.read_cnf()
+    return dbi.read_cnf()
 
 def get_conn(dsn=get_dsn()):
-    return dbconn2.connect(dsn)
+    return dbi.connect(dsn)
 
 def csv_values():
     with open(CSVfilename, 'rU') as csvfile:
@@ -45,9 +44,9 @@ def csv_generator(csvfilename):
 def csv_dict_generator(csvfilename):
     with open(csvfilename, 'rU') as csvfile:
         reader = csv.reader(csvfile) # default format is Excel
-        header = reader.next()
+        header = next(reader)
         for row in reader:
-            yield dict(zip(header,row))
+            yield dict(list(zip(header,row)))
 
 def format_elt(elt):
     if elt is None:
@@ -60,7 +59,7 @@ def format_elt(elt):
         return float(elt)
     elif type(elt) == bool:
         return 1 if elt else 0
-    elif type(elt) == str or type(elt) == unicode:
+    elif type(elt) == str or type(elt) == str:
         return elt
     else:
         raise TypeError('no format for type{t} with value {v}'.format(t=type(elt), v=elt))
@@ -88,7 +87,7 @@ def prefix(iterable,n=10):
     i = 0
     while i < n:
         i += 1
-        yield iterable.next()
+        yield next(iterable)
 
 def prefix_list(iterable,n=10):
     return list(prefix(iterable,n))
@@ -101,7 +100,7 @@ def print_rows(rows):
         return "{key}: {val}".format(key=k,val=v)
 
     for (i,r) in enumerate(rows):
-        print(str(i)+': '+', '.join([ kv_to_str(k,v) for k,v in r.items() ]))
+        print((str(i)+': '+', '.join([ kv_to_str(k,v) for k,v in list(r.items()) ])))
 
 def count(iterator):
     n = 0
@@ -116,12 +115,12 @@ def printIt(iterator,limit=None):
         i += 1
         if limit is not None and i >= limit:
             return
-        print i, elt
+        print(i, elt)
 
 def float_or_none(x):
-    if (type(x) == unicode or type(x) == str) and len(x) > 0:
+    if (type(x) == str or type(x) == str) and len(x) > 0:
         return float(x)
-    elif x == '' or x == u'':
+    elif x == '' or x == '':
         return None
     elif type(x) == decimal.Decimal:
         return float(x)
@@ -130,10 +129,10 @@ def float_or_none(x):
     else:
         raise TypeError("Don't know how to coerce {x} of type {t}".format(x=x,t=type(x)))
 
-    return float(x) if (type(x) == unicode or type(x) == str) and len(x) > 0 else None
+    return float(x) if (type(x) == str or type(x) == str) and len(x) > 0 else None
 
 def float_or_zero(x):
-    if (type(x) == unicode or type(x) == str) and len(x) > 0:
+    if (type(x) == str or type(x) == str) and len(x) > 0:
         return float(x)
     elif type(x) == float:
         return x
@@ -232,7 +231,7 @@ def merge_rows(row1, row2):
     # row, since the later basal values would override the earlier
     # values. If there were two boluses, we'd probably want to sum them.
     if False:
-        print('Merging rows! at time '+row1['epoch'].strftime(US_FORMAT)+' and '+row2['epoch'].strftime(US_FORMAT))
+        print(('Merging rows! at time '+row1['epoch'].strftime(US_FORMAT)+' and '+row2['epoch'].strftime(US_FORMAT)))
     if (row1['bolus_volume'] is not None and
         row2['bolus_volume'] is not None):
         summed_boluses.append([row1,row2])
@@ -248,8 +247,8 @@ def gen_insulin_carb_vrows(conn=get_conn(),rows=None, pipeIn=None):
     # curr <= vrow < next. When vrow catches up to next, discard curr,
     # make curr be next, and get another next. If timestamp of new next is
     # equal to curr, merge them and get another next.
-    curr_row = rows.next()
-    next_row = rows.next()
+    curr_row = next(rows)
+    next_row = next(rows)
     if curr_row == next_row:
         raise Exception('before loop: next row equals curr row')
     curr_time = compute_rtime(curr_row)
@@ -270,7 +269,7 @@ def gen_insulin_carb_vrows(conn=get_conn(),rows=None, pipeIn=None):
             # StopIteration, which is perfect
             while True:
                 curr_row = next_row
-                next_row = rows.next()
+                next_row = next(rows)
                 if curr_row == next_row:
                     raise Exception('next row equals curr row')
                 curr_time = compute_rtime(curr_row)
@@ -327,14 +326,14 @@ def read_insulin_action_curve(CSVcolumn=6,test=True):
     index into the row, and the default value, 6, is the scaled Bernstein
     curve.'''
     if test:
-        print 'USING TEST IAC'
+        print('USING TEST IAC')
         return [ 0, 0.5, 1.0, 0.75, 0.5, 0.25, 0 ]
     else:
-        print 'USING REAL IAC'
+        print('USING REAL IAC')
         with open(CSVfilename, 'rU') as csvfile:
             reader = csv.reader(csvfile) # default format is Excel
             vals = [ row[CSVcolumn] for row in reader ]
-            print('Using column labeled {x}'.format(x=vals[0]))
+            print(('Using column labeled {x}'.format(x=vals[0])))
             # skip first row, which is the header
             return [ float(x) for x in vals[1:]]
 
@@ -388,7 +387,7 @@ def compute_insulin_on_board(rows=None,test_data=True,showCalc=True,test_iac=Tru
     lastrows = []
     if rows is None:
         rows = read_insulin_carb_smoothed(test=test_data)
-    print('showCalc is {sc}'.format(sc=showCalc))
+    print(('showCalc is {sc}'.format(sc=showCalc)))
     for row in rows:
         # print('row1',row)
         coerce_smoothed_row(row)
@@ -405,7 +404,7 @@ def compute_insulin_on_board(rows=None,test_data=True,showCalc=True,test_iac=Tru
         # ================================================================
         # the previous lines are for all rows, including the first N-1 rows
         incr = 0
-        for i in xrange(min(N,len(lastrows))):
+        for i in range(min(N,len(lastrows))):
             prevrow = lastrows[i]
             ins_act = IAC[i]
             if showCalc:
@@ -424,8 +423,8 @@ def compute_insulin_on_board(rows=None,test_data=True,showCalc=True,test_iac=Tru
         yield last
     
 def main():
-    dsn = dbconn2.read_cnf()
-    dbconn2.connect(dsn)
+    dsn = dbi.read_cnf()
+    dbi.connect(dsn)
     compute_insulin_on_board(conn)
     
 '''
@@ -434,8 +433,8 @@ def test_iob():
     iac = read_insulin_action_curve()
     print('insulin_action_curve',iac)
     N = len(iac)
-    dsn = dbconn2.read_cnf()
-    conn = dbconn2.connect(dsn)
+    dsn = dbi.read_cnf()
+    conn = dbi.connect(dsn)
     first60 = first_insulin_rows(conn,len(iac))
     print('first {n}'.format(n=N))
     print_rows(first60)
@@ -477,12 +476,12 @@ def run_ics(test=True):
 def ic_test_data1():
     '''Test data for smoothing. An initial bolus with no basal, then a basal, and then both'''
     for row in [
-        {'epoch': '2016-08-08 07:00:00', 'Basal_amt': u'0.0', 'bolus_volume': u'0.0'}, # start at zero
-        {'epoch': '2016-08-08 08:00:00', 'Basal_amt': u'0.0', 'bolus_volume': u'2.0'}, # bolus
-        {'epoch': '2016-08-08 09:00:00', 'Basal_amt': u'2.4', 'bolus_volume': u'0.0'}, # basal at 0.2 per 5' interval
-        {'epoch': '2016-08-08 10:00:00', 'Basal_amt': u'2.4', 'bolus_volume': u'2.0'}, # both
-        {'epoch': '2016-08-08 11:00:00', 'Basal_amt': u'0.0', 'bolus_volume': u'0.0'}, # neither
-        {'epoch': '2016-08-08 12:00:00', 'Basal_amt': u'0.0', 'bolus_volume': u'0.0'}, # last row
+        {'epoch': '2016-08-08 07:00:00', 'Basal_amt': '0.0', 'bolus_volume': '0.0'}, # start at zero
+        {'epoch': '2016-08-08 08:00:00', 'Basal_amt': '0.0', 'bolus_volume': '2.0'}, # bolus
+        {'epoch': '2016-08-08 09:00:00', 'Basal_amt': '2.4', 'bolus_volume': '0.0'}, # basal at 0.2 per 5' interval
+        {'epoch': '2016-08-08 10:00:00', 'Basal_amt': '2.4', 'bolus_volume': '2.0'}, # both
+        {'epoch': '2016-08-08 11:00:00', 'Basal_amt': '0.0', 'bolus_volume': '0.0'}, # neither
+        {'epoch': '2016-08-08 12:00:00', 'Basal_amt': '0.0', 'bolus_volume': '0.0'}, # last row
         ]:
         print('draw from ic_test_data1')
         yield row

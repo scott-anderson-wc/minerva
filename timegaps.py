@@ -1,11 +1,10 @@
-import MySQLdb
-import dbconn2
+import cs304dbi as dbi
 from datetime import datetime
 from iob2 import get_dsn, get_conn,EPOCH_FORMAT
 
 def gen_row_pairs(query='select rec_num, date from cgm order by rec_num',
                   conn=get_conn()):
-    curs = conn.cursor(MySQLdb.cursors.DictCursor) # results as Dictionaries
+    curs = dbi.dict_cursor(conn)
     curs.execute(query)
     prev = curs.fetchone()
     while True:
@@ -21,7 +20,7 @@ def check_all_consecutive(rows = gen_row_pairs()):
         (a,b) = pair
         if a['rec_num'] != (b['rec_num'] - 1):
             missing_rows.append(pair)
-    print 'There ',len(missing_rows),' gaps'
+    print('There ',len(missing_rows),' gaps')
     missing_rows.sort(key=lambda pair: pair[0]['rec_num'] - pair[1]['rec_num'])
     for pair in missing_rows[:100]:
         (a,b) = pair
@@ -29,11 +28,11 @@ def check_all_consecutive(rows = gen_row_pairs()):
         day_a,day_b = a['date'],b['date']
         date_a = datetime.strptime(day_a,EPOCH_FORMAT)
         date_b = datetime.strptime(day_b,EPOCH_FORMAT)
-        print ('{rec_a:,} (on {date_a}) to {rec_b:,} (on {date_b}) diffs: {rec_diff:,} records and {date_diff}'
+        print(('{rec_a:,} (on {date_a}) to {rec_b:,} (on {date_b}) diffs: {rec_diff:,} records and {date_diff}'
                .format(rec_a=rec_a,date_a=date_a,
                        rec_b=rec_b,date_b=date_b,
                        rec_diff=rec_b-rec_a,
-                       date_diff=date_b-date_a))
+                       date_diff=date_b-date_a)))
     return missing_rows
 
 def ptime(datetime_string):
@@ -41,7 +40,7 @@ def ptime(datetime_string):
         date = datetime.strptime(datetime_string,EPOCH_FORMAT)
         return date
     except ValueError as err:
-        print 'bogus datetime {date}: '.format(date=datetime_string),err
+        print('bogus datetime {date}: '.format(date=datetime_string),err)
 
 def check_date_gaps(rows = gen_row_pairs()):
     big_gaps = []
@@ -58,16 +57,16 @@ def check_date_gaps(rows = gen_row_pairs()):
             big_gaps.append((diff,a,b))
         elif diff.seconds > 3600:
             small_gaps.append((diff,a,b))
-    print 'There ',len(big_gaps),' big gaps'
+    print('There ',len(big_gaps),' big gaps')
     big_gaps.sort(key=lambda triple: -triple[0])
     for (diff,a,b) in big_gaps[:100]:
-        print '{a} to {b} gap of {diff}'.format(a=a['date'],b=b['date'],
-                                                diff=diff)
-    print 'There ',len(small_gaps),' small gaps'
+        print('{a} to {b} gap of {diff}'.format(a=a['date'],b=b['date'],
+                                                diff=diff))
+    print('There ',len(small_gaps),' small gaps')
     small_gaps.sort(key=lambda triple: -triple[0])
     for (diff,a,b) in small_gaps[:100]:
-        print '{a} to {b} gap of {diff}'.format(a=a['date'],b=b['date'],
-                                                diff=diff)
+        print('{a} to {b} gap of {diff}'.format(a=a['date'],b=b['date'],
+                                                diff=diff))
 
 
 if __name__ == '__main__':
