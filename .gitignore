@@ -27,3 +27,5 @@ venv369
 dumps/
 exports/
 pre-process/logs/
+csv_files/
+outtakes/
