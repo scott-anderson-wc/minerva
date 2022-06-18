@@ -381,15 +381,22 @@ def bolus_import_s_test(conn, start_rtime):
     for row in curs.fetchall():
         print("\t".join(map(str,row)))
     
+## The following is obsolete; need to use the data in the
+## extended_bolus_state table. See extended_bolus_import
+
 def bolus_import_e(conn, start_rtime, debugp=False):
     '''E entries. These dribble out the insulin over time, like the basal, but
     it's on *top* of the basal. So, we need a new column: extended_bolus_amt_12.
     data is value (an amount) and a duration. 
 
+    Note that autoapp currently records E entries when they *end*. So
+    we have to look back from that time.
+
     An E entry is recorded via extended_bolus_amt_12
     (when the duration ends, the extended_bolus_amt_12 should go to zero)
     Also, some E entries are zero. So extended_bolus_amt_12 goes to zero then, correct?
     bolus 95 is E for value zero and duration zero. What does that mean?
+
     '''
 
     # This needs to set all new rows (>= start_rtime), but those rows
@@ -403,18 +410,25 @@ def bolus_import_e(conn, start_rtime, debugp=False):
     # hours old. That's in my "todo" list, here:
     # https://docs.google.com/document/d/1ZCtErlxRQmPUz_vbfLXdg7ap2hIz5g9Lubtog8ZqFys/edit#
 
+    # However, since E boluses are recorded when they end, we don't
+    # have to do any date_add(date, interval duration minute)
+    # stuff. We just look for those that end after start_rtime
+
     src = conn.cursor()
-    n = src.execute('''select janice.date5f(date) as rtime, value as extended_bolus_total, duration
+    n = src.execute('''select date as end_time, value as extended_bolus_total, duration
                        from autoapp.bolus 
                        where user_id = 7 and type = 'E' 
-                       AND duration > 0 and date_add(date, interval duration minute) >= %s;''',
+                       AND date >= %s;''',
                     [start_rtime])
     debug('updating with {} E events from bolus table'.format(n))
     dst = conn.cursor()
     for row in src.fetchall():
-        rtime, volume, duration = row
+        end_time, volume, duration = row
+        # convert to rtimes
+        bolus_end_time = date_ui.to_rtime(end_time)
+
         # we need to *not* include this end_time, so < end_time not <= end_time
-        end_time = rtime + timedelta(minutes=duration)
+        bolus_start_time = bolus_end_time - timedelta(minutes=duration)
 
         # example: bolus_id = 3093 on 5/10/2022 is 2 units for 120
         # minutes each database row is 5 minutes, so there will be
@@ -425,16 +439,17 @@ def bolus_import_e(conn, start_rtime, debugp=False):
         # minutes, each extended_bolus_amt_12 is V/floor(D/5) units.
         extended_bolus_amt_12 = volume / math.floor(duration/5)
 
-        debug('spread {} from {} to {}, each {}'.format(volume, rtime, end_time, extended_bolus_amt_12))
+        debug('spread {} from {} to {}, each {}'
+              .format(volume, bolus_start_time, bolus_end_time, extended_bolus_amt_12))
         dst.execute('''UPDATE {} SET extended_bolus_amt_12 = %s 
                        WHERE user='{}' AND %s <= rtime and rtime < %s'''.format(TABLE,USER),
-                      [extended_bolus_amt_12, rtime, end_time])
+                      [extended_bolus_amt_12, bolus_start_time, bolus_end_time])
     conn.commit()
         
 def bolus_import_e_test(conn, start_rtime):
     start_rtime = date_ui.to_rtime(start_rtime)
     curs = conn.cursor()
-    nr = curs.execute('''select janice.date5f(date),type,if(value='', NULL, value), duration
+    nr = curs.execute('''select date,type,if(value='', NULL, value), duration
                          from autoapp.bolus
                          where user_id = 7 and type = 'E' and date >= %s''',
                  [start_rtime])
@@ -460,7 +475,7 @@ def bolus_import_e_test(conn, start_rtime):
                          from {}
                          where rtime >= %s and extended_bolus_amt_12 is not null'''.format(TABLE),
                       [start_rtime])
-    print('{} E boluses since {}'.format(nr, start_rtime))
+    print('{} E bolus drips since {}'.format(nr, start_rtime))
     for row in curs.fetchall():
         print("\t".join(map(str,row)))
     # let's also print the sum
@@ -595,6 +610,92 @@ def bolus_import_de_test(conn, start_rtime):
     print('are the sums approximately equal? {}'.format(approx_equal(before_sum, after_sum)))
 
 
+# ================================================================
+
+def extended_bolus_import(conn, start_rtime, debugp=False):
+    '''because extended boluses aren't recorded in the bolus table until
+they complete, we have to use a different approach. We'll look at the
+extended_bolus_state table, and compute the start time of the extended
+bolus from the date - progress_minutes and the duration from minutes.'''
+    curs = dbi.cursor(conn)
+    n = curs.execute('''SELECT * 
+                        FROM (SELECT date  
+                                     - interval progress_minutes minute as e_start,
+                                    date, absolute_rate, minutes, progress_minutes
+                              FROM autoapp.extended_bolus_state
+                              WHERE user_id = 7) as tmp
+                        WHERE e_start > %s'''.format(USER_ID),
+                     [start_rtime])
+    debug('updating with {} extended bolus reports since {}'.format(n, start_rtime))
+    last_start_time = None
+    dst = conn.cursor()
+    for row in curs.fetchall():
+        # is it volume or rate?
+        e_start, date, volume, duration, progress = row
+        e_start = date_ui.to_rtime_round(e_start)
+        debug(str(e_start),volume,duration,progress)
+        # last_start_time might be None or an earlier, different extended bolus
+        if last_start_time == e_start:
+            # we've done this one
+            debug('skipping ', e_start)
+            continue
+        last_start_time = e_start
+        end_rtime = date_ui.to_rtime(e_start + timedelta(minutes=duration))
+        extended_bolus_amt_12 = volume / math.floor(duration/5)
+        # we'll drip into the row with the start time (<=), but not the row with the end time (<)
+        dst.execute('''UPDATE {} SET extended_bolus_amt_12 = %s 
+                       WHERE user='{}' AND %s <= rtime and rtime < %s'''.format(TABLE,USER),
+                      [extended_bolus_amt_12, e_start, end_rtime])
+    conn.commit()
+
+# still working on this 
+
+def extended_bolus_import_test(conn, start_rtime):
+    start_rtime = date_ui.to_rtime(start_rtime)
+    curs = conn.cursor()
+    nr = curs.execute('''select janice.date5f(date),type,if(value='', NULL, value), duration
+                         from autoapp.bolus
+                         where user_id = 7 and type in ('DE','E') and date >= %s''',
+                 [start_rtime])
+    print('{} extended boluses since {}'.format(nr, start_rtime))
+    for row in curs.fetchall():
+        print("\t".join(map(str,row)))
+    # before updating the destination TABLE, let's null out the extended_bolus_amt_12
+    curs.execute('update {} set extended_bolus_amt_12 = null where rtime >= %s'.format(TABLE),
+                 [start_rtime])
+    conn.commit()
+    nr = extended_bolus_import(conn, start_rtime, debugp=True)
+    print('result: {} rows modified'.format(nr))
+    # find sum of these DE drips
+    curs.execute('''select sum(value) from autoapp.bolus 
+                    where user_id = 7 and type in ('DE','E') and date >= %s''',
+                 [start_rtime])
+    row = curs.fetchone()
+    before_sum = row[0]
+    print('those all sum to {}'.format(before_sum))
+    # because the boluses extend over time, I'm going to get every row, so
+    # we can see when they start/stop
+    nr = curs.execute('''select rtime, bolus_type, extended_bolus_amt_12
+                         from {}
+                         where rtime >= %s and extended_bolus_amt_12 is not null'''.format(TABLE),
+                      [start_rtime])
+    print('{} extended boluses since {}'.format(nr, start_rtime))
+    for row in curs.fetchall():
+        print("\t".join(map(str,row)))
+    # let's also print the sum. Unfortunately, this sum will also include E boluses. What to do....
+    # for debugging, we'll go back and set all the extended_bolus_amt_12 to null at the top of this
+    curs.execute('select sum(extended_bolus_amt_12) from {} where rtime >= %s'.format(TABLE),
+                 [start_rtime])
+    row = curs.fetchone()
+    after_sum = row[0]
+    print('those all sum to {}'.format(after_sum))
+    # floating point equality: less than 0.01%
+    print('are the sums approximately equal? {}'.format(approx_equal(before_sum, after_sum)))
+
+
+# ================================================================
+
+
 def bolus_import(conn, start_rtime, debugp=False):
 
     '''Migrates the bolus table from autoapp. 
@@ -609,9 +710,11 @@ Why are some bolus ids missing?
 
     '''
     bolus_import_s(conn, start_rtime, debugp=debugp)
-    bolus_import_e(conn, start_rtime, debugp=debugp)
     bolus_import_ds(conn, start_rtime, debugp=debugp)
-    bolus_import_de(conn, start_rtime, debugp=debugp)
+    # these are obsolete, replaced by extended_bolus_import
+    # bolus_import_e(conn, start_rtime, debugp=debugp)
+    # bolus_import_de(conn, start_rtime, debugp=debugp)
+    extended_bolus_import(conn, start_rtime, debugp=debugp)
 
 ## ================================================================
 
@@ -766,7 +869,7 @@ spreadsheet to share with Janice and Mileva
     '''
     curs = dbi.cursor(conn)
     n = curs.execute('''SELECT rtime, round(basal_amt_12*12,1) as basal_rate, 
-                        bolus_type, total_bolus_volume, extended_bolus_amt_12
+                        bolus_type, total_bolus_volume, extended_bolus_amt_12,
                         carbs 
                         FROM {} WHERE rtime >= %s'''.format(TABLE),
                      [since])
