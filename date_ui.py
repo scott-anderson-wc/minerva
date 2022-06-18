@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 mysql_fmt = '%Y-%m-%d %H:%M:%S'
 mysql_fmt_dateonly = '%Y-%m-%d'
@@ -57,6 +57,32 @@ def to_rtime(date):
     rtime = datetime(date.year, date.month, date.day, date.hour, min_5, 0)
     return rtime
 
+def to_rtime_round(dt):
+    '''Returns a new datetime object (datetimes are immutable) with the
+    minutes rounded to the most recent five minute mark    '''
+    # convert to number of minutes (as a float) since the beginning of
+    # the year then round that to the nearest multiple of 5 and
+    # finally convert back to a date
+    dt = to_datetime(dt)
+    year_start = datetime(dt.year, 1, 1)
+    td_seconds = dt - year_start   # this is a timedelta object
+    seconds = td_seconds.total_seconds()
+    mins = seconds / 60.0
+    min_5 = 5 * round(mins / 5.0)
+    rtime = year_start + timedelta(minutes=min_5)
+    return rtime
+
+def test_to_rtime_round():
+    vals = [ '2022-06-17 00:20:44',
+             '2022-06-17 00:20:41',
+             '2022-06-17 00:20:42',
+             '2022-06-17 00:20:49',
+             '2022-06-17 00:20:41',
+             '2022-06-17 00:20:42',
+             '2022-06-17 00:19:56',
+             '2022-06-17 00:19:51']
+    for v in vals:
+        print(to_rtime_round(v))
 
 if __name__ == '__main__':
     def test(d,t):
