@@ -27,7 +27,6 @@ import csv
 import math
 import itertools
 from datetime import datetime, timedelta,date
-import dateparser
 import decimal                  # some MySQL types are returned as type decimal
 import date_ui
 
@@ -451,7 +450,7 @@ def min_rtime():
     if min_rtime_cache is None:
         conn = dbi.connect()
         curs = dbi.cursor(conn)
-        curs.execute('''select min(rtime) from insulin_carb_smoothed''')
+        curs.execute('''select min(rtime) from insulin_carb_smoothed_2''')
         min_rtime_cache = curs.fetchone()[0]
     return min_rtime_cache
     
@@ -496,7 +495,7 @@ get the prior quarters, and 14 weeks later will get the following ones.'''
     return datetime2quarter_start(alt)
 
 def test_delta_quarter():
-    dt = dateparser.parse('7/1/2016 14:00')
+    dt = date_ui.to_datetime('7/1/2016 14:00')
     for dq in range(-4,3):
         print((dt,dq,delta_quarter(dt,dq)))
 
@@ -528,7 +527,7 @@ from the isf_details table, which is filled by
         isf_cache['hits'] += 1
     return isf_cache[key]
 
-def test_isf_values(dt=dateparser.parse('3/14/2015 1:15am')):
+def test_isf_values(dt=date_ui.to_datetime('3/14/2015 01:15')):
     '''gets ISF values twice; the second should be cached. The first rtime
 is the argument and the second is the next quarter (92 days later).
     '''
@@ -551,7 +550,7 @@ def compute_estimated_isf_at_time(dt,
     '''Return an estimated ISF value to use for the given datetime (dt), 
 and seeking at least min_data. Any date in the same quarter will yield the same value.
 We may use values from neighboring quarters and buckets.'''
-    dt = dt if type(dt) == datetime else dateparser.parse(dt)
+    dt = dt if type(dt) == datetime else date_ui.to_datetime(dt)
     year, quarter = dt.year, datetime_quarter(dt)
     bucket = datetime_bucket(dt)
     if verbose: print('key is year {}, quarter {} bucket {}'.format(year,quarter,bucket))
@@ -659,12 +658,16 @@ def test_stats():
     print((s.report()))
 
 
-def test_isf_at_time(min_dt=min_rtime(),max_dt=max_rtime()):
+def test_isf_at_time(min_dt=None, max_dt=None):
     '''This tests the computation of estimated ISF values (the function
 earlier). It goes through every year, quarter and bucket, invokes
 isf_at_time, collects the return values and updates the statistics.
 
     '''
+    if min_dt is None:
+        min_dt = min_rtime()
+    if max_dt is None:
+        max_dt = max_rtime()
     all_count = 0
     counts = {}
     isfs = []
@@ -925,7 +928,7 @@ if __name__ == '__main__':
     # print((getRecentISF(0,4,50,debug=True)))
     # import pdb; pdb.set_trace()
     # long_isf_values()
-    # test_isf_at_time(min_rtime(),dateparser.parse('12/1/2014 1:00am'))
+    # test_isf_at_time(min_rtime(),date_ui.to_datetime('12/1/2014 1:00am'))
     # isf_density()
     # est_isf_values()
     # test_isf_at_time()
