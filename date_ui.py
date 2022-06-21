@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import dateutil.parser
 
 mysql_fmt = '%Y-%m-%d %H:%M:%S'
 mysql_fmt_dateonly = '%Y-%m-%d'
@@ -40,10 +41,11 @@ time can be omitted, defaulting to 00:00:00 and can omit seconds, defaulting to 
     return dt.strftime(mysql_fmt),dt
 
 def to_datetime(date):
-    '''Converts a date in MySQL syntax into a Python datetime object. Idempotent.'''
+    '''Converts a date string into a Python datetime object. Idempotent.'''
     if type(date) == datetime:
         return date
-    return mysql_datetime_to_python_datetime(date)
+    # return mysql_datetime_to_python_datetime(date)
+    return dateutil.parser.parse(date)
 
 # rtime is time rounded *down* to the most recent 5 minute mark
 # see the date5f function defined in pre-process/process_2.sql 
