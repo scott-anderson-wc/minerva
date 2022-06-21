@@ -744,7 +744,8 @@ def carbohydrate_import_test(conn, start_rtime):
     before_sum = row[0]
     print('summing to {}'.format(before_sum))
     carbohydrate_import(conn, start_rtime, debugp=True)
-    nr = curs.execute('select rtime, carbs from {} where rtime >= %s and carbs is not null'.format(TABLE),
+    nr = curs.execute('''SELECT rtime, carbs from {} 
+                          WHERE rtime >= %s and carbs is not null'''.format(TABLE),
                       [start_rtime])
     print('{} carbs since {}'.format(nr, start_rtime))
     for row in curs.fetchall():
@@ -834,10 +835,12 @@ def migrate_cgm(conn=None):
     conn.commit()
                     
 
+
 # ================================================================
 # this is the main function
 
 def migrate_all(conn=None, verbose=False, alt_start_time=None):
+
     '''This is the function that should, eventually, be called from a cron job every 5 minutes.'''
     if conn is None:
         conn = dbi.connect()
