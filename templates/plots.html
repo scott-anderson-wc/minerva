@@ -1,0 +1,179 @@
+{% extends "b.html" %}
+
+{% block main_content %}
+
+<h1>Insulin and CGM Plots</h1>
+
+<h2>Starting at <span id="span_start_time">{{start_time}}</span>
+    running for <span id="span_hours">{{hours}}</span> hours</h2>
+
+<p>
+<label>start date <input id="input_start_date" type="date"></label>
+<label>start time <input id="input_start_time" type="time"></label>
+<label>duration (hours) <input id="input_duration" type="number" min="1" max="24" step="1"></label>
+</p>
+
+<div id="insulinPlot" style="width:100%;max-width:1024px"></div>
+<div id="cgmPlot" style="width:100%;max-width:1024px"></div>
+
+<script>
+    var g;
+
+    function datetime_to_minutes(datetime) {
+        let date = new Date(datetime);
+        return date.getHours()*60 + date.getMinutes();
+    }
+
+    function timesteps(startmin, endmin) {
+        let vals = [];
+        for(let mins = startmin; mins <= endmin; mins += 5) {
+            vals.push(mins);
+        }
+        return vals;
+    }
+
+    function minutes_to_timestr(mins) {
+        let hh = Math.floor(mins/60);
+        let mm = mins - hh*60;
+        
+        return (hh<10?"0"+hh:""+hh)
+            +":"
+            +(mm<10?"0"+mm:""+mm);
+    }
+
+
+    // global to hold Ajax response, to help in debugging
+    var g;
+
+    function update_insulin_plot(start_time, hours) {
+        const url = `/plot-data/${start_time}/${hours}`;
+        console.log('fetching data from ',url);
+        $.get(url, function (resp) {
+            g = resp;
+            console.log('got ',resp);
+            const [boluses, prog_basal, actual_basal, extended ] = resp;
+            const trace_boluses = { x: times_str,
+                                    y: boluses,
+                                    type: "bar",
+                                    name: "DS bolus"};
+            const trace_used_basal = {x: times_str,
+                                      y: actual_basal,
+                                      type: "line",
+                                      name: "actual basal"};
+            const trace_extended_bolus = {x: times_str,
+                                          y: extended,
+                                          type: "line",
+                                          name: "extended bolus"};
+            traces = [trace_boluses,
+                        // trace_prog_basal,
+                        trace_used_basal,
+                        trace_extended_bolus
+                       ];
+            // Display using Plotly
+            var data = [trace_boluses,
+                        // trace_prog_basal,
+                        trace_used_basal,
+                        trace_extended_bolus
+                       ];
+            var layout = {title: "Insulin plot",
+                          showlegend: true,
+                          legend: {
+                              x: 1,
+                              xanchor: 'right',
+                              y: 0}
+                         };
+            var config = {responsive: true};
+            Plotly.newPlot("insulinPlot", data, layout, config);
+        });
+    }
+
+    function update_cgm_plot(start_time, hours) {
+        // completely made up CGM curve. Sine curve starting at 100 mgdl,
+        var cgm_function = function (t) {
+            let alpha = t/240.0*Math.PI;
+            let val = 100 + 40*Math.sin(alpha) + Math.random()*10-5;
+            return {t, val};
+        };
+        var cgm_values = times.map(cgm_function);
+        var trace_cgm_values = {x: times_str,
+                                y: cgm_values.map(d => d.val),
+                                type: "line",
+                                name: "imaginary CGM"};
+        var config = {responsive: true};
+        Plotly.newPlot("cgmPlot",
+                       [trace_cgm_values],
+                       {title: "Imaginary CGM plot",
+                        showlegend: false},
+                       config);
+    }
+
+    // globals, to share data and ease debugging
+    var start_mins;
+    var end_mins;
+    var times; 
+    var times_str;
+
+    function update_plots(start_time, hours) {
+        start_mins = datetime_to_minutes(start_time);
+        end_mins = start_mins + 60*hours;
+        times = timesteps(start_mins, end_mins);
+        times_str = times.map(minutes_to_timestr);
+        // ready to plot
+        update_insulin_plot(start_time, hours);
+        update_cgm_plot(start_time, hours);
+    }
+
+    // globals
+    var start_datetime = '{{start_time}}';
+    var hours = {{hours}};
+
+    update_plots('{{start_time}}', {{hours}});
+
+    function date_to_ISO_datestring(date) {
+        // dunno why this method doesn't exist
+        const yyyy = date.getFullYear();
+        const m = date.getMonth();
+        const mm = m<10?"0"+m:""+m;
+        const d = date.getDate();
+        const dd = d<10?"0"+d:""+d;
+        return yyyy+'-'+mm+'-'+dd;
+    }
+
+    function date_to_ISO_timestring(date) {
+        // dunno why this method doesn't exist
+        const h = date.getHours();
+        const m = date.getMinutes();
+        return (h<10 ? "0"+h : ""+h)
+            +":"
+            +(m<10 ? "0"+m : ""+m);
+    }
+
+    $(document).ready(function () {
+        const start = new Date(start_datetime);
+        const start_time = start.toLocaleTimeString();
+
+        $("#input_start_date").val(date_to_ISO_datestring(start));
+        $("#input_start_time").val(date_to_ISO_timestring(start));
+        $("#input_duration").val('{{hours}}');
+    });
+
+    $("#input_start_time").change(function () {
+        let start_date = $("#input_start_date").val();
+        let start_time = $("#input_start_time").val();
+        let start = new Date(start_date + " " + start_time);
+        console.log("switching to ", start);
+        $("#span_start_time").text(start);
+        // set the global
+        start_datetime = date_to_ISO_datestring(start)+" "+date_to_ISO_timestring(start);
+        update_plots(start_datetime, hours);
+    });
+    
+    $("#input_duration").change(function () {
+        hours = $("#input_duration").val();
+        $("#span_hours").text(hours);
+        update_plots(start_datetime, hours);
+    });
+
+
+</script>
+{% endblock %}
