@@ -53,12 +53,13 @@ def displayRecentISF():
     '''This just displays the page; all the data is gotten by Ajax. See below.'''
     return render_template('isf-display.html')
 
-@app.route('/info')
+@app.route('/info/')
 def info():
     '''Info about the app deployment'''
     flash('Python version is {}'.format(sys.version))
     for p in sys.path:
         flash('Path has {}'.format(p))
+    flash('Python sys.prefix is {}'.format(sys.prefix))
     return render_template('b.html')
 
 
