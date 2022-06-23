@@ -55,6 +55,40 @@ some point.
     extended = [ round(row[2]*12,2) if row[2] is not None else None for row in rows ]
     return (boluses, prog_basal, actual_basal, extended)
 
+def get_cgm_info(conn, start_time=None, hours=2):
+    '''Get cgm info for given time period after
+given start time (default to now-hours).  Returns a list of values,
+suitable for a Plotly trace.
+
+    '''
+    if start_time is None:
+        start_time = datetime.now() - timedelta(hours=hours)
+        start_time = date_ui.to_rtime(start_time)
+    else:
+        # can't trust the user's start_time
+        try:
+            start_time = date_ui.to_rtime(start_time)
+        except ValueError:
+            return []
+    try:
+        hours = int(hours)
+    except ValueError:
+        hours = 2
+    end_time = start_time + timedelta(hours=hours)
+    desired_len = 12*hours
+    curs = dbi.cursor(conn)
+    n = curs.execute('''SELECT cgm
+                        FROM insulin_carb_smoothed_2
+                        WHERE user = '{}' 
+                        AND rtime >= %s and rtime < %s'''.format(USER),
+                     [start_time, end_time])
+    if n != desired_len:
+        debug('in get_cgm_info, wrong number of values: wanted {} got {}'.format(desired_len, n))
+    rows = curs.fetchall()
+    cgm_values = [ row[0] for row in rows ]
+    return cgm_values
+
+
 if __name__ == '__main__':
     conn = dbi.connect()
     boluses, prog_basal, actual_basal, extended_boluses = get_insulin_info(conn)
@@ -66,3 +100,7 @@ if __name__ == '__main__':
     print(actual_basal)
     print('extended boluses')
     print(extended_boluses)
+    cgm = get_cgm_info(conn)
+    print('cgm')
+    print(cgm)
+    

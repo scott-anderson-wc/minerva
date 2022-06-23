@@ -113,7 +113,7 @@ def plot_data0():
 
 @app.route('/plot-data/<start_date>/<start_time>/<hours>')
 def plot_data(start_date, start_time, hours):
-    '''return JSON data for given start_time and hours. '''
+    '''return JSON data (insulin and cgm) for given start_time and hours. '''
     # can't trust the user's start_time
     try:
         start_time = date_ui.to_rtime(start_date + " " + start_time)
@@ -125,8 +125,9 @@ def plot_data(start_date, start_time, hours):
         return (jsonify({'error': '''bad duration. should be a positive integer like 2'''}), 400)
     # finally, real work
     conn = dbi.connect()
-    data = ics.get_insulin_info(conn, start_time, hours)
-    return jsonify(data)
+    boluses, prog_basal, actual_basal, extended = ics.get_insulin_info(conn, start_time, hours)
+    cgm = ics.get_cgm_info(conn, start_time, hours)
+    return jsonify([boluses, prog_basal, actual_basal, extended, cgm])
 
 @app.route ('/getRecentISF/<int:time_bucket>/<int:min_weeks>/<int:min_data>/')
 def getRecentISF(time_bucket,min_weeks, min_data):

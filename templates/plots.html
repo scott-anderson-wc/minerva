@@ -129,6 +129,7 @@
     function minutes_to_timestr(mins) {
         let hh = Math.floor(mins/60);
         let mm = mins - hh*60;
+        hh = hh % 24;
         
         return (hh<10?"0"+hh:""+hh)
             +":"
@@ -136,71 +137,56 @@
     }
 
 
-    // global to hold Ajax response, to help in debugging
-    var g;
-
-    function update_insulin_plot(start_date, start_time, duration_hours) {
-        console.log("start date: ",start_date, "start_time:", start_time, "duration_hours:", duration_hours);
-        const url = data_url(start_date, start_time, duration_hours);
-        console.log('fetching data from ',url);
-        $.get(url, function (resp) {
-            g = resp;
-            console.log('got ',resp);
-            const [boluses, prog_basal, actual_basal, extended ] = resp;
-            const trace_boluses = { x: times_str,
-                                    y: boluses,
-                                    type: "bar",
-                                    name: "DS bolus"};
-            const trace_used_basal = {x: times_str,
-                                      y: actual_basal,
+    function update_insulin_plot(boluses, prog_basal, actual_basal, extended) {
+        const trace_boluses = { x: times_str,
+                                y: boluses,
+                                type: "bar",
+                                name: "DS bolus"};
+        const trace_used_basal = {x: times_str,
+                                  y: actual_basal,
+                                  type: "line",
+                                  name: "actual basal"};
+        const trace_extended_bolus = {x: times_str,
+                                      y: extended,
                                       type: "line",
-                                      name: "actual basal"};
-            const trace_extended_bolus = {x: times_str,
-                                          y: extended,
-                                          type: "line",
-                                          name: "extended bolus"};
-            traces = [trace_boluses,
-                        // trace_prog_basal,
-                        trace_used_basal,
-                        trace_extended_bolus
-                       ];
-            // Display using Plotly
-            var data = [trace_boluses,
-                        // trace_prog_basal,
-                        trace_used_basal,
-                        trace_extended_bolus
-                       ];
-            var layout = {title: "Insulin plot",
-                          showlegend: true,
-                          legend: {
-                              x: 1,
-                              xanchor: 'right',
-                              y: 0}
-                         };
-            var config = {responsive: true};
-            Plotly.newPlot("insulinPlot", data, layout, config);
-        });
+                                      name: "extended bolus"};
+        traces = [trace_boluses,
+                  // trace_prog_basal,
+                  trace_used_basal,
+                  trace_extended_bolus
+                 ];
+        // Display using Plotly
+        var data = [trace_boluses,
+                    // trace_prog_basal,
+                    trace_used_basal,
+                    trace_extended_bolus
+                   ];
+        var layout = {title: "Insulin plot",
+                      showlegend: true,
+                      legend: {
+                          x: 1,
+                          xanchor: 'right',
+                          y: 0}
+                     };
+        var config = {responsive: true};
+        Plotly.newPlot("insulinPlot", data, layout, config);
     }
 
-    function update_cgm_plot(start_date, start_time, hours) {
-        // completely made up CGM curve. Sine curve starting at 100 mgdl,
-        var cgm_function = function (t) {
-            let alpha = t/240.0*Math.PI;
-            let val = 100 + 40*Math.sin(alpha) + Math.random()*10-5;
-            return {t, val};
-        };
-        var cgm_values = times.map(cgm_function);
+    function update_cgm_plot(cgm_values) {
         var trace_cgm_values = {x: times_str,
-                                y: cgm_values.map(d => d.val),
+                                y: cgm_values,
                                 type: "line",
-                                name: "imaginary CGM"};
+                                name: "realtime CGM"};
         var config = {responsive: true};
         Plotly.newPlot("cgmPlot",
                        [trace_cgm_values],
-                       {title: "Imaginary CGM plot",
+                       {title: "realtime CGM plot",
                         showlegend: false},
                        config);
     }
+
+    // global to hold Ajax response, to help in debugging
+    var g;
 
     // globals, to share data and ease debugging
     var start_mins;
@@ -214,9 +200,18 @@
         end_mins = start_mins + 60*hours;
         times = timesteps(start_mins, end_mins);
         times_str = times.map(minutes_to_timestr);
-        // ready to plot
-        update_insulin_plot(start_date, start_time, hours);
-        update_cgm_plot(start_date, start_time, hours);
+        // get data
+        console.log("start date: ",start_date, "start_time:", start_time, "duration_hours:", duration_hours);
+        const url = data_url(start_date, start_time, duration_hours);
+        console.log('fetching data from ',url);
+        $.get(url, function (resp) {
+            g = resp;
+            console.log('got ',resp);
+            const [boluses, prog_basal, actual_basal, extended, cgm ] = resp;
+            // ready to plot
+            update_insulin_plot(boluses, prog_basal, actual_basal, extended);
+            update_cgm_plot(cgm);
+        });
     }
 
 
