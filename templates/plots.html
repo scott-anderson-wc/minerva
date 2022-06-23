@@ -17,6 +17,90 @@
 <div id="cgmPlot" style="width:100%;max-width:1024px"></div>
 
 <script>
+    // this URL is the bare URL. Need to concatenate the start datetime and duration
+    const page_url_base = "{{url_for('plots0')}}";
+    const data_url_base = "{{url_for('plot_data0')}}";
+
+
+    // globals
+    var start_datetime_str = '{{start_time}}';
+    var start_datetime = to_date(start_datetime_str);
+    var duration_hours = {{hours}};
+
+    function to_date(datetime_str) {
+        try {
+            return new Date(datetime_str);
+        } catch (err) {
+            console.error('Not a proper datetime str: ', datetime_str);
+            throw err;
+        }
+    }
+
+    function date_to_ISO_datestring(date) {
+        // dunno why this method doesn't exist
+        const yyyy = date.getFullYear();
+        const m = date.getMonth();
+        const mm = m<10?"0"+m:""+m;
+        const d = date.getDate();
+        const dd = d<10?"0"+d:""+d;
+        return yyyy+'-'+mm+'-'+dd;
+    }
+
+    function date_to_ISO_timestring(date) {
+        // dunno why this method doesn't exist
+        const h = date.getHours();
+        const m = date.getMinutes();
+        return (h<10 ? "0"+h : ""+h)
+            +":"
+            +(m<10 ? "0"+m : ""+m);
+    }
+
+    function to_start_datetime_str(start) {
+        // argument is probably a string, but can also be a datetime object
+        try {
+            start = to_date(start);
+            // sets the globals
+            start_datetime = start;
+            start_datetime_str = date_to_ISO_datestring(start)+" "+date_to_ISO_timestring(start);
+        } catch (err) {
+            console.error('start is not a proper datetime: ',start);
+            throw err;
+        }
+    }
+
+    function to_duration(duration) {
+        // should check that it's a small, positive integer
+        try {
+            if( (typeof duration === typeof 2) &&
+                duration > 0 &&
+                duration < 24 ) {
+                // 
+                duration = Math.round(duration);
+            }
+        } catch (err) {
+            console.error('duration is not a small, positive integer: ',duration);
+            throw err;
+        }
+    }
+
+    function data_url(start, duration) {
+        to_start_datetime_str(start);
+        to_duration(duration);
+        // finally, we get to work
+        const slash = "/";
+        // uses the globals set earlier
+        return data_url_base + start_datetime_str + slash + duration;
+    }
+
+    function page_url(start, duration) {
+        to_start_datetime_str(start);
+        to_duration(duration);
+        // finally, we get to work
+        const slash = "/";
+        // uses the globals set earlier
+        return page_url_base + start_datetime_str + slash + duration;
+    }
+
     var g;
 
     function datetime_to_minutes(datetime) {
@@ -45,8 +129,8 @@
     // global to hold Ajax response, to help in debugging
     var g;
 
-    function update_insulin_plot(start_time, hours) {
-        const url = `/plot-data/${start_time}/${hours}`;
+    function update_insulin_plot(start_time, duration_hours) {
+        const url = data_url(start_time, duration_hours);
         console.log('fetching data from ',url);
         $.get(url, function (resp) {
             g = resp;
@@ -123,34 +207,11 @@
         update_cgm_plot(start_time, hours);
     }
 
-    // globals
-    var start_datetime = '{{start_time}}';
-    var hours = {{hours}};
-
-    update_plots('{{start_time}}', {{hours}});
-
-    function date_to_ISO_datestring(date) {
-        // dunno why this method doesn't exist
-        const yyyy = date.getFullYear();
-        const m = date.getMonth();
-        const mm = m<10?"0"+m:""+m;
-        const d = date.getDate();
-        const dd = d<10?"0"+d:""+d;
-        return yyyy+'-'+mm+'-'+dd;
-    }
-
-    function date_to_ISO_timestring(date) {
-        // dunno why this method doesn't exist
-        const h = date.getHours();
-        const m = date.getMinutes();
-        return (h<10 ? "0"+h : ""+h)
-            +":"
-            +(m<10 ? "0"+m : ""+m);
-    }
 
     $(document).ready(function () {
+        update_plots(start_datetime_str, duration_hours);
+
         const start = new Date(start_datetime);
-        const start_time = start.toLocaleTimeString();
 
         $("#input_start_date").val(date_to_ISO_datestring(start));
         $("#input_start_time").val(date_to_ISO_timestring(start));
@@ -162,6 +223,9 @@
         let start_time = $("#input_start_time").val();
         let start = new Date(start_date + " " + start_time);
         console.log("switching to ", start);
+        // Ajax would be nice, but then we couldn't bookmark, etc.
+        // Maybe allow either, as a user preference?
+        document.location = 
         $("#span_start_time").text(start);
         // set the global
         start_datetime = date_to_ISO_datestring(start)+" "+date_to_ISO_timestring(start);

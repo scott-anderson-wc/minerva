@@ -101,6 +101,13 @@ model, starting at given date/time and for given number of hours.'''
     # finally, a useful response. However, the actual data is sent by Ajax.
     return render_template('plots.html', start_time=start_time, hours=hours)
 
+@app.route('/plot-data/')
+def plot_data0():
+    '''Gets the current data as an JSON response'''
+    start = date_ui.to_rtime(datetime.now())
+    hours = 2
+    return plot_data(start, hours)
+
 @app.route('/plot-data/<start_time>/<hours>')
 def plot_data(start_time, hours):
     '''return JSON data for given start_time and hours. '''
