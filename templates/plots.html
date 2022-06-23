@@ -23,15 +23,17 @@
 
 
     // globals
-    var start_datetime_str = '{{start_time}}';
-    var start_datetime = to_date(start_datetime_str);
+    var start_date_str = "{{start_date}}";
+    var start_time_str = "{{start_time}}";
+    var start_datetime = to_date(start_date_str+" "+start_time_str);
     var duration_hours = {{hours}};
 
-    function to_date(datetime_str) {
+    function to_date(datetime_str, opt_timestr) {
+        let dt_str = opt_timestr ? datetime_str + " " + opt_timestr : datetime_str;
         try {
-            return new Date(datetime_str);
+            return new Date(dt_str);
         } catch (err) {
-            console.error('Not a proper datetime str: ', datetime_str);
+            console.error('Not a proper datetime str: ', datetime_str, opt_timestr);
             throw err;
         }
     }
@@ -39,7 +41,7 @@
     function date_to_ISO_datestring(date) {
         // dunno why this method doesn't exist
         const yyyy = date.getFullYear();
-        const m = date.getMonth();
+        const m = date.getMonth()+1;
         const mm = m<10?"0"+m:""+m;
         const d = date.getDate();
         const dd = d<10?"0"+d:""+d;
@@ -55,6 +57,7 @@
             +(m<10 ? "0"+m : ""+m);
     }
 
+    // obsolete
     function to_start_datetime_str(start) {
         // argument is probably a string, but can also be a datetime object
         try {
@@ -62,6 +65,7 @@
             // sets the globals
             start_datetime = start;
             start_datetime_str = date_to_ISO_datestring(start)+" "+date_to_ISO_timestring(start);
+            return start_datetime_str;
         } catch (err) {
             console.error('start is not a proper datetime: ',start);
             throw err;
@@ -76,6 +80,9 @@
                 duration < 24 ) {
                 // 
                 duration = Math.round(duration);
+                // set global
+                duration_hours = duration;
+                return duration;
             }
         } catch (err) {
             console.error('duration is not a small, positive integer: ',duration);
@@ -83,24 +90,27 @@
         }
     }
 
-    function data_url(start, duration) {
-        to_start_datetime_str(start);
-        to_duration(duration);
+    function data_url(date, time, duration) {
+        // to do: add debugging
+        let start = new Date(date + " " + time);
+        let start_date = date_to_ISO_datestring(start);
+        let start_time = date_to_ISO_timestring(start);
         // finally, we get to work
         const slash = "/";
-        // uses the globals set earlier
-        return data_url_base + start_datetime_str + slash + duration;
+        return data_url_base + start_date + slash + start_time + slash + duration;
     }
 
-    function page_url(start, duration) {
-        to_start_datetime_str(start);
-        to_duration(duration);
+    function page_url(date, time, duration) {
+        // to do: add debugging
+        let start = new Date(date + " " + time);
+        let start_date = date_to_ISO_datestring(start);
+        let start_time = date_to_ISO_timestring(start);
         // finally, we get to work
         const slash = "/";
-        // uses the globals set earlier
-        return page_url_base + start_datetime_str + slash + duration;
+        return page_url_base + start_date + slash + start_time + slash + duration;
     }
 
+    // the response to the Ajax request; just for debugging
     var g;
 
     function datetime_to_minutes(datetime) {
@@ -129,8 +139,9 @@
     // global to hold Ajax response, to help in debugging
     var g;
 
-    function update_insulin_plot(start_time, duration_hours) {
-        const url = data_url(start_time, duration_hours);
+    function update_insulin_plot(start_date, start_time, duration_hours) {
+        console.log("start date: ",start_date, "start_time:", start_time, "duration_hours:", duration_hours);
+        const url = data_url(start_date, start_time, duration_hours);
         console.log('fetching data from ',url);
         $.get(url, function (resp) {
             g = resp;
@@ -171,7 +182,7 @@
         });
     }
 
-    function update_cgm_plot(start_time, hours) {
+    function update_cgm_plot(start_date, start_time, hours) {
         // completely made up CGM curve. Sine curve starting at 100 mgdl,
         var cgm_function = function (t) {
             let alpha = t/240.0*Math.PI;
@@ -197,46 +208,41 @@
     var times; 
     var times_str;
 
-    function update_plots(start_time, hours) {
-        start_mins = datetime_to_minutes(start_time);
+    function update_plots(start_date, start_time, hours) {
+        let start = to_date(start_date_str, start_time_str);
+        start_mins = datetime_to_minutes(start);
         end_mins = start_mins + 60*hours;
         times = timesteps(start_mins, end_mins);
         times_str = times.map(minutes_to_timestr);
         // ready to plot
-        update_insulin_plot(start_time, hours);
-        update_cgm_plot(start_time, hours);
+        update_insulin_plot(start_date, start_time, hours);
+        update_cgm_plot(start_date, start_time, hours);
     }
 
 
     $(document).ready(function () {
-        update_plots(start_datetime_str, duration_hours);
-
-        const start = new Date(start_datetime);
+        update_plots(start_date_str, start_time_str, duration_hours);
+        
+        let start = to_date(start_date_str, start_time_str);
 
         $("#input_start_date").val(date_to_ISO_datestring(start));
         $("#input_start_time").val(date_to_ISO_timestring(start));
         $("#input_duration").val('{{hours}}');
     });
 
-    $("#input_start_time").change(function () {
+    function on_change() {
         let start_date = $("#input_start_date").val();
         let start_time = $("#input_start_time").val();
         let start = new Date(start_date + " " + start_time);
         console.log("switching to ", start);
         // Ajax would be nice, but then we couldn't bookmark, etc.
         // Maybe allow either, as a user preference?
-        document.location = 
-        $("#span_start_time").text(start);
-        // set the global
-        start_datetime = date_to_ISO_datestring(start)+" "+date_to_ISO_timestring(start);
-        update_plots(start_datetime, hours);
-    });
-    
-    $("#input_duration").change(function () {
-        hours = $("#input_duration").val();
-        $("#span_hours").text(hours);
-        update_plots(start_datetime, hours);
-    });
+        document.location = page_url(start_date, start_time, duration_hours);
+    }
+
+    $("#input_start_date").change(on_change);
+    $("#input_start_time").change(on_change);
+    $("#input_duration").change(on_change);
 
 
 </script>

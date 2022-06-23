@@ -70,36 +70,39 @@ DEFAULT_HOURS = 2
 @app.route('/plots/')
 def plots0():
     '''Plots for most recent two hours (DEFAULT_HOURS)'''
-    start_time = datetime.now() - timedelta(hours=DEFAULT_HOURS)
-    start_time = date_ui.to_rtime(start_time)
-    return redirect(url_for('plots2', start_time = start_time, hours = DEFAULT_HOURS))
+    start_datetime = datetime.now() - timedelta(hours=DEFAULT_HOURS)
+    start_rtime = date_ui.to_rtime(start_datetime)
+    start_date = start_rtime.strftime('%Y-%m-%d')
+    start_time = start_rtime.strftime('%H:%M')
+    return redirect(url_for('plots2',
+                            start_date = start_date,
+                            start_time = start_time,
+                            hours = DEFAULT_HOURS))
 
-@app.route('/plots/<start_time>/')
-def plots1(start_time):
-    '''Plots for two hours (DEFAULT_HOURS) after given start date and time'''
-    # can't trust the user's start_time
-    try:
-        start_time = date_ui.to_rtime(start_time)
-    except ValueError:
-        flash('bad start time. Use format YYYY-MM-DD HH:MM; using now instead')
-        start_time = datetime.now() - timedelta(hours=2)
-        start_time = date_ui.to_rtime(start_time)
-        return redirect(url_for('plots2', start_time = start_time, hours = DEFAULT_HOURS))
-
-@app.route('/plots/<start_time>/<hours>')
-def plots2(start_time, hours):
+@app.route('/plots/<start_date>/<start_time>/<hours>')
+def plots2(start_date, start_time, hours):
     '''Plots of insulin and cgm, and, eventually, predictive
-model, starting at given date/time and for given number of hours.'''
+model, starting at given date and time and for given number of hours.'''
     # can't trust the user's start_time
     try:
-        start_time = date_ui.to_rtime(start_time)
+        start_datetime = date_ui.to_rtime(start_date + " " + start_time)
+        start_rtime = date_ui.to_rtime(start_datetime)
+        start_date = start_rtime.strftime('%Y-%m-%d')
+        start_time = start_rtime.strftime('%H:%M')
     except ValueError:
         flash('bad start time. Use format YYYY-MM-DD HH:MM; using now instead')
-        start_time = datetime.now() - timedelta(hours=2)
-        start_time = date_ui.to_rtime(start_time)
-        return redirect(url_for('plots2', start_time = start_time, hours = DEFAULT_HOURS))
+        ## code is same as plots0
+        start_datetime = datetime.now() - timedelta(hours=DEFAULT_HOURS)
+        start_rtime = date_ui.to_rtime(start_datetime)
+        start_date = start_rtime.strftime('%Y-%m-%d')
+        start_time = start_rtime.strftime('%H:%M')
+        return redirect(url_for('plots2',
+                                start_date = start_date,
+                                start_time = start_time,
+                                hours = DEFAULT_HOURS))
+
     # finally, a useful response. However, the actual data is sent by Ajax.
-    return render_template('plots.html', start_time=start_time, hours=hours)
+    return render_template('plots.html', start_date=start_date, start_time=start_time, hours=hours)
 
 @app.route('/plot-data/')
 def plot_data0():
@@ -108,12 +111,12 @@ def plot_data0():
     hours = 2
     return plot_data(start, hours)
 
-@app.route('/plot-data/<start_time>/<hours>')
-def plot_data(start_time, hours):
+@app.route('/plot-data/<start_date>/<start_time>/<hours>')
+def plot_data(start_date, start_time, hours):
     '''return JSON data for given start_time and hours. '''
     # can't trust the user's start_time
     try:
-        start_time = date_ui.to_rtime(start_time)
+        start_time = date_ui.to_rtime(start_date + " " + start_time)
     except ValueError:
         return (jsonify({'error': '''bad start time. use format YYYY-MM-DD HH:MM'''}), 400)
     try:
