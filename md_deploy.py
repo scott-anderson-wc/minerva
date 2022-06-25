@@ -65,7 +65,7 @@ def info():
 
 # Plots of insulin and cgm, and, eventually, predictive model.
 
-DEFAULT_HOURS = 2
+DEFAULT_HOURS = 6
 
 @app.route('/plots/')
 def plots0():
