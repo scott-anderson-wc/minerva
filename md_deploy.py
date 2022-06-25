@@ -69,11 +69,18 @@ DEFAULT_HOURS = 6
 
 @app.route('/plots/')
 def plots0():
-    '''Plots for most recent two hours (DEFAULT_HOURS)'''
-    start_datetime = datetime.now() - timedelta(hours=DEFAULT_HOURS)
-    start_rtime = date_ui.to_rtime(start_datetime)
-    start_date = start_rtime.strftime('%Y-%m-%d')
-    start_time = start_rtime.strftime('%H:%M')
+    '''Plots for form-supplied data, with defaults'''
+    if request.args.get('input_start_date'):
+        # form inputs
+        start_date = request.args.get('input_start_date')
+        start_time = request.args.get('input_start_time')
+        hours = request.args.get('input_duration')
+    else:
+        # work back from now
+        start_datetime = datetime.now() - timedelta(hours=DEFAULT_HOURS)
+        start_rtime = date_ui.to_rtime(start_datetime)
+        start_date = start_rtime.strftime('%Y-%m-%d')
+        start_time = start_rtime.strftime('%H:%M')
     return redirect(url_for('plots2',
                             start_date = start_date,
                             start_time = start_time,

@@ -8,10 +8,15 @@
     running for <span id="span_hours">{{hours}}</span> hours</h2>
 
 <p>
-<label>start date <input id="input_start_date" type="date"></label>
-<label>start time <input id="input_start_time" type="time"></label>
-<label>duration (hours) <input id="input_duration" type="number" min="1" max="24" step="1"></label>
+<form method="GET" action="{{url_for('plots0')}}">
+    <label>start date <input name="input_start_date" type="date"></label>
+    <label>start time <input name="input_start_time" type="time"></label>
+    <label>duration (hours) <input name="input_duration" type="number" min="1" max="24" step="1"></label>
+    <input type="submit" value="change date/time/duration">
+</form>
 </p>
+
+<p><form method="GET" action="{{url_for('plots0')}}"><input type="submit" value="latest"></form></p>
 
 <div id="insulinPlot" style="width:100%;max-width:1024px"></div>
 <div id="cgmPlot" style="width:100%;max-width:1024px"></div>
@@ -220,11 +225,12 @@
         
         let start = to_date(start_date_str, start_time_str);
 
-        $("#input_start_date").val(date_to_ISO_datestring(start));
-        $("#input_start_time").val(date_to_ISO_timestring(start));
-        $("#input_duration").val('{{hours}}');
+        $("[name=input_start_date]").val(date_to_ISO_datestring(start));
+        $("[name=input_start_time]").val(date_to_ISO_timestring(start));
+        $("[name=input_duration]").val('{{hours}}');
     });
 
+    // Not currently in use
     function on_change() {
         let start_date = $("#input_start_date").val();
         let start_time = $("#input_start_time").val();
@@ -234,11 +240,6 @@
         // Maybe allow either, as a user preference?
         document.location = page_url(start_date, start_time, duration_hours);
     }
-
-    $("#input_start_date").change(on_change);
-    $("#input_start_time").change(on_change);
-    $("#input_duration").change(on_change);
-
 
 </script>
 {% endblock %}
