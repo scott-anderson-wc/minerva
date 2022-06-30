@@ -14,6 +14,7 @@ mysql_fmt = '%Y-%m-%d %H:%M:%S'
 TABLE = 'janice.insulin_carb_smoothed_2'
 USER = 'Hugh'
 USER_ID = 7
+RELEVANCE_LAG = 6               # see https://docs.google.com/document/d/1ZCtErlxRQmPUz_vbfLXdg7ap2hIz5g9Lubtog8ZqFys/edit#heading=h.vthjbnv8q2o
 
 def debug(*args):
     print('debug', *args)
@@ -63,23 +64,21 @@ unnecessarily is fine. Soon, we'll set this up as to be invoked via
 CRON.  The function returns the rtime where it started. Other
 migration functions should start from that time.
     '''
-    # first, read the last row, to determine the max rtime and the
-    # current basal_amt_12, the latter because it has to be propagated
-    # to all the new rows.
+    # first, read the last row, to determine the max rtime
     curs = conn.cursor()
     # since we control the value of TABLE, using an f-string here is safe
     # Now that we're using Python 3.6 on this server, we can use f-strings. :-)
-    curs.execute(f'''SELECT rtime, basal_amt_12 FROM {TABLE} 
-                    WHERE rtime = (SELECT max(rtime) FROM {TABLE})''')
-    max_rtime, basal_amt_12 = curs.fetchone()
+    curs.execute(f'''SELECT max(rtime) FROM {TABLE}''')
+    max_rtime = curs.fetchone()[0]
     debug(f'max rtime in {TABLE}', max_rtime)
-    if basal_amt_12 is None:
-        raise Exception('basal_amt_12 is NULL for row with rtime = {}'.format(rtime))
     now = date_ui.to_rtime(datetime.now())
     rtime = max_rtime + timedelta(minutes=5)
+    # this part needs to be idempotent, particularly when we are testing, so
+    # I added the ON DUPLICATE KEY no-op
     debug(f'fill_forward: inserting rows into {TABLE} starting at', rtime, 'ending at', now)
-    insert = ("INSERT INTO {TABLE}(rtime, user, basal_amt_12) values(%s, '{USER}', {basal_amt_12})"
-              .format(TABLE=TABLE, USER=USER, basal_amt_12=basal_amt_12))
+    insert = ("""INSERT INTO {TABLE}(rtime, user) values(%s, '{USER}')
+                 ON DUPLICATE KEY UPDATE user=user; """
+              .format(TABLE=TABLE, USER=USER))
     while rtime < now:
         curs.execute(insert, [rtime])
         rtime += timedelta(minutes=5)
@@ -125,6 +124,7 @@ start_time.
                              [start_time])
     if rows == 0:
         # oh dear. Special case for start_time > most recent
+        # now that we've implemented RELEVANCE_LAG, I think this is unlikely
         # We need to look back
         debug('special case for start_time > most recent')
         prog_curs.execute('''SELECT * from autoapp.base_basal_profile 
@@ -167,6 +167,7 @@ https://docs.google.com/document/d/1UBp8VDckHNzqjorcJNgkYaJXF6iR5CeluGQ3VB_GKkE/
     # If we go back *too* far, to the beginning of the data, there
     # will be no prior 'cancel_temp_basal' command, in which case we
     # want *all* the data. So we use ifnull() to get zero for the minimum command.
+    # We will keep this behavior despite RELEVANCE_LAG
     curs.execute('''SELECT date, type, ratio, duration FROM autoapp.commands 
                     LEFT OUTER JOIN autoapp.commands_temporary_basal_data USING (command_id)
                     WHERE user_id = %s and command_id >= 
@@ -347,6 +348,10 @@ duration mean? See #57 among others.'''
     # existing row and replace it. We don't want that. We want to
     # update it if it's already there, and it will be. There may be a more
     # efficient way to do this, but it works.
+
+    # Now that we have relevance_lag, this should capture S boluses in
+    # the recent past. The ON DUPLICATE KEY code should make it
+    # idempotent.
     nr = curs.execute('''insert into {}( rtime, bolus_type, total_bolus_volume)
                          select
                             janice.date5f(date),
@@ -381,117 +386,13 @@ def bolus_import_s_test(conn, start_rtime):
     for row in curs.fetchall():
         print("\t".join(map(str,row)))
     
-## The following is obsolete; need to use the data in the
-## extended_bolus_state table. See extended_bolus_import
-
-def bolus_import_e(conn, start_rtime, debugp=False):
-    '''E entries. These dribble out the insulin over time, like the basal, but
-    it's on *top* of the basal. So, we need a new column: extended_bolus_amt_12.
-    data is value (an amount) and a duration. 
-
-    Note that autoapp currently records E entries when they *end*. So
-    we have to look back from that time.
-
-    An E entry is recorded via extended_bolus_amt_12
-    (when the duration ends, the extended_bolus_amt_12 should go to zero)
-    Also, some E entries are zero. So extended_bolus_amt_12 goes to zero then, correct?
-    bolus 95 is E for value zero and duration zero. What does that mean?
-
-    '''
-
-    # This needs to set all new rows (>= start_rtime), but those rows
-    # might be affected by extended boluses that started in the recent
-    # past. So we compute when the extended bolus should end and
-    # check.  I worry a bit about efficiency here: there should be a
-    # way to focus on the relevant rows: as we get to thousands of
-    # rows, we don't want to be computing when an extended bolus ended
-    # from some event last month or last year. I think we should add
-    # an index on date to bolus and select from rows that are <= 24
-    # hours old. That's in my "todo" list, here:
-    # https://docs.google.com/document/d/1ZCtErlxRQmPUz_vbfLXdg7ap2hIz5g9Lubtog8ZqFys/edit#
-
-    # However, since E boluses are recorded when they end, we don't
-    # have to do any date_add(date, interval duration minute)
-    # stuff. We just look for those that end after start_rtime
-
-    src = conn.cursor()
-    n = src.execute('''select date as end_time, value as extended_bolus_total, duration
-                       from autoapp.bolus 
-                       where user_id = 7 and type = 'E' 
-                       AND date >= %s;''',
-                    [start_rtime])
-    debug('updating with {} E events from bolus table'.format(n))
-    dst = conn.cursor()
-    for row in src.fetchall():
-        end_time, volume, duration = row
-        # convert to rtimes
-        bolus_end_time = date_ui.to_rtime(end_time)
-
-        # we need to *not* include this end_time, so < end_time not <= end_time
-        bolus_start_time = bolus_end_time - timedelta(minutes=duration)
-
-        # example: bolus_id = 3093 on 5/10/2022 is 2 units for 120
-        # minutes each database row is 5 minutes, so there will be
-        # 120/5 or 24 entries that should sum to 2 units. So 2/24 or
-        # 0.08333. Similarly, bolus_id = 1952 on 2/18/2022 is 0.7 for
-        # 51 minutes. That will be floor(51/5) rows. 
-        # In general, if there are V units for duration D
-        # minutes, each extended_bolus_amt_12 is V/floor(D/5) units.
-        extended_bolus_amt_12 = volume / math.floor(duration/5)
-
-        debug('spread {} from {} to {}, each {}'
-              .format(volume, bolus_start_time, bolus_end_time, extended_bolus_amt_12))
-        dst.execute('''UPDATE {} SET extended_bolus_amt_12 = %s 
-                       WHERE user='{}' AND %s <= rtime and rtime < %s'''.format(TABLE,USER),
-                      [extended_bolus_amt_12, bolus_start_time, bolus_end_time])
-    conn.commit()
-        
-def bolus_import_e_test(conn, start_rtime):
-    start_rtime = date_ui.to_rtime(start_rtime)
-    curs = conn.cursor()
-    nr = curs.execute('''select date,type,if(value='', NULL, value), duration
-                         from autoapp.bolus
-                         where user_id = 7 and type = 'E' and date >= %s''',
-                 [start_rtime])
-    print('{} E boluses since {}'.format(nr, start_rtime))
-    for row in curs.fetchall():
-        print("\t".join(map(str,row)))
-    # before updating the destination TABLE, let's null out the extended_bolus_amt_12
-    curs.execute('update {} set extended_bolus_amt_12 = null where rtime >= %s'.format(TABLE),
-                 [start_rtime])
-    conn.commit()
-    nr = bolus_import_e(conn, start_rtime, debugp=True)
-    print('result: {} rows modified'.format(nr))
-    # find sum of these E boluses
-    curs.execute('''select sum(value) from autoapp.bolus 
-                    where user_id = 7 and type = 'E' and date >= %s''',
-                 [start_rtime])
-    row = curs.fetchone()
-    before_sum = row[0]
-    print('those all sum to {}'.format(before_sum))
-    # because the E boluses extend over time, I'm going to get every row, so
-    # we can see when they start/stop
-    nr = curs.execute('''select rtime, bolus_type, extended_bolus_amt_12
-                         from {}
-                         where rtime >= %s and extended_bolus_amt_12 is not null'''.format(TABLE),
-                      [start_rtime])
-    print('{} E bolus drips since {}'.format(nr, start_rtime))
-    for row in curs.fetchall():
-        print("\t".join(map(str,row)))
-    # let's also print the sum
-    curs.execute('select sum(extended_bolus_amt_12) from {} where rtime >= %s'.format(TABLE),
-                 [start_rtime])
-    row = curs.fetchone()
-    after_sum = row[0]
-    print('those all sum to {}'.format(after_sum))
-    # floating point equality: less than 0.01%
-    print('are the sums approximately equal? {}'.format(approx_equal(before_sum, after_sum)))
-
 def bolus_import_ds(conn, start_rtime, debugp=False):
     '''A DS entry is, I think, the same as an S entry, but maybe is paired
     with a DE entry?  '''
     # DS events. Treating them just like S, for now.
     curs = conn.cursor()
+    # Again, the ON DUPLICATE KEY trick should make this idempotent
+    # and do the right thing now that we have relevance_lag
     n = curs.execute('''insert into {}( rtime, bolus_type, total_bolus_volume)
                     select 
                         janice.date5f(date),
@@ -526,38 +427,6 @@ def bolus_import_ds_test(conn, start_rtime):
     for row in curs.fetchall():
         print("\t".join(map(str,row)))
 
-    
-def bolus_import_de(conn, start_rtime, debugp=False):
-    '''A DE entry is when the extended dose (changed extended_bolus_amt_12)
-    ends. Sometimes, it's paired with a DS entry.
-
-  For example:
-|     1062 |       7 | 2021-12-27 21:44:00 | DS   | 1.4000000000000001 |        0 | 2021-12-27 21:56:26 |
-|     1065 |       7 | 2021-12-27 23:44:00 | DE   | 1.4000000000000001 |      120 | 2021-12-27 23:56:24 |
-    '''
-    # DE events. Need to go *back* and drip out the insulin over the
-    # given duration, similar to E type boluses.
-    src = conn.cursor()
-    n = src.execute('''select janice.date5f(date) as rtime, value as extended_bolus_total, duration
-                       from autoapp.bolus 
-                       where user_id = 7 and type = 'DE' 
-                       AND duration > 0 and date_add(date, interval duration minute) >= %s;''',
-                    [start_rtime])
-    debug('updating with {} DE events from bolus table'.format(n))
-    dst = conn.cursor()
-    for row in src.fetchall():
-        rtime, volume, duration = row
-        start_time = rtime - timedelta(minutes=duration) # minus not plus
-
-        # same as for bolus_import_e
-        extended_bolus_amt_12 = volume / math.floor(duration/5)
-
-        # we'll drip into the row with the start time (<=), but not the row with the end time (<)
-        dst.execute('''UPDATE {} SET extended_bolus_amt_12 = %s 
-                       WHERE user='{}' AND %s <= rtime and rtime < %s'''.format(TABLE,USER),
-                      [extended_bolus_amt_12, start_time, rtime])
-    conn.commit()
-
 def approx_equal(x, y, maxRelDiff = 0.0001):
     '''see https://randomascii.wordpress.com/2012/02/25/comparing-floating-point-numbers-2012-edition/
 true if the numbers are within maxRelDiff of each other, default 0.01%'''
@@ -567,49 +436,7 @@ true if the numbers are within maxRelDiff of each other, default 0.01%'''
     larger = x if x > y else y
     return diff <= larger * maxRelDiff
 
-def bolus_import_de_test(conn, start_rtime):
-    start_rtime = date_ui.to_rtime(start_rtime)
-    curs = conn.cursor()
-    nr = curs.execute('''select janice.date5f(date),type,if(value='', NULL, value), duration
-                         from autoapp.bolus
-                         where user_id = 7 and type = 'DE' and date >= %s''',
-                 [start_rtime])
-    print('{} DE boluses since {}'.format(nr, start_rtime))
-    for row in curs.fetchall():
-        print("\t".join(map(str,row)))
-    # before updating the destination TABLE, let's null out the extended_bolus_amt_12
-    curs.execute('update {} set extended_bolus_amt_12 = null where rtime >= %s'.format(TABLE),
-                 [start_rtime])
-    conn.commit()
-    nr = bolus_import_de(conn, start_rtime, debugp=True)
-    print('result: {} rows modified'.format(nr))
-    # find sum of these DE drips
-    curs.execute('''select sum(value) from autoapp.bolus 
-                    where user_id = 7 and type = 'DE' and date >= %s''',
-                 [start_rtime])
-    row = curs.fetchone()
-    before_sum = row[0]
-    print('those all sum to {}'.format(before_sum))
-    # because the DE boluses extend over time, I'm going to get every row, so
-    # we can see when they start/stop
-    nr = curs.execute('''select rtime, bolus_type, extended_bolus_amt_12
-                         from {}
-                         where rtime >= %s and extended_bolus_amt_12 is not null'''.format(TABLE),
-                      [start_rtime])
-    print('{} DE boluses since {}'.format(nr, start_rtime))
-    for row in curs.fetchall():
-        print("\t".join(map(str,row)))
-    # let's also print the sum. Unfortunately, this sum will also include E boluses. What to do....
-    # for debugging, we'll go back and set all the extended_bolus_amt_12 to null at the top of this
-    curs.execute('select sum(extended_bolus_amt_12) from {} where rtime >= %s'.format(TABLE),
-                 [start_rtime])
-    row = curs.fetchone()
-    after_sum = row[0]
-    print('those all sum to {}'.format(after_sum))
-    # floating point equality: less than 0.01%
-    print('are the sums approximately equal? {}'.format(approx_equal(before_sum, after_sum)))
-
-
+    
 # ================================================================
 
 def extended_bolus_import(conn, start_rtime, debugp=False):
@@ -643,6 +470,7 @@ bolus from the date - progress_minutes and the duration from minutes.'''
         end_rtime = date_ui.to_rtime(e_start + timedelta(minutes=duration))
         extended_bolus_amt_12 = volume / math.floor(duration/5)
         # we'll drip into the row with the start time (<=), but not the row with the end time (<)
+        # Because this is an update, it should be idempotent
         dst.execute('''UPDATE {} SET extended_bolus_amt_12 = %s 
                        WHERE user='{}' AND %s <= rtime and rtime < %s'''.format(TABLE,USER),
                       [extended_bolus_amt_12, e_start, end_rtime])
@@ -720,13 +548,14 @@ Why are some bolus ids missing?
 
 def carbohydrate_import(conn, start_rtime, debugp=False):
     curs = conn.cursor()
+    # the ON DUPLICATE KEY makes this idempotent
     num_rows = curs.execute(
-    '''INSERT INTO {}(rtime, carbs) 
-                               SELECT janice.date5f(date) as rtime, value as carbs
-                               FROM autoapp.carbohydrate
-                               WHERE date >= %s
-                               ON DUPLICATE KEY UPDATE carbs = values(carbs)'''.format(TABLE),
-                            [start_rtime])
+        '''INSERT INTO {}(rtime, carbs) 
+           SELECT janice.date5f(date) as rtime, value as carbs
+           FROM autoapp.carbohydrate
+           WHERE date >= %s
+           ON DUPLICATE KEY UPDATE carbs = values(carbs)'''.format(TABLE),
+        [start_rtime])
     if debugp:
         debug('inserted {} carb entries'.format(num_rows))
 
@@ -840,13 +669,18 @@ def migrate_cgm(conn=None):
 # this is the main function
 
 def migrate_all(conn=None, verbose=False, alt_start_time=None):
-
     '''This is the function that should, eventually, be called from a cron job every 5 minutes.'''
     if conn is None:
         conn = dbi.connect()
     if verbose: print('starting')
     max_start_rtime = fill_forward(conn)
     start_rtime = alt_start_time or max_start_rtime
+    # to a datetime object
+    start_rtime_dt = date_ui.to_rtime(start_rtime)
+    # subtract
+    start_rtime_dt = start_rtime_dt - timedelta(hours=RELEVANCE_LAG)
+    # back to a string
+    start_rtime = date_ui.dstr(start_rtime_dt)
     if verbose: print('start_rtime is {}'.format(start_rtime))
     # basal hour is obsolete because it might be behind by up to an hour
     # if verbose: print('basal_hour_import_2')
