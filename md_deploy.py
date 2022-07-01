@@ -81,10 +81,11 @@ def plots0():
         start_rtime = date_ui.to_rtime(start_datetime)
         start_date = start_rtime.strftime('%Y-%m-%d')
         start_time = start_rtime.strftime('%H:%M')
+        hours = DEFAULT_HOURS
     return redirect(url_for('plots2',
                             start_date = start_date,
                             start_time = start_time,
-                            hours = DEFAULT_HOURS))
+                            hours = hours))
 
 @app.route('/plots/<start_date>/<start_time>/<hours>')
 def plots2(start_date, start_time, hours):
