@@ -14,7 +14,6 @@ mysql_fmt = '%Y-%m-%d %H:%M:%S'
 TABLE = 'janice.insulin_carb_smoothed_2'
 USER = 'Hugh'
 USER_ID = 7
-RELEVANCE_LAG = 6               # see https://docs.google.com/document/d/1ZCtErlxRQmPUz_vbfLXdg7ap2hIz5g9Lubtog8ZqFys/edit#heading=h.vthjbnv8q2o
 
 def debug(*args):
     print('debug', *args)
@@ -61,8 +60,10 @@ statement rather than mess with REPLACE or INSERT ON DUPLICATE
 KEY. This function establishes that precondition. All the functions
 below can call this function first. It's idempotent, so calling it
 unnecessarily is fine. Soon, we'll set this up as to be invoked via
-CRON.  The function returns the rtime where it started. Other
-migration functions should start from that time.
+CRON.  The function returns the rtime where it started. However, other
+migration functions should start from autoapp.last_update.date. See
+get_migration_time().
+
     '''
     # first, read the last row, to determine the max rtime
     curs = conn.cursor()
@@ -124,8 +125,7 @@ start_time.
                              [start_time])
     if rows == 0:
         # oh dear. Special case for start_time > most recent
-        # now that we've implemented RELEVANCE_LAG, I think this is unlikely
-        # We need to look back
+        # We need to look back to find the most recent programmed basal 
         debug('special case for start_time > most recent')
         prog_curs.execute('''SELECT * from autoapp.base_basal_profile 
                              WHERE base_basal_profile_id = (SELECT max(base_basal_profile_id) 
@@ -167,7 +167,6 @@ https://docs.google.com/document/d/1UBp8VDckHNzqjorcJNgkYaJXF6iR5CeluGQ3VB_GKkE/
     # If we go back *too* far, to the beginning of the data, there
     # will be no prior 'cancel_temp_basal' command, in which case we
     # want *all* the data. So we use ifnull() to get zero for the minimum command.
-    # We will keep this behavior despite RELEVANCE_LAG
     curs.execute('''SELECT date, type, ratio, duration FROM autoapp.commands 
                     LEFT OUTER JOIN autoapp.commands_temporary_basal_data USING (command_id)
                     WHERE user_id = %s and command_id >= 
@@ -663,7 +662,79 @@ def migrate_cgm(conn=None):
                  [start_cgm])
     conn.commit()
                     
+# ================================================================
+# migrate data since previous update
 
+def get_migration_time(conn):
+    '''Long discussion about the data to migrate. See
+https://docs.google.com/document/d/1ZCtErlxRQmPUz_vbfLXdg7ap2hIz5g9Lubtog8ZqFys/edit#heading=h.umdjcuqs1gq4
+
+This function looks up the values of autoapp.last_update.date (X) and
+migration_status.prev_update (Y) and returns X,Y iff X < Y otherwise
+None,None.
+
+It returns both values so that Y can be stored into migration_status
+when we are done migrating. See set_migration_time.
+
+    '''
+    curs = dbi.cursor(conn)
+    curs.execute('''select date from autoapp.last_update where user_id = %s''',
+                 [USER_ID])
+    last_update = curs.fetchone()[0]
+    curs.execute('''select prev_update from migration_status where user_id = %s''',
+                 [USER_ID])
+    prev_update_row = curs.fetchone()
+    if prev_update_row is None:
+        raise Exception('no previous update stored')
+    prev_update = prev_update_row[0]
+    if prev_update < last_update:
+        return prev_update, last_update
+    else:
+        return None, None
+
+def init_migration_time(conn, force=False):
+    '''Our normal code compares the prev_update (X) with last_update (Y)
+and if X<Y, then there's new data to migrate and so we do so. But that
+assumes that X exists. The Y value comes from autoapp; so that's not
+our problem. But if X is missing we will initialize it by using
+'2022-06-30 17:14', which I think is the last time I deleted the
+commands table in Autoapp.
+
+    '''
+    curs = dbi.cursor(conn)
+    curs.execute('''select prev_update from migration_status where user_id = %s''',
+                 [USER_ID])
+    prev_update = curs.fetchone()
+    if prev_update is None or force:
+        print('there is no previous update or forcing an overwrite. See documentation')
+        old_time = '2022-06-30 17:14:00'
+        curs.execute('''INSERT INTO migration_status(user_id,prev_update,migration_time)
+                        VALUES (%s, %s, current_timestamp())
+                        ON DUPLICATE KEY UPDATE prev_update = %s, migration_time = current_timestamp()''',
+                     [USER_ID, old_time, old_time])
+        conn.commit()
+
+def set_migration_time(conn, prev_update_time, last_update_time):
+
+    '''Long discussion about the data to migrate. See
+https://docs.google.com/document/d/1ZCtErlxRQmPUz_vbfLXdg7ap2hIz5g9Lubtog8ZqFys/edit#heading=h.umdjcuqs1gq4
+
+This function sets the value of prev_update_time in the janice
+database from the value of last_update from autoapp. It uses the
+passed-in values, to avoid issues of simultaneous.
+    '''
+    curs = dbi.cursor(conn)
+    curs.execute('''UPDATE migration_status 
+                    SET prev_update = %s, migration_time = current_timestamp() 
+                    WHERE user_id = %s''',
+                 # notice this says last_ not prev_; we ignore prev here
+                 [last_update_time, USER_ID])
+    conn.commit()
+    curs.execute('''INSERT INTO migration_log(user_id,prev_update,last_update,last_migration) 
+                    VALUES(%s,%s,%s,current_timestamp())''',
+                 [USER_ID, prev_update_time, last_update_time])
+    conn.commit()
+    return 'done'
 
 # ================================================================
 # this is the main function
@@ -673,14 +744,13 @@ def migrate_all(conn=None, verbose=False, alt_start_time=None):
     if conn is None:
         conn = dbi.connect()
     if verbose: print('starting')
-    max_start_rtime = fill_forward(conn)
-    start_rtime = alt_start_time or max_start_rtime
-    # to a datetime object
-    start_rtime_dt = date_ui.to_rtime(start_rtime)
-    # subtract
-    start_rtime_dt = start_rtime_dt - timedelta(hours=RELEVANCE_LAG)
-    # back to a string
-    start_rtime = date_ui.dstr(start_rtime_dt)
+    fill_forward(conn)
+    prev_update, last_update = get_migration_time(conn)
+    if prev_update is None:
+        if verbose:
+            print('bailing because no updates')
+        return
+    start_rtime = alt_start_time or prev_update
     if verbose: print('start_rtime is {}'.format(start_rtime))
     # basal hour is obsolete because it might be behind by up to an hour
     # if verbose: print('basal_hour_import_2')
@@ -696,6 +766,8 @@ def migrate_all(conn=None, verbose=False, alt_start_time=None):
     carbohydrate_import(conn, start_rtime)
     if verbose: print('glucose')
     glucose_import(conn, start_rtime)
+    if verbose: print('logging update time')
+    set_migration_time(conn, prev_update, last_update)
     if verbose: print('done')
 
 def pm_data(conn, since):
