@@ -133,9 +133,9 @@ def plot_data(start_date, start_time, hours):
         return (jsonify({'error': '''bad duration. should be a positive integer like 2'''}), 400)
     # finally, real work
     conn = dbi.connect()
-    boluses, prog_basal, actual_basal, extended = ics.get_insulin_info(conn, start_time, hours)
+    boluses, prog_basal, actual_basal, extended, last_update = ics.get_insulin_info(conn, start_time, hours)
     cgm = ics.get_cgm_info(conn, start_time, hours)
-    return jsonify([boluses, prog_basal, actual_basal, extended, cgm])
+    return jsonify([boluses, prog_basal, actual_basal, extended, last_update, cgm])
 
 @app.route ('/getRecentISF/<int:time_bucket>/<int:min_weeks>/<int:min_data>/')
 def getRecentISF(time_bucket,min_weeks, min_data):

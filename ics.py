@@ -10,6 +10,7 @@ def debug(*args):
     print('debug', *args)
 
 USER = 'Hugh'
+USER_ID = 7
 
 # ================================================================
 # Data readout. Helpful for testing and data display
@@ -51,9 +52,14 @@ some point.
     rows = curs.fetchall()
     boluses = [ row[0] for row in rows ]
     prog_basal = []             # fix this someday?
-    actual_basal = [ round(row[1]*12,2) for row in rows ]
-    extended = [ round(row[2]*12,2) if row[2] is not None else None for row in rows ]
-    return (boluses, prog_basal, actual_basal, extended)
+    def round2x12(x):
+        return round(x*12,2) if x is not None else None
+    actual_basal = [ round2x12(row[1]) for row in rows ]
+    extended = [ round2x12(row[2])  for row in rows ]
+    # and also last_update
+    curs.execute('SELECT date FROM autoapp.last_update WHERE user_id = %s', [USER_ID])
+    last_update = curs.fetchone()[0]
+    return (boluses, prog_basal, actual_basal, extended, last_update)
 
 def get_cgm_info(conn, start_time=None, hours=2):
     '''Get cgm info for given time period after

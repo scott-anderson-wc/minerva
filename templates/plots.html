@@ -4,8 +4,14 @@
 
 <h1>Insulin and CGM Plots</h1>
 
+<style>
+    span { color: red; font-weight: bold; }
+</style>
+
 <h2>Starting at <span id="span_start_time">{{start_time}}</span>
     running for <span id="span_hours">{{hours}}</span> hours</h2>
+
+<h2>Autoapp Last Update : <span id="span_last_update"></span></h2>
 
 <p>
 <form method="GET" action="{{url_for('plots0')}}">
@@ -212,8 +218,10 @@
         $.get(url, function (resp) {
             g = resp;
             console.log('got ',resp);
-            const [boluses, prog_basal, actual_basal, extended, cgm ] = resp;
+            const [boluses, prog_basal, actual_basal, extended, last_update, cgm ] = resp;
             // ready to plot
+            let last_update_dt = new Date(last_update);
+            $("#span_last_update").text(last_update.toLocaleString());
             update_insulin_plot(boluses, prog_basal, actual_basal, extended);
             update_cgm_plot(cgm);
         });
