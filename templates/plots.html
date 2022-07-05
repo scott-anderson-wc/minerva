@@ -220,8 +220,9 @@
             console.log('got ',resp);
             const [boluses, prog_basal, actual_basal, extended, last_update, cgm ] = resp;
             // ready to plot
-            let last_update_dt = new Date(last_update);
-            $("#span_last_update").text(last_update.toLocaleString());
+            // Note that there's no timezone information in the last_update data;
+            // it's just a string from the server
+            $("#span_last_update").text(last_update);
             update_insulin_plot(boluses, prog_basal, actual_basal, extended);
             update_cgm_plot(cgm);
         });
