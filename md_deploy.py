@@ -115,9 +115,11 @@ model, starting at given date and time and for given number of hours.'''
 @app.route('/plot-data/')
 def plot_data0():
     '''Gets the current data as an JSON response'''
-    start = date_ui.to_rtime(datetime.now())
-    hours = 2
-    return plot_data(start, hours)
+    start_rtime = date_ui.to_rtime(datetime.now())
+    start_date = start_rtime.strftime('%Y-%m-%d')
+    start_time = start_rtime.strftime('%H:%M')
+    hours = DEFAULT_HOURS
+    return plot_data(start_date, start_time, hours)
 
 @app.route('/plot-data/<start_date>/<start_time>/<hours>')
 def plot_data(start_date, start_time, hours):
