@@ -1,11 +1,18 @@
 '''Migrates Hugh's records from the autoapp database to the insulin_carb_smoothed_2 table in the janice database'''
 
+import os                       # for path.join
 import sys
 import math                     # for floor
 import collections              # for deque
 import cs304dbi as dbi
 from datetime import datetime, timedelta
 import date_ui
+import logging
+
+# Configuration Constants
+
+# probably should have different logs for production vs development
+LOG_DIR = '/home/hugh9/autoapp_to_ics2_logs/'
 
 mysql_fmt = '%Y-%m-%d %H:%M:%S'
 
@@ -15,8 +22,27 @@ TABLE = 'janice.insulin_carb_smoothed_2'
 USER = 'Hugh'
 USER_ID = 7
 
-def debug(*args):
-    print('debug', *args)
+# Logging is global, so we save these global values
+log_stream = None
+log_now = None
+
+def start_log():
+    global log_stream, log_now
+    now = datetime.today()
+    log_now = now.strftime('%H:%M')
+    logfile = log_file_name()
+    log_stream = open(logfile, "a")
+    write_log('start')
+
+def write_log(line):
+    log_stream.write(log_now+'\t'+str(line)+'\n')
+    log_stream.flush()
+
+def close_log():
+    log_stream.close()
+
+def debugging():
+    logging.basicConfig(level=logging.DEBUG)
 
 ## ----------------------------- Setup functions ----------------------------------------
 
@@ -71,12 +97,12 @@ get_migration_time().
     # Now that we're using Python 3.6 on this server, we can use f-strings. :-)
     curs.execute(f'''SELECT max(rtime) FROM {TABLE}''')
     max_rtime = curs.fetchone()[0]
-    debug(f'max rtime in {TABLE}', max_rtime)
+    logging.debug(f'max rtime in {TABLE}: {max_rtime}')
     now = date_ui.to_rtime(datetime.now())
     rtime = max_rtime + timedelta(minutes=5)
     # this part needs to be idempotent, particularly when we are testing, so
     # I added the ON DUPLICATE KEY no-op
-    debug(f'fill_forward: inserting rows into {TABLE} starting at', rtime, 'ending at', now)
+    logging.debug(f'fill_forward: inserting rows into {TABLE} starting at {rtime} ending at {now}')
     insert = ("""INSERT INTO {TABLE}(rtime, user) values(%s, '{USER}')
                  ON DUPLICATE KEY UPDATE user=user; """
               .format(TABLE=TABLE, USER=USER))
@@ -126,7 +152,7 @@ start_time.
     if rows == 0:
         # oh dear. Special case for start_time > most recent
         # We need to look back to find the most recent programmed basal 
-        debug('special case for start_time > most recent')
+        loggin.debug('special case for start_time > most recent')
         prog_curs.execute('''SELECT * from autoapp.base_basal_profile 
                              WHERE base_basal_profile_id = (SELECT max(base_basal_profile_id) 
                                                             FROM autoapp.base_basal_profile)''')
@@ -167,26 +193,26 @@ https://docs.google.com/document/d/1UBp8VDckHNzqjorcJNgkYaJXF6iR5CeluGQ3VB_GKkE/
     # If we go back *too* far, to the beginning of the data, there
     # will be no prior 'cancel_temp_basal' command, in which case we
     # want *all* the data. So we use ifnull() to get zero for the minimum command.
-    curs.execute('''SELECT date, type, ratio, duration FROM autoapp.commands 
+    curs.execute('''SELECT update_timestamp as 'date', type, ratio, duration FROM autoapp.commands 
                     LEFT OUTER JOIN autoapp.commands_temporary_basal_data USING (command_id)
                     WHERE user_id = %s and command_id >= 
                          (SELECT ifnull(max(command_id),0) FROM autoapp.commands 
-                          WHERE type = 'cancel_temporary_basal' and date < %s)
+                          WHERE type = 'cancel_temporary_basal' and update_timestamp < %s)
                     AND type in ('suspend','temporary_basal','cancel_temporary_basal')
                     AND state = 'done'; ''',
                  [USER_ID, start_time])
     commands = curs.fetchall()
-    debug('there are {} commands to process since {}'.format(len(commands), start_time))
+    logging.debug('there are {} commands to process since {}'.format(len(commands), start_time))
     for c in commands:
-        debug(c)
+        logging.debug(str(c))
     ## Now the real code
     rtime = date_ui.to_rtime(start_time)
     now = datetime.now()
     # programmed values
     programmed = programmed_basal(conn, start_time)
-    debug('there are {} programmed basal'.format(len(programmed)))
+    logging.debug('there are {} programmed basal'.format(len(programmed)))
     for p in programmed:
-        debug(p)
+        logging.debug(str(p))
     return merge_time_queues(start_time, now, programmed, commands)
 
 def migrate_basal_12(conn, start_time):
@@ -197,7 +223,7 @@ and stores basal_amt_12 in each row.'''
     twelfth = 1.0/12.0
     update = '''UPDATE {} SET basal_amt_12 = %s 
                 WHERE rtime = %s and user = \'{}\'; '''.format(TABLE, USER)
-    debug('update sql', update)
+    logging.debug('update sql {}'.format(update))
     for row in basal_rates:
         curs.execute(update, [ row['actual basal']*twelfth, row['rtime'] ])
     conn.commit()
@@ -241,7 +267,7 @@ temp basals (percentages or cancelations).'''
     # if start_time is well in the past (we're migrating a ton of old data), we might not
     # know what the state variable was at that time. So, we can 
     if curr_programmed_rate() is None:
-        debug('first 4 programmed rates: ',programmed_basal_rates[0:4])
+        logging.debug('first 4 programmed rates: {}'.format(programmed_basal_rates[0:4]))
         raise ValueError('programmed basal had no past values')
 
     temp_basal = None           # invisible state variable
@@ -268,8 +294,8 @@ temp basals (percentages or cancelations).'''
     # if start_time is well in the past, we might not have any commands prior to the start time.
     # but I think that's okay.
     if curr_temp_basal() is None:
-        debug('commands had no past values; first is: ',commands[0])
-        debug('assuming no temp basal')
+        logging.debug('commands had no past values; first is: {}'.format(commands[0]))
+        logging.debug('assuming no temp basal')
         temp_basal = 1.0
         # raise ValueError('commands had no past values')
 
@@ -403,7 +429,7 @@ def bolus_import_ds(conn, start_rtime, debugp=False):
                         bolus_type = values(bolus_type),
                         total_bolus_volume = values(total_bolus_volume)'''.format(TABLE),
                      [start_rtime])
-    debug('updated with {} DS events from bolus table'.format(n))
+    logging.debug('updated with {} DS events from bolus table'.format(n))
     conn.commit()
 
 def bolus_import_ds_test(conn, start_rtime):
@@ -452,18 +478,18 @@ bolus from the date - progress_minutes and the duration from minutes.'''
                               WHERE user_id = 7) as tmp
                         WHERE e_start > %s'''.format(USER_ID),
                      [start_rtime])
-    debug('updating with {} extended bolus reports since {}'.format(n, start_rtime))
+    logging.debug('updating with {} extended bolus reports since {}'.format(n, start_rtime))
     last_start_time = None
     dst = conn.cursor()
     for row in curs.fetchall():
         # is it volume or rate?
         e_start, date, volume, duration, progress = row
         e_start = date_ui.to_rtime_round(e_start)
-        debug(str(e_start),volume,duration,progress)
+        logging.debug('start {} vol {} dur {} progress {}'.format(e_start,volume,duration,progress))
         # last_start_time might be None or an earlier, different extended bolus
         if last_start_time == e_start:
             # we've done this one
-            debug('skipping ', e_start)
+            logging.debug('skipping {}'.format(e_start))
             continue
         last_start_time = e_start
         end_rtime = date_ui.to_rtime(e_start + timedelta(minutes=duration))
@@ -556,7 +582,7 @@ def carbohydrate_import(conn, start_rtime, debugp=False):
            ON DUPLICATE KEY UPDATE carbs = values(carbs)'''.format(TABLE),
         [start_rtime])
     if debugp:
-        debug('inserted {} carb entries'.format(num_rows))
+        logging.debug('inserted {} carb entries'.format(num_rows))
 
 def carbohydrate_import_test(conn, start_rtime):
     start_rtime = date_ui.to_rtime(start_rtime)
@@ -588,7 +614,7 @@ def carbohydrate_import_test(conn, start_rtime):
 
 # TBD
 def glucose_import(conn, start_rtime):
-    debug('glucose_import is not yet implemented')
+    logging.debug('glucose_import is not yet implemented')
     return
     curs = conn.cursor()
     curs.execute('''INSERT INTO {}(rtime, carbs) 
@@ -654,7 +680,7 @@ def migrate_cgm(conn=None):
     curs = dbi.cursor(conn)
     curs.execute('select max(rtime) from insulin_carb_smoothed_2 where cgm is not null');
     start_cgm = curs.fetchone()[0]
-    debug('migrating cgm data starting at ', start_cgm)
+    logging.debug('migrating cgm data starting at {}'.format(start_cgm))
     curs.execute('''UPDATE insulin_carb_smoothed_2 AS ics 
                         INNER JOIN realtime_cgm2 AS rt USING (rtime)
                     SET ics.cgm = rt.mgdl
@@ -678,7 +704,7 @@ when we are done migrating. See set_migration_time.
 
     '''
     curs = dbi.cursor(conn)
-    curs.execute('''select date from autoapp.last_update where user_id = %s''',
+    curs.execute('''select date from autoapp.dana_history_timestamp where user_id = %s''',
                  [USER_ID])
     last_update = curs.fetchone()[0]
     curs.execute('''select prev_update from migration_status where user_id = %s''',
@@ -743,6 +769,7 @@ def migrate_all(conn=None, verbose=False, alt_start_time=None):
     '''This is the function that should, eventually, be called from a cron job every 5 minutes.'''
     if conn is None:
         conn = dbi.connect()
+    logging.info('starting')
     if verbose: print('starting')
     fill_forward(conn)
     prev_update, last_update = get_migration_time(conn)
@@ -751,23 +778,30 @@ def migrate_all(conn=None, verbose=False, alt_start_time=None):
             print('bailing because no updates')
         return
     start_rtime = alt_start_time or prev_update
+    logging.info(f'start rtime is {start_rtime}')
     if verbose: print('start_rtime is {}'.format(start_rtime))
     # basal hour is obsolete because it might be behind by up to an hour
     # if verbose: print('basal_hour_import_2')
     # basal_hour_import_2(conn, start_rtime)
+    logging.info('migrate_basal_12')
     if verbose: print('migrate_basal_12')
     migrate_basal_12(conn, start_rtime)
     # this is obsolete
     # if verbose: print('temp basal state')
     # temp_basal_state_import_incremental(conn, start_rtime)
+    logging.info('bolus')
     if verbose: print('bolus')
     bolus_import(conn, start_rtime)
+    logging.info('carbohydrate')
     if verbose: print('carbohydrate')
     carbohydrate_import(conn, start_rtime)
+    logging.info('glucose')
     if verbose: print('glucose')
     glucose_import(conn, start_rtime)
+    logging.info('storing update time')
     if verbose: print('logging update time')
     set_migration_time(conn, prev_update, last_update)
+    logging.info('done')
     if verbose: print('done')
 
 def pm_data(conn, since):
@@ -795,10 +829,6 @@ if __name__ == '__main__':
     if len(sys.argv) > 1 and sys.argv[1] == 'reinit':
         create_test_tables(conn)    
         import_functions(conn)
-    if len(sys.argv) > 1 and sys.argv[1] == 'cron':
-        migrate_all(conn, verbose=True)
-        migrate_cgm(conn)
-        sys.exit()
     if len(sys.argv) > 1 and sys.argv[1] == 'since':
         migrate_all(conn, verbose=True, alt_start_time=sys.argv[2])
         sys.exit()
@@ -832,5 +862,14 @@ if __name__ == '__main__':
         carbohydrate_import(conn, start_rtime)
         print('glucose')
         glucose_import(conn, start_rtime)
-
-        
+    # The default is to run as a cron job
+    # when run as a script, log to a logfile 
+    today = datetime.today()
+    logfile = os.path.join(LOG_DIR, 'day'+str(today.day))
+    logging.basicConfig(format='%(asctime)s %(levelname)s %(message)s',
+                        datefmt='%H:%M',
+                        filename=logfile,
+                        level=logging.DEBUG)
+    logging.info('running at {}'.format(datetime.now()))
+    migrate_all(conn)
+    migrate_cgm(conn)
