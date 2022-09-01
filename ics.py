@@ -61,7 +61,7 @@ some point.
     actual_basal = [ round2x12(row[1]) for row in rows ]
     extended = [ round2x12(row[2])  for row in rows ]
     # and also last_update
-    curs.execute('SELECT date FROM autoapp.last_update WHERE user_id = %s', [USER_ID])
+    curs.execute('SELECT date FROM autoapp.dana_history_timestamp WHERE user_id = %s', [USER_ID])
     last_update = curs.fetchone()[0]
     return (boluses, prog_basal, actual_basal, extended, last_update)
 
