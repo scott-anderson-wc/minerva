@@ -134,14 +134,17 @@ def plot_data(start_date, start_time, hours):
     except ValueError:
         return (jsonify({'error': '''bad duration. should be a positive integer like 2'''}), 400)
     # finally, real work
-    conn = dbi.connect()
-    boluses, prog_basal, actual_basal, extended, last_update = ics.get_insulin_info(conn, start_time, hours)
-    cgm = ics.get_cgm_info(conn, start_time, hours)
-    return jsonify([boluses, prog_basal, actual_basal, extended, last_update, cgm])
+    try:
+        conn = dbi.connect()
+        boluses, prog_basal, actual_basal, extended, last_update = ics.get_insulin_info(conn, start_time, hours)
+        cgm = ics.get_cgm_info(conn, start_time, hours)
+        return jsonify([boluses, prog_basal, actual_basal, extended, last_update, cgm])
+    except Exception as err:
+        return jsonify({'error': repr(err)})
 
 @app.route ('/getRecentISF/<int:time_bucket>/<int:min_weeks>/<int:min_data>/')
 def getRecentISF(time_bucket,min_weeks, min_data):
-    '''Returns the first, second, and thrid quartile isf information given a time bucket and number of weeks and data points to look back. '''
+    '''Returns the first, second, and third quartile isf information given a time bucket and number of weeks and data points to look back. '''
     return_example_result = False
     if return_example_result:
         val = {'Q1': 4, 'Q2': 24, 'Q3': 48,

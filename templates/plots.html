@@ -188,7 +188,8 @@
                                 y: cgm_values,
                                 type: "line",
                                 name: "realtime CGM"};
-        var config = {responsive: true};
+        var config = {responsive: true,
+                      yaxis: {range: [0, 300]}};
         Plotly.newPlot("cgmPlot",
                        [trace_cgm_values],
                        {title: "realtime CGM plot",
@@ -218,6 +219,9 @@
         $.get(url, function (resp) {
             g = resp;
             console.log('got ',resp);
+            if(resp.error) {
+                alert('Sorry; there was this error '+resp.error)
+            }
             const [boluses, prog_basal, actual_basal, extended, last_update, cgm ] = resp;
             // ready to plot
             // Note that there's no timezone information in the last_update data;
