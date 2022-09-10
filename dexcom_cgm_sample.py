@@ -60,7 +60,9 @@ LOGIN_URL = 'https://share1.dexcom.com/ShareWebServices/Services/General/LoginPu
 USER_AGENT_HEADER = 'Dexcom%20Share/3.0.2.11 CFNetwork/672.0.2 Darwin/14.0.0';
 CGM_URL = 'https://share1.dexcom.com/ShareWebServices/Services/Publisher/ReadPublisherLatestGlucoseValues'
 CRED_FILE = '/home/hugh9/dexcom-credentials.json'
-HUGH_USER = 'Hugh'              # the username value stored in realtime_cgm2
+# added this on 9/10/2022
+HUGH_USER_ID = 7          # the user_id value stored in realtime_cgm2
+HUGH_USER = 'Hugh'        # the username value stored in realtime_cgm2
 TREND_VALUES = {'None': 0,
                 'DoubleUp': 1,
                 'SingleUp': 2,
@@ -106,10 +108,10 @@ the number of values we need from Dexcom from those.
     curs = dbi.cursor(conn)
     curs.execute('''SELECT rtime, dexcom_time
                     FROM realtime_cgm2
-                    WHERE user = %s and
+                    WHERE user_id = %s and
                           rtime = (SELECT max(rtime) FROM realtime_cgm2
-                                   WHERE user = %s and mgdl is not NULL)''',
-                 [HUGH_USER, HUGH_USER])
+                                   WHERE user_id = %s and mgdl is not NULL)''',
+                 [HUGH_USER_ID, HUGH_USER_ID])
     row = curs.fetchone()
     return row
 
@@ -230,24 +232,24 @@ might be an old value.'''
     if trend_num is None:
         logging.error('trend is invalid: {}'.format(trend_code))
     logging.debug('rtime {} WT {} value {}'.format(rtime_now,wt_time,mgdl))
-    nrows = curs.execute('''INSERT INTO realtime_cgm2(user, rtime, dexcom_time, mgdl, trend, trend_code) 
-                            VALUES(%s,%s,%s,%s,%s,%s)
+    nrows = curs.execute('''INSERT INTO realtime_cgm2(user_id, user, rtime, dexcom_time, mgdl, trend, trend_code) 
+                            VALUES(%s,%s,%s,%s,%s,%s,%s)
                             ON DUPLICATE KEY UPDATE
                                dexcom_time = values(dexcom_time),
                                mgdl = values(mgdl),
                                trend = values(trend),
                                trend_code = values(trend_code)''',
-                         [HUGH_USER, rtime_now, wt_time, mgdl, trend_num, trend_code ])
+                         [HUGH_USER_ID, HUGH_USER, rtime_now, wt_time, mgdl, trend_num, trend_code ])
     conn.commit()
     return nrows
     
 def write_no_data(conn, rtime_now):
     '''write a NoData event into the realtime_cgm2 table.'''
     curs = dbi.cursor(conn)
-    curs.execute('''INSERT INTO realtime_cgm2(user, rtime, mgdl, trend, trend_code) 
-                    VALUES(%s,%s,%s,%s,%s)
+    curs.execute('''INSERT INTO realtime_cgm2(user_id, user, rtime, mgdl, trend, trend_code) 
+                    VALUES(%s,%s,%s,%s,%s,%s)
                     ON DUPLICATE KEY UPDATE mgdl = NULL, trend = NULL, trend_code = NULL''',
-                 [HUGH_USER, rtime_now, None, None, None])
+                 [HUGH_USER_ID, HUGH_USER, rtime_now, None, None, None])
     conn.commit()
     
   
