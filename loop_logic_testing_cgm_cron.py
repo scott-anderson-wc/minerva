@@ -82,7 +82,6 @@ copy of the next test value.'''
     curs = conn.cursor()
     curs.execute('select command, status from loop_logic.testing_command where comm_id = 1')
     (command, status) = curs.fetchone()
-    print('debug',command,status)
     command = command.lower()
     if command == 'start':
         cron_start(conn)
