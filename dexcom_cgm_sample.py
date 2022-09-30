@@ -75,25 +75,6 @@ TREND_VALUES = {'None': 0,
                 'RateOutOfRange': 9
                }
 
-# Logging is global, so we save these global values
-log_stream = None
-log_now = None
-
-def start_log():
-    global log_stream, log_now
-    now = datetime.today()
-    log_now = now.strftime('%H:%M')
-    logfile = log_file_name()
-    log_stream = open(logfile, "a")
-    write_log('start')
-
-def write_log(line):
-    log_stream.write(log_now+'\t'+str(line)+'\n')
-    log_stream.flush()
-
-def close_log():
-    log_stream.close()
-
 def debugging():
     logging.basicConfig(level=logging.DEBUG)
 

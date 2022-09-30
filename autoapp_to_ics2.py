@@ -22,26 +22,8 @@ TABLE = 'janice.insulin_carb_smoothed_2'
 USER = 'Hugh'
 USER_ID = 7
 
-# Logging is global, so we save these global values
-log_stream = None
-log_now = None
-
-def start_log():
-    global log_stream, log_now
-    now = datetime.today()
-    log_now = now.strftime('%H:%M')
-    logfile = log_file_name()
-    log_stream = open(logfile, "a")
-    write_log('start')
-
-def write_log(line):
-    log_stream.write(log_now+'\t'+str(line)+'\n')
-    log_stream.flush()
-
-def close_log():
-    log_stream.close()
-
 def debugging():
+    '''Run this in the Python REPL to turn on debug logging. The default is just error'''
     logging.basicConfig(level=logging.DEBUG)
 
 ## ----------------------------- Setup functions ----------------------------------------
