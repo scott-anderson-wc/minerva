@@ -12,29 +12,32 @@
 
 # We should probably just have a single venv version of python
 
+# the crontab entry should look like
+# * * * * /home/hugh9/scott/prod3/minerva/cronjobs.sh 
+# and let the error output go to email
+
 devel=/home/hugh9/scott/devel3
 prod=/home/hugh9/scott/prod3/
 
 if [ "$PWD" = "$devel" ]; then
     echo "running the development versions, output to terminal"
-    logfile=/dev/stdout
     python="$devel/venv369/bin/python3"
     repo="$devel"
 else
-    logfile=/home/hugh9/cronjobs.log
     python="$prod/venv369/bin/python3"
     repo="$prod/minerva"
 fi
 
 if [ ! -x "$python" ]; then
-    echo "cannot find python $python " >> $logfile
+    echo "cannot find python $python "
     exit
 fi
 
 if [ ! -d "$repo" ]; then
-   echo "cannot find repo directory $repo " >> $logfile
+   echo "cannot find repo directory $repo "
 fi
 
-$python $repo/dexcom_cgm_sample.py >> $logfile 2&>1
-$python $repo/autoapp_to_ics2.py cron >> $logfile 2&>1
-$python $repo/autoapp_to_loop_logic.py &>> $logfile
+date 
+$python $repo/dexcom_cgm_sample.py 
+$python $repo/autoapp_to_ics2.py cron 
+$python $repo/autoapp_to_loop_logic.py 
