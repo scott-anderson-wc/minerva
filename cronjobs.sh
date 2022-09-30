@@ -35,6 +35,6 @@ if [ ! -d "$repo" ]; then
    echo "cannot find repo directory $repo " >> $logfile
 fi
 
-$python $repo/dexcom_cgm_sample.py > $logfile 1&>2
-$python $repo/autoapp_to_ics2.py cron > $logfile 1&>2
-$python $repo/autoapp_to_loop_logic.py > $logfile 1&>2
+$python $repo/dexcom_cgm_sample.py >> $logfile 2&>1
+$python $repo/autoapp_to_ics2.py cron >> $logfile 2&>1
+$python $repo/autoapp_to_loop_logic.py &>> $logfile
