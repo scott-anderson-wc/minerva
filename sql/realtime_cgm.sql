@@ -13,8 +13,11 @@
 -- I got rid of the rec_num field, since we almost never use it and it makes more sense
 -- to use (user,rtime) as the key. That also allows the ON-DUPLICATE-KEY trick. 
 
-drop table if exists realtime_cgm3;
-create table realtime_cgm3 (
+use janice;
+
+drop table if exists realtime_cgm2;
+create table realtime_cgm2 (
+    user_id int not null,
     user varchar(20),
     rtime datetime,
     dexcom_time datetime,
@@ -35,7 +38,7 @@ create table realtime_cgm3 (
     index(rtime)
 );
 
-insert into realtime_cgm3
+insert into realtime_cgm2
 select user, date5f(date), NULL, min(mgdl), 
 min(case
     when trend = '' then 0
