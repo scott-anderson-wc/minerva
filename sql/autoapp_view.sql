@@ -9,7 +9,8 @@ use autoapp;
 drop view if exists janice.command_view;
 create view janice.command_view as
 select command_id,
-       date,
+       created_timestamp,
+       update_timestamp,
        type,
        if(commands.completed=1,"completed", "not completed") as completed,
        if(commands.error=1, "error", "") as error,
@@ -18,7 +19,7 @@ select command_id,
        ifnull(temp_basal.duration,"") as duration
 from commands
      left outer join commands_temporary_basal_data as temp_basal using (command_id)
-order by date asc;     
+order by created_timestamp asc;     
 
 drop view if exists janice.bolus_view;
 create view janice.bolus_view as
@@ -42,7 +43,8 @@ drop view if exists janice.autoapp_view;
 create view janice.autoapp_view as
 select 'command' as 'kind',
        command_id as 'id',
-       date,
+       created_timestamp as 'date',
+       update_timestamp,
        type,
        completed,
        error,
@@ -55,6 +57,7 @@ union
 select 'bolus' as 'kind',
        bolus_id as 'id',
        date,
+       null,
        type,
        "" as completed,
        "" as error,
@@ -67,6 +70,7 @@ union
 select 'carbs' as 'kind',
        carbohydrate_id as 'id',
        date,
+       null,
        "" as type,
        "" as complete,
        "" as error,
