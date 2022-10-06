@@ -250,9 +250,10 @@ timestamp, which is probably the timestamp of a bolus.
     nr = curs.execute(query, [HUGH_USER_ID, timestamp, timestamp])
     if nr > 1:
         # ick. could there be two exactly the same distance? 
-        for row in curs.fetchall():
-            print(row)
+        # we will log the fact, but leave them in the cursor and get one of them below
         logging.error(f'found {nr} matching CGM values for timestamp {timestamp} ')
+    # The following executes whether regardless of the value of 'nr'. Will get the first
+    # match or None
     row = curs.fetchone()
     if row is None:
         logging.error(f'no matching CGM for timestamp {timestamp}')
@@ -288,15 +289,19 @@ def migrate_boluses(conn, start_time, commit=True):
     for row in boluses:
         # note: bolus_id is called bolus_pump_id in loop_logic
         (user_id, bolus_pump_id, date, value) = row
-        # see if all values match
+        # see if all values match, to avoid re-inserting something already migrated
         curs.execute('''select loop_summary_id, user_id, bolus_pump_id, bolus_timestamp, bolus_value
                         from loop_logic.loop_summary
                         where user_id = %s and bolus_pump_id = %s and bolus_timestamp = %s and bolus_value = %s''',
                      row)
         match = curs.fetchone()
         if match is None:
-            # the normal case
-            (cgm_id, cgm_value) = matching_cgm(conn, date)
+            # the normal case, we'll insert it. First see if there's a CGM at this time
+            cgm = matching_cgm(conn, date)
+            if cgm is not None:
+                (cgm_id, cgm_value) = cgm
+            else:
+                (cgm_id, cgm_value) = (None, None)
             curs.execute('''insert into loop_logic.loop_summary
                                 (user_id, bolus_pump_id, bolus_timestamp, bolus_value,
                                 linked_cgm_id
