@@ -1,4 +1,11 @@
-'''Code to run as a cron job. Uses the tables defined in loop-logic-latest-cgm.sql
+'''Code to run as a cron job. Uses the tables defined in loop-logic-latest-cgm.sql namely
+
+latest_cgm
+
+migrating test data from 
+
+source_cgm
+
 
 When the loop_logic.testing_command table as a non-empty string in the 'command' column,
 we start or stop the testing.  That means:
@@ -47,17 +54,21 @@ def cron_stop(conn):
 
 def cron_copy(conn):
     '''Normal processing. Take the next value from the source_cgm table,
-determined by the min rtime where used is NO.'''
-    curs = conn.cursor()
-    # get next test value to use
-    curs.execute('''SELECT user_id, rtime, mgdl, trend, trend_code
-                    FROM loop_logic.source_cgm
-                    WHERE rtime = (SELECT min(rtime) 
-                                   FROM loop_logic.source_cgm 
-                                   WHERE used = 'NO');''')
-    row = curs.fetchone()
+determined by the min rtime where used is NO.  This is coded under the
+assumption that it might run until we run out of fake entries in
+source_cgm and that when we run out we want to clear out the fake
+entries from latest_cgm, and reset everything, so the fake entries
+will be copied repetitively forever.
+    '''
+    row = get_next_unused_test_value(conn)
+    if row is None:
+        # if row is none, reset and repeat
+        reset_and_start_over(conn)
+        row = get_next_unused_test_value(conn)
+    # As long as we have *some* test values, the preceding code must find one
     (user_id, rtime, mgdl, trend, trend_code) = row
     # mark it as used
+    curs = conn.cursor()
     curs.execute('''UPDATE loop_logic.source_cgm SET used = 'YES' WHERE rtime = %s''', [rtime])
     conn.commit()
     # Insert it into the real table, substituting current_timestamp() for rtime
@@ -72,6 +83,36 @@ determined by the min rtime where used is NO.'''
                     WHERE comm_id = 1''',
                  [msg])
     conn.commit()
+
+def get_next_unused_test_value(conn):
+    '''search for the next value to copy, the min rtime among unused test
+values. Returns a tuple from source_cgm: 
+
+(user_id, rtime, mgdl, trend, trend_code)
+'''
+    curs = conn.cursor()
+    curs.execute('''SELECT user_id, rtime, mgdl, trend, trend_code
+                    FROM loop_logic.source_cgm
+                    WHERE rtime = (SELECT min(rtime) 
+                                   FROM loop_logic.source_cgm 
+                                   WHERE used = 'NO');''')
+    # one row or None if there are none left
+    return curs.fetchone()
+    
+
+def reset_and_start_over(conn):
+    '''Use this to clear the copied records to start over. This code is
+similar to cron_start; if we wanted to put the current timestamp into
+the command table whenever we restart, we could just use that
+function.'''
+    curs = conn.cursor()
+    # delete the fake entries from latest_cgm
+    curs.execute('''DELETE FROM loop_logic.latest_cgm WHERE status = 'fake'; ''')
+    conn.commit()
+    # update all the source entries, marking them unused
+    curs.execute('''UPDATE loop_logic.source_cgm SET used = 'NO'; ''')
+    conn.commit()
+    
 
 def run_as_cron():
     '''The processing we do when we run as a cron job: figure out what
@@ -88,6 +129,10 @@ copy of the next test value.'''
         cron_copy(conn)
     elif command == 'stop':
         cron_stop(conn)
+    elif command == 'restart':
+        # a lot like start
+        reset_and_start_over(conn)
+        cron_copy(conn)
     elif command != '':
         msg = f'Did not understand this command: {command}. Expected "start" or "stop" without quotation marks'
         curs.execute('update loop_logic.testing_command set msg = % where comm_id = 1',
