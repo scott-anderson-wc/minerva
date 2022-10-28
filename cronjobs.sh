@@ -41,4 +41,5 @@ $python $repo/dexcom_cgm_sample.py
 $python $repo/autoapp_to_ics2.py cron 
 $python $repo/autoapp_to_loop_logic.py 
 $python $repo/loop_logic_testing_cgm_cron.py
+$python $repo/pull_data_from_diamond.py
 
