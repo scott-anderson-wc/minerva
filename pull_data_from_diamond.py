@@ -42,6 +42,8 @@ import cs304dbi as dbi
 from datetime import datetime
 
 DIAMOND = 'http://minervaanalysis.net/analytics/userCarbs'
+DIAMOND_ALL = 'http://minervaanalysis.net/analytics/userCarbs'
+
 SINCE_FILE = '/home/hugh9/last_pull_data_from_diamond.log'
 ISO_FMT = '%Y-%m-%dT%H:%M:%S'
 
@@ -50,6 +52,7 @@ def get_data(fromTimestamp, userId=4):
     return resp.json()
 
 def convert_timestamp(timestr):
+    '''Converts the timestamp to one with integer number of seconds'''
     return datetime.strptime(timestr,ISO_FMT+'.%fZ').strftime(ISO_FMT)
 
 def store_data(conn, data):
@@ -86,13 +89,14 @@ def store_time(timestamp=None):
 
 def transfer(since_str=None):
     if since_str is None:
-        since_str = find_since()
+        (since_str, since_dt) = find_since()
     data = get_data(since_str)
     if len(data) > 0:
         dbi.cache_cnf()
         conn = dbi.connect()
         store_data(conn, data)
-    store_time()
+        last_time = convert_timestamp(max([ d.get('timestamp') for d in data ]))
+        store_time(last_time)
 
 if __name__ == '__main__':
     transfer()
