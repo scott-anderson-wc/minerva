@@ -325,6 +325,211 @@ to the dictionary. Then converting to a table, for easier analysis.
 pm = predictive_model_june21
 
 # ================================================================
+# Predictive Model with multiple carbs
+
+def predictive_model_multi_carbs(
+        time_now,
+        conn = None,
+        debug = False,
+        coef_bg_now = 1, # c0
+        bg_now = None,
+        coef_bg_prev = 0, # c1
+        bg_prev = None,
+        coef_bg_slope = 1, # c2
+        bg_slope = None,
+        coef_effect = 1, # c3
+        past_inputs = None,
+        insulin_inputs = None,  # replace with past_inputs?
+        basal_rate_12 = None,
+        isf_function = None,
+        action_curves = None,   # added this (from action_curves.py) 
+        iac_curve = None,       # replace by action_curves
+        coef_carbs = 7,         # do we still want this?
+        carb_curve = None,      # replace by action_curves
+        # probably want to delete carb_inputs and use past_inputs instead
+        carb_inputs = None):
+
+    '''Returns a prediction (a trace of BG values) for a length of time
+(two hours) from the given time_now. The result is suitable for
+plotting along with the actual BG values, if any. Other values have
+sensible defaults but can be provided.
+
+Defaults that are None will be read from the database or otherwise
+    computed.
+
+This PM tries to identify the kind of carbs (brunch, dinner or rescue)
+and use the appropriate curve. It uses the curves read from the
+database tables by functions in action_curves.py.
+
+This one gets a bunch of past data as dictionaries, iterating over it
+to make the predictions, and adding the prediction to the
+dictionary. Then converting to a table, for easier analysis.
+    '''
+    time_now = date_ui.to_datetime(time_now)
+    time_now = date_ui.to_rtime(time_now)
+    logging.info('predictive model for {}'.format(time_now))
+    # computing defaults
+    if conn is None:
+        conn = dbi.connect()
+    curs = dbi.dict_cursor(conn)
+    if bg_now is None:
+        bg_now = float(get_bg(time_now, conn=conn))
+    time_prev = time_now - timedelta(minutes=5)
+    if bg_prev is None:
+        bg_prev = float(get_bg(time_prev, conn=conn))
+    # we may eventually replace this bg_slope with, say, a 30-minute slope
+    if bg_slope is None:
+        bg_slope = bg_now - bg_prev
+    rtime = time_now
+    if past_inputs is None:
+        # need carbs and insulin to compute DC and DI
+        # need rtime and delta time for x-axis
+        # need abg (actual bg) for comparison to prediction
+        # added carb_code so we can know which action curve to apply
+        curs.execute('''select rtime, 
+                        timestampdiff(MINUTE,%s,rtime) as delta, 
+                           coalesce(bg, cgm) as abg, 
+                           if(total_bolus_volume is null,basal_amt_12,total_bolus_volume+basal_amt_12) as insulin, 
+                           carb_code,
+                           if(carbs is null, 0, carbs) as carbs, 
+                           rescue_carbs,
+                           basal_amt_12
+                    from insulin_carb_smoothed_2
+                    where rtime >= %s and rtime <= %s''',
+                 [rtime, rtime-timedelta(hours=5), rtime+timedelta(hours=3)])
+        past_inputs = curs.fetchall()
+    if basal_rate_12 is None:
+        # should get this from past_inputs instead
+        basal_rate_12 = get_basal_rate_12(time_now, conn=conn)
+    if isf_function is None:
+        isf_function = estimated_isf
+    logging.debug('initial ISF %s', isf_function(time_now))
+    # the percent curve is our IAC
+    if iac_curve is None:
+        iac_curve = getIAC(conn=conn)
+        assert(type(iac_curve) is list and len(iac_curve) == 60)
+        # iac_curve.reverse()
+    if carb_curve is None:
+        carb_curve = normalize(CAC)
+        # omit the length check. It'll be 40 and will run out when we
+        # do the convolution, but that's okay
+        assert(type(carb_curve) is list)
+        # carb_curve.reverse()
+    # outputs, predictions (bg units) dynamic insulin and dynamic carbs
+    predictions = []
+    prev_di = 0
+    prev_dc = 0
+    # New algorithm. Skip the first N rows because we need N past
+    # inputs to compute DC and DI. N = max(len(percent_curve), len(carb_curve))
+    skip_amt = max(len(iac_curve), len(carb_curve))
+    skip_rows = past_inputs[0:skip_amt]
+    print('initial insulin inputs',insulin_inputs)
+    print('initial carb inputs',carb_inputs)
+    for i in range(skip_amt, len(past_inputs)):
+        row = past_inputs[i]
+        dynamic_insulin = convolve(past_inputs, i, 'insulin', iac_curve)
+        effect = -1 * dynamic_insulin * isf_function(time_now)
+        dynamic_carbs = convolve(past_inputs, i, 'carbs', carb_curve)
+        rt = row['rtime']
+        logging.debug('RT: %s DT: %s IN: %d BG %.2f DI %.2f Effect %.2f DC: %.2f ',
+                      rt, row['delta'],
+                      row['insulin'],
+                      bg_now,
+                      dynamic_insulin,
+                      effect,
+                      dynamic_carbs)
+        bg_next = (coef_bg_now * bg_now +
+                   coef_bg_prev * bg_prev +
+                   coef_effect * effect + 
+                   coef_carbs * dynamic_carbs )
+        predictions.append(bg_next)
+        row['pred_bg'] = bg_next
+        row['di'] = dynamic_insulin
+        row['dc'] = dynamic_carbs
+        delta_di, prev_di = dynamic_insulin - prev_di, dynamic_insulin
+        row['delta_di'] = delta_di
+        # carbs
+        delta_dc, prev_dc = dynamic_carbs - prev_dc, dynamic_carbs
+        row['delta_dc'] = delta_dc
+        # Advance now and past
+        (bg_now, bg_past, time_now) = (bg_next, bg_now, time_now+timedelta(minutes=5))
+    return predictions, past_inputs
+
+def make_test_inputs(start_time, duration, events):
+    '''Create some test inputs for the predictive model, to supply as past_inputs value. 
+Given arguments like start_time='2022-11-04 06:00' and duration=3*60, and events as a list of tuples the columns
+we need for computing past inputs, namely 
+
+delta     (minutes since start_time)
+abg       (we'll omit this, and just use 120)
+insulin
+carb_code
+carbs
+rescue_carbs  (seems redundant. omitted)
+basal_amt_12   (we'll just use a default value for now)
+
+This computes a series of dictionaries to replace this:
+
+        select rtime, 
+                        timestampdiff(MINUTE,%s,rtime) as delta, 
+                           coalesce(bg, cgm) as abg, 
+                           if(total_bolus_volume is null,basal_amt_12,total_bolus_volume+basal_amt_12) as insulin, 
+                           carb_code,
+                           if(carbs is null, 0, carbs) as carbs, 
+                           rescue_carbs,
+                           basal_amt_12
+                    from insulin_carb_smoothed_2
+
+'''
+    start_rtime = date_ui.to_rtime(start_time)
+    default_abg = 120
+    default_basal = 0.1
+    # first generate basic rows. We'll edit them next
+    rows = [ {'rtime': start_rtime + timedelta(minutes=n),
+              'delta': n,
+              'abg': default_abg,
+              'carb_code': None,
+              'carbs': 0,
+              'basal_amt_12': default_basal }
+             for n in range(0, duration, 5) ]
+    print('len(rows)', len(rows))
+    # now iterate over events and update
+    for evt in events:
+        # this is the format of the events
+        (dt, insulin, carb_code, carbs ) = evt
+        matches = [ row for row in rows if row.get('delta') == dt ]
+        if len(matches) != 1:
+            # this should always match exactly one row
+            raise Exception('should be only one match: {}'.format(len(matches)))
+        row = matches[0]
+        if insulin is not None:
+            row['insulin'] = insulin
+        if carb_code is not None:
+            row['carb_code'] = carb_code
+            row['carbs'] = carbs
+    print('len(rows)', len(rows))
+    return rows
+
+def test_inputs_1():
+    rows = make_test_inputs('2022-11-03 07:00', 180,
+                            [(5, 2, None, None), # 2 units insulin first
+                             (10, 0, 20, 'breakfast')])
+    return rows
+
+def test_pm_1():
+    '''First test case for the PMMC (predictive model multi carb). This
+case is a "normal" breakfast with carbs and insulin.'''
+    time_now = '2022-11-03 07:00'
+    duration = 180
+    past = make_test_inputs(time_now, duration, 
+                            [(5, 2, None, None), # 2 units insulin first
+                             (10, 0, 20, 'breakfast')])
+    return predictive_model_multi_carbs(time_now,
+                                        debug = True,
+                                        past_inputs = past,
+                                        basal_rate_12 = 0.1)
+
+# ================================================================
 # convolution
 
 def convolve(list_of_rows, index, key, curve):
