@@ -1,9 +1,9 @@
-'''My head is swimming with the complexity of this model. I've written up my thoughts in 
+'''My head is swimming with the complexity of this model. I've written up my thoughts in
 this Google Doc:
 
 https://docs.google.com/document/d/1-erML0G9NQuPqN8CFUDG2M9Z4nfwIZiGpPK6noOTdRk/edit#
 
-The inputs are 
+The inputs are
 
 coef_bg_now,
 bg_now,
@@ -21,7 +21,7 @@ because 60 steps times 5 minutes per step is 300 minutes or 5
 hours. P[i] is the percent of a past insulin that is active at this
 time. Usually, we call this the Insulin_Action_curve or IAC.
 
-Scott 
+Scott
 
 June 2021
 
@@ -38,7 +38,7 @@ import date_ui
 import random
 
 # ================================================================
-# Notes are like flashing. 
+# Notes are like flashing.
 
 notes = []
 
@@ -171,7 +171,7 @@ Defaults that are None will be read from the database or otherwise
                      dynamic_carbs)
         bg_next = (coef_bg_now * bg_now +
                    coef_bg_prev * bg_prev +
-                   coef_effect * effect + 
+                   coef_effect * effect +
                    coef_carbs * dynamic_carbs )
         predictions.append(bg_next)
         # insulin
@@ -254,11 +254,11 @@ to the dictionary. Then converting to a table, for easier analysis.
         # need carbs and insulin to compute DC and DI
         # need rtime and delta time for x-axis
         # need abg (actual bg) for comparison to prediction
-        curs.execute('''select rtime, 
-                        timestampdiff(MINUTE,%s,rtime) as delta, 
-                           coalesce(bg, cgm) as abg, 
-                           if(total_bolus_volume is null,basal_amt_12,total_bolus_volume+basal_amt_12) as insulin, 
-                           if(carbs is null, 0, carbs) as carbs, 
+        curs.execute('''select rtime,
+                        timestampdiff(MINUTE,%s,rtime) as delta,
+                           coalesce(bg, cgm) as abg,
+                           if(total_bolus_volume is null,basal_amt_12,total_bolus_volume+basal_amt_12) as insulin,
+                           if(carbs is null, 0, carbs) as carbs,
                            rescue_carbs,
                            basal_amt_12
                     from insulin_carb_smoothed_2
@@ -307,7 +307,7 @@ to the dictionary. Then converting to a table, for easier analysis.
                       dynamic_carbs)
         bg_next = (coef_bg_now * bg_now +
                    coef_bg_prev * bg_prev +
-                   coef_effect * effect + 
+                   coef_effect * effect +
                    coef_carbs * dynamic_carbs )
         predictions.append(bg_next)
         row['pred_bg'] = bg_next
@@ -342,7 +342,7 @@ def predictive_model_multi_carbs(
         insulin_inputs = None,  # replace with past_inputs?
         basal_rate_12 = None,
         isf_function = None,
-        action_curves = None,   # added this (from action_curves.py) 
+        action_curves = None,   # added this (from action_curves.py)
         iac_curve = None,       # replace by action_curves
         coef_carbs = 7,         # do we still want this?
         carb_curve = None,      # replace by action_curves
@@ -386,12 +386,12 @@ dictionary. Then converting to a table, for easier analysis.
         # need rtime and delta time for x-axis
         # need abg (actual bg) for comparison to prediction
         # added carb_code so we can know which action curve to apply
-        curs.execute('''select rtime, 
-                        timestampdiff(MINUTE,%s,rtime) as delta, 
-                           coalesce(bg, cgm) as abg, 
-                           if(total_bolus_volume is null,basal_amt_12,total_bolus_volume+basal_amt_12) as insulin, 
+        curs.execute('''select rtime,
+                        timestampdiff(MINUTE,%s,rtime) as delta,
+                           coalesce(bg, cgm) as abg,
+                           if(total_bolus_volume is null,basal_amt_12,total_bolus_volume+basal_amt_12) as insulin,
                            carb_code,
-                           if(carbs is null, 0, carbs) as carbs, 
+                           if(carbs is null, 0, carbs) as carbs,
                            rescue_carbs,
                            basal_amt_12
                     from insulin_carb_smoothed_2
@@ -440,7 +440,7 @@ dictionary. Then converting to a table, for easier analysis.
                       dynamic_carbs)
         bg_next = (coef_bg_now * bg_now +
                    coef_bg_prev * bg_prev +
-                   coef_effect * effect + 
+                   coef_effect * effect +
                    coef_carbs * dynamic_carbs )
         predictions.append(bg_next)
         row['pred_bg'] = bg_next
@@ -456,9 +456,9 @@ dictionary. Then converting to a table, for easier analysis.
     return predictions, past_inputs
 
 def make_test_inputs(start_time, duration, events):
-    '''Create some test inputs for the predictive model, to supply as past_inputs value. 
+    '''Create some test inputs for the predictive model, to supply as past_inputs value.
 Given arguments like start_time='2022-11-04 06:00' and duration=3*60, and events as a list of tuples the columns
-we need for computing past inputs, namely 
+we need for computing past inputs, namely
 
 delta     (minutes since start_time)
 abg       (we'll omit this, and just use 120)
@@ -470,12 +470,12 @@ basal_amt_12   (we'll just use a default value for now)
 
 This computes a series of dictionaries to replace this:
 
-        select rtime, 
-                        timestampdiff(MINUTE,%s,rtime) as delta, 
-                           coalesce(bg, cgm) as abg, 
-                           if(total_bolus_volume is null,basal_amt_12,total_bolus_volume+basal_amt_12) as insulin, 
+        select rtime,
+                        timestampdiff(MINUTE,%s,rtime) as delta,
+                           coalesce(bg, cgm) as abg,
+                           if(total_bolus_volume is null,basal_amt_12,total_bolus_volume+basal_amt_12) as insulin,
                            carb_code,
-                           if(carbs is null, 0, carbs) as carbs, 
+                           if(carbs is null, 0, carbs) as carbs,
                            rescue_carbs,
                            basal_amt_12
                     from insulin_carb_smoothed_2
@@ -521,7 +521,7 @@ def test_pm_1():
 case is a "normal" breakfast with carbs and insulin.'''
     time_now = '2022-11-03 07:00'
     duration = 180
-    past = make_test_inputs(time_now, duration, 
+    past = make_test_inputs(time_now, duration,
                             [(5, 2, None, None), # 2 units insulin first
                              (10, 0, 20, 'breakfast')])
     return predictive_model_multi_carbs(time_now,
@@ -554,7 +554,7 @@ the curve and backwards through the rows.
         # print(row['delta'], '\t', row[key],'\t', curve[j], '\t', prod)
         sum += row[key] * curve[j]
     return sum
-        
+
 def dict_to_list(dic):
     '''returns a list using the keys in sorted order'''
     return [ dic[key] for key in sorted(dic.keys()) ]
@@ -583,14 +583,14 @@ def test_convolve(test):
 # get_bg
 
 def get_bg(datetime, conn=None, null_okay = False):
-    '''BG comes from a finger stick and is preferable to CGM when it's available. 
-CGM comes from the implanted meter and is more likely to be available. Sometimes 
+    '''BG comes from a finger stick and is preferable to CGM when it's available.
+CGM comes from the implanted meter and is more likely to be available. Sometimes
 both are missing.'''
     rtime = date_ui.to_rtime(datetime)
     if conn is None:
         conn = dbi.connect()
     curs = dbi.cursor(conn)
-    curs.execute('''SELECT bg, cgm 
+    curs.execute('''SELECT bg, cgm
                     FROM insulin_carb_smoothed_2
                     WHERE rtime = %s''',
                  [rtime])
@@ -605,7 +605,7 @@ both are missing.'''
     if null_okay:
         return None
     raise Exception('no BG or CGM data for datetime {} (rtime {})'.format(datetime, rtime))
-    
+
 def get_basal_rate_12(datetime, conn=None, null_okay = False):
     '''Basal rate is a steady input of insulin and needs to be taken into
 account in the predictive model. We use basal_rate_12 because that's
@@ -629,7 +629,7 @@ hour.
     if null_okay:
         return None
     raise Exception('no basal data for datetime {} (rtime {})'.format(datetime, rtime))
-    
+
 
 # ================================================================
 # ISF from TSV
@@ -641,7 +641,7 @@ The data is also in the isf_est table.
 
 The format is as written out by isf2.est_isf_table:
 Columns are year,quarter,bucket,isf,option,n
-where option are how the data was computed and 
+where option are how the data was computed and
 n is the number of real values that the median is
 computed from.
 
@@ -649,7 +649,7 @@ The data is stored in memory in a dictionary where the key is
 
     key = (bucket, year, quarter)
 
-and the values are (isf, option, count). 
+and the values are (isf, option, count).
 
 This is the same as isf2.isf_est_cache  and as computed by isf2.compute_estimated_isf_at_time.
 
@@ -716,7 +716,7 @@ ISF_EST_CACHE = None
 
 def get_isf_history(conn = None):
     '''Read the historical ISF data from the est_ in TSV format from the given
-filename. See file for more detail. Data is saved to a global dictionary, where the key is 
+filename. See file for more detail. Data is saved to a global dictionary, where the key is
 year,quarter,bucket and the return value is a list of [isf, quality, count].'''
     global ISF_EST_CACHE
     if ISF_EST_CACHE is None:
@@ -736,7 +736,7 @@ TSV_DATA_TABLE = None
 
 def read_isf_table(isf_filename_tsv):
     '''Read the historical ISF data in TSV format from the given
-filename. See file for more detail. Data is saved to a global dictionary, where the key is 
+filename. See file for more detail. Data is saved to a global dictionary, where the key is
 year,quarter,bucket and the return value is a list of [isf, quality, count].'''
     pass
 
@@ -772,12 +772,12 @@ def getIAC(conn=None):
             conn = dbi.connect()
         curs = dbi.dict_cursor(conn)
         user = 'hugh'
-        curs.execute('''SELECT max(curve_date) as curve_date 
+        curs.execute('''SELECT max(curve_date) as curve_date
                         FROM insulin_action_curve
                         WHERE user = %s''',
                      [user])
         curve_date = curs.fetchone()['curve_date']
-        curs.execute('''select curve from insulin_action_curve 
+        curs.execute('''select curve from insulin_action_curve
                         WHERE user=%s and curve_date=%s''',
                      [user, curve_date])
         data = curs.fetchone()['curve']
@@ -797,7 +797,7 @@ def putIAC(notes, conn=None):
     curs = dbi.dict_cursor(conn)
     user = 'hugh'
     data = json.dumps(IAC)
-    curs.execute('''INSERT INTO insulin_action_curve(user, curve_date, curve, notes) 
+    curs.execute('''INSERT INTO insulin_action_curve(user, curve_date, curve, notes)
                     VALUES (%s, now(), %s, %s)''',
                  [user, data, notes])
     conn.commit()
@@ -890,7 +890,7 @@ of rescue carbs given.'''
     logging.getLogger().setLevel(loglevel)
     conn = conn if conn else dbi.connect()
     curs = dbi.cursor(conn)
-    curs.execute('''select rtime, carbs from insulin_carb_smoothed_2 
+    curs.execute('''select rtime, carbs from insulin_carb_smoothed_2
                     where rescue_carbs = 1''')
     clean_rescues = []
     for rescue_row in curs.fetchall():
@@ -929,19 +929,19 @@ def actual_cac(rtime, carbs, conn = None, time_interval = 6, loglevel = 10):
 bg_deltas for a given rtime, where the delta is measured as the
 difference of the actual BG from the BG at 'rtime'. This trace is
 divided by the number of carbs that were given at 'rtime' so the trace
-is a delta per unit of carbs. 
+is a delta per unit of carbs.
     '''
     rescue_time = rtime
     rescue_carbs = carbs
     t1 = date_ui.mysql_datetime_to_python_datetime(rescue_time)
     t2 = t1 + timedelta(hours=time_interval)
     rescue_time_end = date_ui.python_datetime_to_mysql_datetime(t2)
-    
+
     logging.getLogger().setLevel(loglevel)
     conn = conn if conn else dbi.connect()
     curs = dbi.cursor(conn)
     # Get all BG values
-    curs.execute('''select coalesce(bg, cgm) from insulin_carb_smoothed_2 
+    curs.execute('''select coalesce(bg, cgm) from insulin_carb_smoothed_2
                     where rtime >= %s and rtime <= %s''',
                  [rescue_time, rescue_time_end])
     bg_vals = [ row[0] for row in curs.fetchall() ]
@@ -957,7 +957,7 @@ is a delta per unit of carbs.
     bg_deltas = [ (bg - baseline) / rescue_carbs if bg else None
                   for bg in bg_vals ]
     return bg_deltas
-          
+
 def stats(lst):
     n = len(lst)
     lst = sorted(lst)
@@ -994,7 +994,7 @@ def usable_cac(conn = None, time_interval = 6, loglevel = logging.INFO):
     # each trace is for the same time interval, so they have the same length, unless
     # the trace is None
     # 219 traces
-    # print('len(traces)', len(traces)) 
+    # print('len(traces)', len(traces))
     # good traces are not None, but lists of numbers
     good_traces = list(filter(lambda x: x, traces))
     # 39 good traces
@@ -1021,16 +1021,16 @@ def usable_cac(conn = None, time_interval = 6, loglevel = logging.INFO):
 # ================================================================
 
 def get_past_insulin_at_time(time_now, time_interval_hours = 5, conn=None):
-    '''returns the insulin inputs for the past time_interval. These can be used 
-to compute dynamic insulin by convolving it with the IAC. Ultimately, we will 
-pre-compute these, but for now, while we are developing the predictive model, 
+    '''returns the insulin inputs for the past time_interval. These can be used
+to compute dynamic insulin by convolving it with the IAC. Ultimately, we will
+pre-compute these, but for now, while we are developing the predictive model,
 let's just read the data.'''
     if conn is None:
         conn = dbi.connect()
     curs = dbi.cursor(conn)
     time_now = date_ui.to_rtime(time_now)
     time_prev = time_now - timedelta(hours=time_interval_hours)
-    curs.execute('''SELECT rtime, basal_amt_12, total_bolus_volume 
+    curs.execute('''SELECT rtime, basal_amt_12, total_bolus_volume
                     FROM insulin_carb_smoothed_2
                     WHERE %s < rtime and rtime <= %s
                     ORDER BY rtime''',
@@ -1039,7 +1039,7 @@ let's just read the data.'''
     raw_rows = curs.fetchall()
     logging.debug('first past insulin %s', raw_rows[0])
     logging.debug('last past insulin %s', raw_rows[-1])
-    ## do we have to worry about rows where *both* basal and bolus are NULL? 
+    ## do we have to worry about rows where *both* basal and bolus are NULL?
     ## this is a list of tuples
     vals = [ (date_ui.str(row[0]),
               (row[1] if row[1] is not None else 0)
@@ -1054,9 +1054,9 @@ let's just read the data.'''
     return vals
 
 def get_past_carbs_at_time(time_now, time_interval_hours = 5, conn=None):
-    '''returns the carb inputs for the past time_interval. These can be used 
-to compute dynamic carbs by convolving it with the CAC. Ultimately, we will 
-pre-compute these, but for now, while we are developing the predictive model, 
+    '''returns the carb inputs for the past time_interval. These can be used
+to compute dynamic carbs by convolving it with the CAC. Ultimately, we will
+pre-compute these, but for now, while we are developing the predictive model,
 let's just read the data.'''
     conn = conn or dbi.connect()
     curs = dbi.cursor(conn)
@@ -1084,7 +1084,7 @@ def pm_test():
     '''let time 0 be the time of the first prediction, like pt in the
 predictive_model the IAC curve is a 5 hour curve, so 60 steps.
 
-test cases: 
+test cases:
 
 1. if there was an input of 1 unit of insulin at time -1 and a basal
 rate of 0, we should see the first 20 steps of the IAC play out in our
@@ -1107,7 +1107,7 @@ output.
                                    bg_now = 100,
                                    bg_prev = 100,
                                    insulin_inputs = in1,
-                                   basal_rate = 0.0,
+                                   basal_rate_12 = 0.0,
                                    isf_function = isf)
 
     in2 = [ 0 for i in range(60) ]
@@ -1116,7 +1116,7 @@ output.
                                    bg_now = 100,
                                    bg_prev = 100,
                                    insulin_inputs = in2,
-                                   basal_rate = 0.0,
+                                   basal_rate_12 = 0.0,
                                    isf_function = isf)
 
     in3 = [ 0.01 for i in range(60) ]
@@ -1124,7 +1124,7 @@ output.
                                    bg_now = 100,
                                    bg_prev = 100,
                                    insulin_inputs = in3,
-                                   basal_rate = 0.01,
+                                   basal_rate_12 = 0.01,
                                    isf_function = isf)
 
     table = [ list(range(60)), out1, out2, out3 ]
@@ -1135,7 +1135,7 @@ output.
 # ================================================================
 
 def get_clean_region(index = None, conn = None):
-    '''Return the rtime for a clean region. If index is omitted, choose a random one. 
+    '''Return the rtime for a clean region. If index is omitted, choose a random one.
 Otherwise, the rtime of the clean region specified by index.'''
     if conn is None:
         conn = dbi.connect()
@@ -1148,7 +1148,7 @@ Otherwise, the rtime of the clean region specified by index.'''
     return curs.fetchone()[0]
 
 def get_model_inputs(rtime = None, hrs_minus = 5, hrs_plus = 2, conn = None):
-    '''Return the the data for the predictive model for a given datetime or the index 
+    '''Return the the data for the predictive model for a given datetime or the index
 for a clean region.'''
     if conn is None:
         conn = dbi.connect()
@@ -1184,7 +1184,7 @@ designed to plotted in Excel.'''
         raise Exception('Must specify datetime or index')
     datetime = date_ui.to_datetime(datetime)
     # let's get going
-    pred_vals, di_vals, dc_vals, di_deltas, dc_deltas = predictive_model_june21(datetime, conn=conn, debug=debug)
+    pred_vals, di_vals, dc_vals, di_deltas, dc_deltas, notes = predictive_model_june21(datetime, conn=conn, debug=debug)
 
     basal_rate_12 = get_basal_rate_12(datetime, conn=conn)
 
@@ -1201,7 +1201,7 @@ designed to plotted in Excel.'''
     t_past_60 = datetime - timedelta(hours=5)
     t_plus_20 = datetime + timedelta(hours=2)
 
-    times = [ t*5 for t in range(-60, 20) ] 
+    times = [ t*5 for t in range(-60, 20) ]
     past_vals = get_bg_trace(t_past_60, t_zero, conn = conn)
     plus_vals = get_bg_trace(t_zero, t_plus_20, conn = conn)
 
@@ -1221,7 +1221,7 @@ def get_bg_trace(t0, t1, conn = None):
     if conn is None:
         conn = dbi.connect()
     curs = dbi.cursor(conn)
-    curs.execute('''select coalesce(BG, CGM, '') from insulin_carb_smoothed_2 
+    curs.execute('''select coalesce(BG, CGM, '') from insulin_carb_smoothed_2
                     where %s <= rtime and rtime <= %s''',
                  [date_ui.python_datetime_to_mysql_datetime(t0),
                   date_ui.python_datetime_to_mysql_datetime(t1)])
@@ -1325,7 +1325,7 @@ def get_rescue_carbs(index = None, conn = None):
     # index=1 is the most *recent* not the oldest
     index = 1745-index
     curs = dbi.cursor(conn)
-    curs.execute('''select rtime from insulin_carb_smoothed_2 
+    curs.execute('''select rtime from insulin_carb_smoothed_2
                     where rescue_carbs = 1
                     limit 1 offset {}'''.format(index))
     return curs.fetchone()[0]
@@ -1335,7 +1335,7 @@ def get_all_rescue_carbs(conn = None):
     if conn is None:
         conn = dbi.connect()
     curs = dbi.cursor(conn)
-    curs.execute('''select rtime, carbs from insulin_carb_smoothed_2 
+    curs.execute('''select rtime, carbs from insulin_carb_smoothed_2
                     where rescue_carbs = 1
                     order by rtime desc''')
     return tsv_table_out(curs.fetchall())
@@ -1343,8 +1343,8 @@ def get_all_rescue_carbs(conn = None):
 
 '''
 this is the most recent in anah.clean_regions_5hr
-Note that there was a correction at that time (1am), 
-so we want to take that insulin input into account, so 
+Note that there was a correction at that time (1am),
+so we want to take that insulin input into account, so
 we want to start our prediction at t+1
 
 '''
@@ -1401,7 +1401,7 @@ def pm_test_5(conn = None, loglevel=logging.CRITICAL):
     diffs = [ pair[1]-pair[0] for pair in zip(smoothed, next) ]
     table = transpose([times, smoothed, diffs])
     tsv_table_out(table)
-    
+
 def pm_test_5b(conn = None, loglevel=logging.DEBUG):
     # compute the predictive model for one of the rescue events, maybe the first
     conn = conn if conn else dbi.connect()
@@ -1421,10 +1421,10 @@ def what_happened_at(rtime,
     curs = dbi.cursor(conn)
     t1 = rtime - before
     t2 = rtime + after
-    curs.execute('''select rtime, 
-                           timestampdiff(MINUTE,%s,rtime) as delta, 
-                           coalesce(bg, cgm) as abg, 
-                           total_bolus_volume as insulin, 
+    curs.execute('''select rtime,
+                           timestampdiff(MINUTE,%s,rtime) as delta,
+                           coalesce(bg, cgm) as abg,
+                           total_bolus_volume as insulin,
                            carbs, rescue_carbs,
                            basal_amt_12
                     from insulin_carb_smoothed_2
@@ -1433,7 +1433,7 @@ def what_happened_at(rtime,
     table = curs.fetchall()
     print('rtime\t delta\t aBG\t insulin\t carbs\t rescue?\t basal12')
     tsv_table_out(table)
-    
+
 
 def pm_test_6(conn = None, loglevel=logging.DEBUG):
     '''The case we studied in test5, case 0, may be anomalous. Let's look
@@ -1449,7 +1449,7 @@ correctly. Let's look at event 6, on 2020-10-12 19:30:00
         table = run_hist_pm(rescue_date, conn=conn, debug=True)
         print('time\t p BG\t a BG\t In\t DI\t DC\t DDI\t DDC')
         tsv_table_out(table)
-    
+
 def pm_test_7(conn = None, rescue_event = 7, loglevel=logging.DEBUG, isf_function = None):
     '''The case we studied in test5, case 0, may be anomalous. Let's look
 at another case, and look at whether DI and DC are being computed
@@ -1470,7 +1470,7 @@ This uses the new predictive model function.
               for row in rows ]
     print('atime\t dtime\t actual BG\t pred BG\t Insulin\t DI\t carbs\t DC\t DDI\t DDC')
     tsv_table_out(table)
-    
+
 def pm_test_8(isf, conn = None, rescue_event = 1):
     '''Looking more at rescue_event 1, where the model did pretty well but
 P BG > A BG throughout. So, maybe use a lower value of ISF? How much
@@ -1480,7 +1480,7 @@ used was 16 (time bucket 16). Let's try values below that.
     '''
     isf_function = lambda x: isf
     pm_test_7(conn=conn, rescue_event=rescue_event, isf_function=isf_function)
-    
+
 ## ================================================================
 
 # Carb curve from rescue event. Based on Sept 21st predictive model
@@ -1537,11 +1537,11 @@ to the dictionary. Then converting to a table, for easier analysis.
         # need carbs and insulin to compute DC and DI
         # need rtime and delta time for x-axis
         # need abg (actual bg) for comparison to prediction
-        curs.execute('''select rtime, 
-                        timestampdiff(MINUTE,%s,rtime) as delta, 
-                           coalesce(bg, cgm) as abg, 
-                           if(total_bolus_volume is null,basal_amt_12,total_bolus_volume+basal_amt_12) as insulin, 
-                           if(carbs is null, 0, carbs) as carbs, 
+        curs.execute('''select rtime,
+                        timestampdiff(MINUTE,%s,rtime) as delta,
+                           coalesce(bg, cgm) as abg,
+                           if(total_bolus_volume is null,basal_amt_12,total_bolus_volume+basal_amt_12) as insulin,
+                           if(carbs is null, 0, carbs) as carbs,
                            rescue_carbs,
                            basal_amt_12
                     from insulin_carb_smoothed_2
@@ -1606,7 +1606,7 @@ to the dictionary. Then converting to a table, for easier analysis.
         '''
         bg_next = (coef_bg_now * bg_now +
                    coef_bg_prev * bg_prev +
-                   coef_effect * effect + 
+                   coef_effect * effect +
                    coef_carbs * dynamic_carbs )
         '''
         abg = row['abg']
@@ -1641,7 +1641,7 @@ This uses the new predictive model function.
               for row in rows ]
     print('atime\t dtime\t actual BG\t rev CC\t Insulin\t DI\t carbs\t DC\t DDI\t DDC')
     tsv_table_out(table)
-    
+
 
 def find_cc_test_1(conn = None):
     possible = []
@@ -1655,5 +1655,4 @@ def find_cc_test_1(conn = None):
 
 
 if __name__ == '__main__':
-    tab = pm_test()
-    tsv_table_out(tab)
+    tab = pm_test_2()
