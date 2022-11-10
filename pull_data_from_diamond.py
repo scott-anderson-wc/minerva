@@ -49,7 +49,10 @@ ISO_FMT = '%Y-%m-%dT%H:%M:%S'
 
 def get_data(fromTimestamp, userId=4):
     resp = requests.get(DIAMOND, {'fromTimestamp': fromTimestamp, 'userId': userId})
-    return resp.json()
+    if resp.ok:
+        return resp.json()
+    raise Exception('bad login request or response',
+                    [resp.status_code, resp.reason, resp.text] )
 
 def convert_timestamp(timestr):
     '''Converts the timestamp to one with integer number of seconds'''
@@ -68,12 +71,20 @@ def store_data(conn, data):
         timestamp = convert_timestamp(timestamp)
         # note that, currently, the key is timestamp only, because we only have one user
         curs.execute('''insert into rescue_carbs_from_diamond
-                        (user, timestamp, carbCountGrams, totalCarbGrams, quantity, carbName)
+                        (user, timestamp, carbs, quantity, carbName)
                         values (%s, %s, %s, %s, %s, %s)
                         on duplicate key update
                         carbCountGrams = %s, totalCarbGrams = %s, quantity = %s, carbName = %s;''',
                      [userId, timestamp, carbCountGrams, totalCarbGrams, quantity, carbName,
                       carbCountGrams, totalCarbGrams, quantity, carbName ])
+        # also put in ICS2
+        curs.execute('''insert into insulin_carb_smoothed_2
+                        (user, timestamp, carb_code, carbs, rescue_carbs, notes)
+                        values (%s, %s, %s, %s, %s, %s)
+                        on duplicate key update
+                        carb_code = 'rescue', carbs = %s, rescue_carbs = %s, notes = %s;''',
+                     [userId, date_ui.to_rtime(timestamp), totalCarbGrams, totalCarbGrams,
+                      f'{quantity} of {carbName}'])
     conn.commit()
 
 def find_since():
