@@ -184,6 +184,11 @@ https://docs.google.com/document/d/1UBp8VDckHNzqjorcJNgkYaJXF6iR5CeluGQ3VB_GKkE/
                     AND state = 'done'; ''',
                  [USER_ID, start_time])
     commands = curs.fetchall()
+    if len(commands) == 0:
+        # having no commands is a problem because we need commands to
+        # be sure whether temp basal is off (we need it to be off) so
+        # we can determine the actual basal.
+        raise Exception('no recent temp_basal commands at time {}'.format(start_time))
     logging.debug('there are {} commands to process since {}'.format(len(commands), start_time))
     for c in commands:
         logging.debug(str(c))
@@ -229,9 +234,9 @@ temp basals (percentages or cancelations).'''
     ## for the first thing in the queue. If the queue becomes empty,
     ## state variable just continues forever.
     if len(programmed_basal_rates) == 0:
-        raise ValueError('no programmed basal rates')
+        raise ValueError('no programmed basal rates at time {}'.format(start_time))
     if len(commands) == 0:
-        raise ValueError('no commands')
+        raise ValueError('no commands at time {}'.format(start_time))
 
     event = None                # one-time state variable
 
@@ -252,7 +257,7 @@ temp basals (percentages or cancelations).'''
         logging.debug('first 4 programmed rates: {}'.format(programmed_basal_rates[0:4]))
         raise ValueError('programmed basal had no past values')
 
-    temp_basal = None           # invisible state variable
+    temp_basal = None           # invisible state variable. Value is 1.0 when no temp_basal.
     temp_basal_end_time = None  # invisible state variable
     def curr_temp_basal():
         nonlocal temp_basal
