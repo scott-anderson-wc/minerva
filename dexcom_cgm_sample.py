@@ -130,7 +130,8 @@ def dexcom_login(creds):
         session_cookies = resp.cookies
     if resp.ok:
         return trim_quotes(resp.text)
-    raise Exception('bad login request or response', resp)
+    raise Exception('bad login request or response',
+                    [resp.status_code, resp.reason, resp.text] )
 
 def extract_unix_epoch(dexcom_date_string):
     '''Given a string like Date(1659091309000) or Date(1659091309000-0400) returns the string of digits'''
