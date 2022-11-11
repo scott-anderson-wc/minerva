@@ -557,8 +557,10 @@ Why are some bolus ids missing?
     extended_bolus_import(conn, start_rtime, debugp=debugp)
 
 ## ================================================================
+## Carb import needs to also compute the carb code.
 
-def carbohydrate_import(conn, start_rtime, debugp=False):
+# This one is now obsolete
+def old_carbohydrate_import(conn, start_rtime, debugp=False):
     curs = conn.cursor()
     # the ON DUPLICATE KEY makes this idempotent
     num_rows = curs.execute(
@@ -570,6 +572,63 @@ def carbohydrate_import(conn, start_rtime, debugp=False):
         [start_rtime])
     if debugp:
         logging.debug('inserted {} carb entries'.format(num_rows))
+
+'''The rule is that carbs with insulin are a meal, where "with
+insulin" means insulin within a 65 minute window before or after the
+meal. If the insulin comes before the meal, this function will notice
+it. However, if the insulin comes into the database *after* the carbs
+are imported, the carbs will initially be categorized as
+'rescue'. We'll have to fix that after the fact, when we import the
+bolus info.
+
+Nov 10, 2022
+'''
+
+# mean_name is also defined in iob2.py
+from dynamic_insulin import meal_name
+
+MEAL_INSULIN_TIME_INTERVAL = 30
+
+def carbohydrate_import(conn, start_rtime, debugp=False):
+    '''Gets all the recent carbs in autoapp, and for each, searches if
+there has been recent boluses. If so, these are a meal and we compute
+the meal_name and store that. Otherwise, these are rescue carbs and we
+store that.'''
+    curs = conn.cursor()
+    nrows = curs.execute('''select janice.date5f(date) as rtime, value as carbs
+                            from autoapp.carbohydrate
+                            where date >= %s''',
+                         [start_rtime])
+    logging.debug(f'found {nrows} carbs to migrate')
+    for row in curs.fetchall():
+        (rtime, carbs) = row
+        if matching_insulin_bolus(conn, rtime):
+            carb_code = meal_name(rtime)
+        else:
+            carb_code = 'rescue'
+        update = conn.cursor()
+        logging.debug(f'{carbs} carbs at {str(rtime)} is {carb_code}')
+        update.execute(f'''update {TABLE} 
+                           set carbs = %s, carb_code = %s
+                           where rtime = %s''',
+                       [carbs, carb_code, rtime])
+        if not debugp:
+            conn.commit()
+
+def matching_insulin_bolus(conn, carb_rtime, time_interval=MEAL_INSULIN_TIME_INTERVAL, debugp=False):
+    '''Looks back (and forward) time_interval minutes from carb_rtime for
+any boluses. Returns true if any.
+    '''
+    curs = dbi.dict_cursor(conn)
+    carb_rtime = date_ui.to_rtime(carb_rtime)
+    time0 = carb_rtime - timedelta(minutes=time_interval)
+    time1 = carb_rtime + timedelta(minutes=time_interval)
+    recent = curs.execute(f'''select rtime from {TABLE} 
+                              where %s < rtime and rtime < %s 
+                              and total_bolus_volume is not null''',
+                          [time0, time1])
+    logging.debug(f'number of matching boluses in {TABLE} around {carb_rtime}: {recent}')
+    return recent > 0
 
 def carbohydrate_import_test(conn, start_rtime):
     start_rtime = date_ui.to_rtime(start_rtime)
