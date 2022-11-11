@@ -22,6 +22,10 @@ def python_datetime_to_mysql_datetime(datestr):
         return datestr
     return datetime.strftime(datestr, mysql_fmt)
 
+def str(python_datetime_object):
+    '''Given a Python Datetime object, returns a readable str in MySQL syntax'''
+    return python_datetime_to_mysql_datetime(python_datetime_object)
+
 def dstr(python_datetime_object):
     '''Given a Python Datetime object, returns a readable str in MySQL syntax'''
     return python_datetime_to_mysql_datetime(python_datetime_object)
@@ -34,9 +38,9 @@ time can be omitted, defaulting to 00:00:00 and can omit seconds, defaulting to 
         time = '00:00:00'
     elif time.count(':') == 1:
         time += ':00'
-    
+
     dt_str = date + ' ' + time
-    # This will throw an error if the datetime value are bogus. 
+    # This will throw an error if the datetime value are bogus.
     dt = datetime.strptime(dt_str,mysql_fmt)
     return dt.strftime(mysql_fmt),dt
 
@@ -48,7 +52,7 @@ def to_datetime(date):
     return dateutil.parser.parse(date)
 
 # rtime is time rounded *down* to the most recent 5 minute mark
-# see the date5f function defined in pre-process/process_2.sql 
+# see the date5f function defined in pre-process/process_2.sql
 
 def to_rtime(date):
     '''Returns a new datetime object (datetimes are immutable) with the
@@ -108,4 +112,4 @@ if __name__ == '__main__':
     print('testing conversions to/from mysql and python')
     d1 = mysql_datetime_to_python_datetime('2019-01-22 13:24:00')
     print((d1, python_datetime_to_mysql_datetime(d1)))
-    
+
