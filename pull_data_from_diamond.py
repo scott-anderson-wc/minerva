@@ -38,8 +38,9 @@ March 24, 2022
 
 import os
 import requests
-import cs304dbi as dbi
 from datetime import datetime
+import cs304dbi as dbi
+import date_ui
 
 DIAMOND = 'http://minervaanalysis.net/analytics/userCarbs'
 DIAMOND_ALL = 'http://minervaanalysis.net/analytics/userCarbs'
@@ -71,20 +72,22 @@ def store_data(conn, data):
         timestamp = convert_timestamp(timestamp)
         # note that, currently, the key is timestamp only, because we only have one user
         curs.execute('''insert into rescue_carbs_from_diamond
-                        (user, timestamp, carbs, quantity, carbName)
+                        (user, timestamp, carbCountGrams, totalCarbGrams, quantity, carbName)
                         values (%s, %s, %s, %s, %s, %s)
                         on duplicate key update
                         carbCountGrams = %s, totalCarbGrams = %s, quantity = %s, carbName = %s;''',
                      [userId, timestamp, carbCountGrams, totalCarbGrams, quantity, carbName,
                       carbCountGrams, totalCarbGrams, quantity, carbName ])
         # also put in ICS2
+        notes = f'{quantity} of {carbName}'
+        print(notes)
         curs.execute('''insert into insulin_carb_smoothed_2
-                        (user, timestamp, carb_code, carbs, rescue_carbs, notes)
-                        values (%s, %s, %s, %s, %s, %s)
+                        (user, rtime, carb_code, carbs, rescue_carbs, notes)
+                        values (%s, %s, 'rescue', %s, %s, %s)
                         on duplicate key update
                         carb_code = 'rescue', carbs = %s, rescue_carbs = %s, notes = %s;''',
-                     [userId, date_ui.to_rtime(timestamp), totalCarbGrams, totalCarbGrams,
-                      f'{quantity} of {carbName}'])
+                     [userId, date_ui.to_rtime(timestamp), totalCarbGrams, totalCarbGrams, notes,
+                      totalCarbGrams, totalCarbGrams, notes])
     conn.commit()
 
 def find_since():
