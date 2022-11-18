@@ -315,6 +315,65 @@ def migrate_boluses(conn, start_time, commit=True):
     if commit:
         conn.commit()
     
+def bytes_to_int(bytes_val):
+    '''0/1 values are stored in autoapp as single-byte quantities,
+actually bit(1). They come into Python as byte arrays of length
+1. This converts to nice integers.'''
+    if type(bytes_val) is int:
+        return bytes_val
+    if type(bytes_val) is bytes:
+        if len(bytes_val) == 1:
+            int_val = int.from_bytes(bytes_val, "big")
+            return int_val
+        raise ValueError(f'multi-byte value: {bytes_val}')
+    raise TypeError(f'not either int or bytes: {bytes_val}')
+
+def migrate_commands(conn, alt_start_time=None, commit=True):
+    '''Migrate commands within the last 40". '''
+    if conn is None:
+        conn = dbi.connect()
+    read = dbi.cursor(conn)
+    start = alt_start_time if alt_start_time is not None else datetime.now() - timedelta(minutes=40)
+    start = date_ui.to_rtime(start)
+    logging.info(f'migrating commands since {start}')
+    num_com = read.execute('''SELECT command_id, user_id, created_timestamp, type, completed, error, 
+                                     state, pending, loop_command, parent_decision, 
+                                     sb.amount as sb_amount,
+                                     tb.ratio as tb_ratio
+                              FROM autoapp.commands 
+                                   LEFT OUTER JOIN commands_single_bolus_data AS sb USING(command_id)
+                                   LEFT OUTER JOIN commands_temporary_basal_data AS tb USING(command_id)
+                              WHERE created_timestamp > %s''',
+                           [start])
+    logging.info(f'{num_com} commands to migrate')
+    update = dbi.cursor(conn)
+    for row in read.fetchall():
+        print('row',row)
+        # shorthands for the column names above
+        (cid, uid, ct, ty, comp, err, state, pend, lc, pd, sb_amt, tb_amt) = row
+        comp = bytes_to_int(comp)
+        err = bytes_to_int(err)
+        pend = bytes_to_int(pend)
+        lc = bytes_to_int(lc)
+        pd = bytes_to_int(pd)
+        # check if it's already there (migrated earlier) by checking command_id
+        nrows = update.execute('''SELECT command_id FROM loop_logic.loop_summary WHERE command_id = %s''',
+                               [cid])
+        if nrows > 0:
+            logging.info(f'command {cid} has already been migrated')
+            continue
+        update.execute('''INSERT INTO loop_logic.loop_summary
+                                 (loop_summary_id,
+                                 user_id,
+                                 created_timestamp,
+                                 type,
+                                 state,
+                                 pending,
+                                 loop_command,
+                                 parent_decision) VALUES (NULL, %s, %s, %s, %s, %s, %s, %s)''',
+                       [uid, ct, ty, state, pend, lc, pd])
+        if commit:
+            conn.commit()
 
 
 def migrate_all(conn, alt_start_time=None):
@@ -335,6 +394,8 @@ If alt_start_time is supplied, ignore the value from the get_migration_time() ta
     logging.info(f'migrating data since {start_time}')
     logging.info('2. bolus')
     migrate_boluses(conn, start_time)
+    logging.info('3. commands')
+    migrate_commands(conn, start_time)
     logging.info('done. storing update time')
     set_autoapp_migration_time(conn, prev_update, last_autoapp_update)
     logging.info('done')
