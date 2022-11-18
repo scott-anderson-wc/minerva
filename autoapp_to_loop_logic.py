@@ -328,6 +328,32 @@ actually bit(1). They come into Python as byte arrays of length
         raise ValueError(f'multi-byte value: {bytes_val}')
     raise TypeError(f'not either int or bytes: {bytes_val}')
 
+def matching_bolus_row(conn, timestamp):
+    '''Returns the row (as a dictionary) from the `autoapp.bolus` table closest in
+    time to the given timestamp.
+    '''
+    curs = dbi.dict_cursor(conn)
+    query = '''SELECT bolus_id, user_id, date, type, value, duration, server_date 
+               FROM autoapp.bolus
+               WHERE user_id = %s AND 
+               abs(time_to_sec(timediff(date, %s))) = 
+                  (SELECT min(abs(time_to_sec(timediff(date, %s)))) 
+                   FROM autoapp.bolus)'''
+    nr = curs.execute(query, [HUGH_USER_ID, timestamp, timestamp])
+    if nr > 1:
+        # ick. could there be two exactly the same distance? 
+        # we will log the fact, but leave them in the cursor and get one of them below
+        logging.error(f'found {nr} matching BOLUS values for timestamp {timestamp} ')
+    # The following executes whether regardless of the value of 'nr'. Will get the first
+    # match or None
+    row = curs.fetchone()
+    if row is None:
+        logging.error(f'no matching BOLUS for timestamp {timestamp}')
+        return None
+    else:
+        return row
+
+
 def migrate_commands(conn, alt_start_time=None, commit=True):
     '''Migrate commands within the last 40". '''
     if conn is None:
@@ -336,8 +362,13 @@ def migrate_commands(conn, alt_start_time=None, commit=True):
     start = alt_start_time if alt_start_time is not None else datetime.now() - timedelta(minutes=40)
     start = date_ui.to_rtime(start)
     logging.info(f'migrating commands since {start}')
-    num_com = read.execute('''SELECT command_id, user_id, created_timestamp, type, completed, error, 
-                                     state, pending, loop_command, parent_decision, 
+    num_com = read.execute('''SELECT command_id, user_id, created_timestamp, type, 
+                                     if(completed,1,0) as comp,
+                                     if(error,1,0) as err,
+                                     state, 
+                                     if(pending,1,0) as pend, 
+                                     if(loop_command,1,0) as lc, 
+                                     if(parent_decision,1,0) as pd, 
                                      sb.amount as sb_amount,
                                      tb.ratio as tb_ratio
                               FROM autoapp.commands 
@@ -348,30 +379,57 @@ def migrate_commands(conn, alt_start_time=None, commit=True):
     logging.info(f'{num_com} commands to migrate')
     update = dbi.cursor(conn)
     for row in read.fetchall():
-        print('row',row)
+        row_str = ','.join([str(e) for e in row])
+        logging.debug(f'migrating row {row_str}')
         # shorthands for the column names above
-        (cid, uid, ct, ty, comp, err, state, pend, lc, pd, sb_amt, tb_amt) = row
-        comp = bytes_to_int(comp)
-        err = bytes_to_int(err)
-        pend = bytes_to_int(pend)
-        lc = bytes_to_int(lc)
-        pd = bytes_to_int(pd)
+        (cid, uid, ct, ty, comp, err, state, pend, lc, pd, sb_amt, tb_ratio) = row
         # check if it's already there (migrated earlier) by checking command_id
-        nrows = update.execute('''SELECT command_id FROM loop_logic.loop_summary WHERE command_id = %s''',
-                               [cid])
+        nrows = update.execute('''SELECT created_timestamp FROM loop_logic.loop_summary WHERE created_timestamp = %s''',
+                               [ct])
+        '''If ‘completed’=1, the bolus command should be matched to a row
+        with a ‘bolus_pump_id’.  Match can be done by closest
+        timestamp.  In addition, the ‘bolus_value’ of the
+        ‘bolus_pump_id’ row should be the same as the
+        ‘amount_delivered’ in the “commands_single_bolus” table with
+        the associated ‘command_id’.  The ‘settled’ field should be
+        set to 1 (matching and completed).  If not completed, and
+        ‘error’=1, bring it over but it will have no match and the
+        ‘settled’ field should be set to 3.  If ‘completed’ =0 and
+        ‘error’=0, bring it over and set ‘settled’ field to 0.
+        '''
+        if comp == 1 and ty == 'bolus':
+            # find closest matching timestamp in `bolus` table:
+            bolus_row = matching_bolus_row(conn, ct)
+            bolus_pump_id = bolus_row['bolus_id'] # check whether this is correct
+            bolus_value = bolus_row['value']
+        else:
+            bolus_pump_id = None
+            bolus_value = None
+        # So, now we have a bolus_value but we also have a sb_amt from the commands_single_bolus_data table.
+        # are these the same? 
+
         if nrows > 0:
-            logging.info(f'command {cid} has already been migrated')
-            continue
-        update.execute('''INSERT INTO loop_logic.loop_summary
+            # eventually, I think we just skip a row that has been
+            # migrated, because we'll do things right the first time.
+            logging.info(f'command at time {ct} has already been migrated; updating it')
+            update.execute('''UPDATE loop_logic.loop_summary
+                              SET bolus_value = %s, command_id = %s 
+                              WHERE created_timestamp = %s and type='bolus'; ''',
+                           [sb_amt, cid, ct])
+        else:
+            update.execute('''INSERT INTO loop_logic.loop_summary
                                  (loop_summary_id,
                                  user_id,
+                                 bolus_value,
+                                 command_id,
                                  created_timestamp,
                                  type,
                                  state,
                                  pending,
                                  loop_command,
-                                 parent_decision) VALUES (NULL, %s, %s, %s, %s, %s, %s, %s)''',
-                       [uid, ct, ty, state, pend, lc, pd])
+                                 parent_decision) VALUES (NULL, %s, %s, %s, %s, %s, %s, %s, %s)''',
+                       [uid, cid, sb_amt, ct, ty, state, pend, lc, pd])
+        # after either INSERT or UPDATE
         if commit:
             conn.commit()
 
