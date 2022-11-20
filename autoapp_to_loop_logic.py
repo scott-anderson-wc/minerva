@@ -354,28 +354,32 @@ def matching_bolus_row(conn, timestamp):
         return row
 
 
-def migrate_commands(conn, alt_start_time=None, commit=True):
+def migrate_commands(conn, alt_start_time=None, commit=True,
+                     loop_summary_table='loop_logic.loop_summary'):
     '''Migrate commands within the last 40". '''
     if conn is None:
         conn = dbi.connect()
     read = dbi.cursor(conn)
-    start = alt_start_time if alt_start_time is not None else datetime.now() - timedelta(minutes=40)
+    start = (alt_start_time
+             if alt_start_time is not None
+             else datetime.now() - timedelta(minutes=40))
     start = date_ui.to_rtime(start)
     logging.info(f'migrating commands since {start}')
-    num_com = read.execute('''SELECT command_id, user_id, created_timestamp, type, 
-                                     if(completed,1,0) as comp,
-                                     if(error,1,0) as err,
-                                     state, 
-                                     if(pending,1,0) as pend, 
-                                     if(loop_command,1,0) as lc, 
-                                     if(parent_decision,1,0) as pd, 
-                                     sb.amount as sb_amount,
-                                     tb.ratio as tb_ratio
-                              FROM autoapp.commands 
-                                   LEFT OUTER JOIN commands_single_bolus_data AS sb USING(command_id)
-                                   LEFT OUTER JOIN commands_temporary_basal_data AS tb USING(command_id)
-                              WHERE created_timestamp > %s''',
-                           [start])
+    num_com = read.execute(
+        '''SELECT command_id, user_id, created_timestamp, type, 
+                  if(completed,1,0) as comp,
+                  if(error,1,0) as err,
+                  state, 
+                  if(pending,1,0) as pend, 
+                  if(loop_command,1,0) as lc, 
+                  if(parent_decision,1,0) as pd, 
+                  sb.amount as sb_amount,
+                  tb.ratio as tb_ratio
+           FROM autoapp.commands 
+                LEFT OUTER JOIN commands_single_bolus_data AS sb USING(command_id)
+                LEFT OUTER JOIN commands_temporary_basal_data AS tb USING(command_id)
+           WHERE created_timestamp > %s''',
+        [start])
     logging.info(f'{num_com} commands to migrate')
     update = dbi.cursor(conn)
     for row in read.fetchall():
@@ -384,7 +388,9 @@ def migrate_commands(conn, alt_start_time=None, commit=True):
         # shorthands for the column names above
         (cid, uid, ct, ty, comp, err, state, pend, lc, pd, sb_amt, tb_ratio) = row
         # check if it's already there (migrated earlier) by checking command_id
-        nrows = update.execute('''SELECT created_timestamp FROM loop_logic.loop_summary WHERE created_timestamp = %s''',
+        nrows = update.execute(f'''SELECT created_timestamp 
+                                   FROM {loop_summary_table} 
+                                   WHERE created_timestamp = %s''',
                                [ct])
         '''If ‘completed’=1, the bolus command should be matched to a row
         with a ‘bolus_pump_id’.  Match can be done by closest
@@ -405,19 +411,20 @@ def migrate_commands(conn, alt_start_time=None, commit=True):
         else:
             bolus_pump_id = None
             bolus_value = None
-        # So, now we have a bolus_value but we also have a sb_amt from the commands_single_bolus_data table.
-        # are these the same? 
+        # So, now we have a bolus_value but we also have a sb_amt from
+        # the commands_single_bolus_data table.  are these the same?
 
         if nrows > 0:
             # eventually, I think we just skip a row that has been
             # migrated, because we'll do things right the first time.
             logging.info(f'command at time {ct} has already been migrated; updating it')
-            update.execute('''UPDATE loop_logic.loop_summary
+            update.execute(f'''UPDATE {loop_summary_table}
                               SET bolus_value = %s, command_id = %s 
                               WHERE created_timestamp = %s and type='bolus'; ''',
                            [sb_amt, cid, ct])
         else:
-            update.execute('''INSERT INTO loop_logic.loop_summary
+            ## 10 columns, first being NULL, the rest are migrated data
+            update.execute(f'''INSERT INTO {loop_summary_table}
                                  (loop_summary_id,
                                  user_id,
                                  bolus_value,
@@ -427,11 +434,33 @@ def migrate_commands(conn, alt_start_time=None, commit=True):
                                  state,
                                  pending,
                                  loop_command,
-                                 parent_decision) VALUES (NULL, %s, %s, %s, %s, %s, %s, %s, %s)''',
+                                 parent_decision) VALUES 
+                                 (NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s)''',
                        [uid, cid, sb_amt, ct, ty, state, pend, lc, pd])
         # after either INSERT or UPDATE
         if commit:
             conn.commit()
+
+def test_migrate_commands(conn, alt_start_time, commit):
+    '''this uses a test table that is a copy of the structure of the real
+    loop_logic.loop_summary table'''
+    if conn is None:
+        conn = dbi.connect()
+    curs = dbi.cursor(conn)
+    TABLE = 'loop_logic.test_loop_summary'
+    curs.execute(f'drop table if exists {TABLE}')
+    curs.execute(f'create table {TABLE} like loop_logic.loop_summary')
+    conn.commit()
+    migrate_commands(conn, alt_start_time, commit,
+                     loop_summary_table=TABLE)
+    curs.execute(f'select * from {TABLE}')
+    print('after migration')
+    for row in curs.fetchall():
+        print(row)
+    
+    
+
+## ================================================================
 
 
 def migrate_all(conn, alt_start_time=None):
