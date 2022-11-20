@@ -555,6 +555,9 @@ Why are some bolus ids missing?
     # bolus_import_e(conn, start_rtime, debugp=debugp)
     # bolus_import_de(conn, start_rtime, debugp=debugp)
     extended_bolus_import(conn, start_rtime, debugp=debugp)
+    # Added this to fix any carb_codes that were incorrect because the
+    # bolus hadn't yet been recorded.
+    update_carb_codes(conn, start_rtime, datetime.now(), debugp=debugp)
 
 ## ================================================================
 ## Carb import needs to also compute the carb code.
@@ -657,6 +660,39 @@ def carbohydrate_import_test(conn, start_rtime):
     print('summing to {}'.format(after_sum))
     print('are sums equal? {}'.format(before_sum == after_sum))
     
+
+def update_carb_codes(conn, rtime0, rtime1, debugp=True):
+    '''updates the carb codes for the given time range. Could be a long
+range if we are fixing past mistakes, or recent past because we just
+migrated a bolus.'''
+    if conn is None:
+        conn = dbi.connect()
+    curs = dbi.cursor(conn)
+    rtime0 = date_ui.to_rtime(rtime0)
+    rtime1 = date_ui.to_rtime(rtime1)
+    logging.debug(f'searching for carbs from {rtime0} to {rtime1}')
+    nrows = curs.execute('''select rtime, carbs
+                            from janice.insulin_carb_smoothed_2
+                            where carbs > 0 
+                            and (carb_code is null or
+                                 carb_code not in ('before6', 'breakfast', 'lunch', 'snack', 'dinner', 'after9', 'rescue'))
+                            and %s <= rtime and rtime <= %s''',
+                         [rtime0, rtime1])
+    logging.debug(f'found {nrows} carbs to update')
+    for row in curs.fetchall():
+        (rtime, carbs) = row
+        if matching_insulin_bolus(conn, rtime):
+            carb_code = meal_name(rtime)
+        else:
+            carb_code = 'rescue'
+        update = conn.cursor()
+        logging.debug(f'{carbs} carbs at {str(rtime)} is {carb_code}')
+        update.execute(f'''update {TABLE} 
+                           set carbs = %s, carb_code = %s
+                           where rtime = %s''',
+                       [carbs, carb_code, rtime])
+        if not debugp:
+            conn.commit()
 
 # TBD
 def glucose_import(conn, start_rtime):

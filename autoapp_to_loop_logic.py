@@ -315,6 +315,123 @@ def migrate_boluses(conn, start_time, commit=True):
     if commit:
         conn.commit()
     
+def bytes_to_int(bytes_val):
+    '''0/1 values are stored in autoapp as single-byte quantities,
+actually bit(1). They come into Python as byte arrays of length
+1. This converts to nice integers.'''
+    if type(bytes_val) is int:
+        return bytes_val
+    if type(bytes_val) is bytes:
+        if len(bytes_val) == 1:
+            int_val = int.from_bytes(bytes_val, "big")
+            return int_val
+        raise ValueError(f'multi-byte value: {bytes_val}')
+    raise TypeError(f'not either int or bytes: {bytes_val}')
+
+def matching_bolus_row(conn, timestamp):
+    '''Returns the row (as a dictionary) from the `autoapp.bolus` table closest in
+    time to the given timestamp.
+    '''
+    curs = dbi.dict_cursor(conn)
+    query = '''SELECT bolus_id, user_id, date, type, value, duration, server_date 
+               FROM autoapp.bolus
+               WHERE user_id = %s AND 
+               abs(time_to_sec(timediff(date, %s))) = 
+                  (SELECT min(abs(time_to_sec(timediff(date, %s)))) 
+                   FROM autoapp.bolus)'''
+    nr = curs.execute(query, [HUGH_USER_ID, timestamp, timestamp])
+    if nr > 1:
+        # ick. could there be two exactly the same distance? 
+        # we will log the fact, but leave them in the cursor and get one of them below
+        logging.error(f'found {nr} matching BOLUS values for timestamp {timestamp} ')
+    # The following executes whether regardless of the value of 'nr'. Will get the first
+    # match or None
+    row = curs.fetchone()
+    if row is None:
+        logging.error(f'no matching BOLUS for timestamp {timestamp}')
+        return None
+    else:
+        return row
+
+
+def migrate_commands(conn, alt_start_time=None, commit=True):
+    '''Migrate commands within the last 40". '''
+    if conn is None:
+        conn = dbi.connect()
+    read = dbi.cursor(conn)
+    start = alt_start_time if alt_start_time is not None else datetime.now() - timedelta(minutes=40)
+    start = date_ui.to_rtime(start)
+    logging.info(f'migrating commands since {start}')
+    num_com = read.execute('''SELECT command_id, user_id, created_timestamp, type, 
+                                     if(completed,1,0) as comp,
+                                     if(error,1,0) as err,
+                                     state, 
+                                     if(pending,1,0) as pend, 
+                                     if(loop_command,1,0) as lc, 
+                                     if(parent_decision,1,0) as pd, 
+                                     sb.amount as sb_amount,
+                                     tb.ratio as tb_ratio
+                              FROM autoapp.commands 
+                                   LEFT OUTER JOIN commands_single_bolus_data AS sb USING(command_id)
+                                   LEFT OUTER JOIN commands_temporary_basal_data AS tb USING(command_id)
+                              WHERE created_timestamp > %s''',
+                           [start])
+    logging.info(f'{num_com} commands to migrate')
+    update = dbi.cursor(conn)
+    for row in read.fetchall():
+        row_str = ','.join([str(e) for e in row])
+        logging.debug(f'migrating row {row_str}')
+        # shorthands for the column names above
+        (cid, uid, ct, ty, comp, err, state, pend, lc, pd, sb_amt, tb_ratio) = row
+        # check if it's already there (migrated earlier) by checking command_id
+        nrows = update.execute('''SELECT created_timestamp FROM loop_logic.loop_summary WHERE created_timestamp = %s''',
+                               [ct])
+        '''If ‘completed’=1, the bolus command should be matched to a row
+        with a ‘bolus_pump_id’.  Match can be done by closest
+        timestamp.  In addition, the ‘bolus_value’ of the
+        ‘bolus_pump_id’ row should be the same as the
+        ‘amount_delivered’ in the “commands_single_bolus” table with
+        the associated ‘command_id’.  The ‘settled’ field should be
+        set to 1 (matching and completed).  If not completed, and
+        ‘error’=1, bring it over but it will have no match and the
+        ‘settled’ field should be set to 3.  If ‘completed’ =0 and
+        ‘error’=0, bring it over and set ‘settled’ field to 0.
+        '''
+        if comp == 1 and ty == 'bolus':
+            # find closest matching timestamp in `bolus` table:
+            bolus_row = matching_bolus_row(conn, ct)
+            bolus_pump_id = bolus_row['bolus_id'] # check whether this is correct
+            bolus_value = bolus_row['value']
+        else:
+            bolus_pump_id = None
+            bolus_value = None
+        # So, now we have a bolus_value but we also have a sb_amt from the commands_single_bolus_data table.
+        # are these the same? 
+
+        if nrows > 0:
+            # eventually, I think we just skip a row that has been
+            # migrated, because we'll do things right the first time.
+            logging.info(f'command at time {ct} has already been migrated; updating it')
+            update.execute('''UPDATE loop_logic.loop_summary
+                              SET bolus_value = %s, command_id = %s 
+                              WHERE created_timestamp = %s and type='bolus'; ''',
+                           [sb_amt, cid, ct])
+        else:
+            update.execute('''INSERT INTO loop_logic.loop_summary
+                                 (loop_summary_id,
+                                 user_id,
+                                 bolus_value,
+                                 command_id,
+                                 created_timestamp,
+                                 type,
+                                 state,
+                                 pending,
+                                 loop_command,
+                                 parent_decision) VALUES (NULL, %s, %s, %s, %s, %s, %s, %s, %s)''',
+                       [uid, cid, sb_amt, ct, ty, state, pend, lc, pd])
+        # after either INSERT or UPDATE
+        if commit:
+            conn.commit()
 
 
 def migrate_all(conn, alt_start_time=None):
@@ -335,6 +452,8 @@ If alt_start_time is supplied, ignore the value from the get_migration_time() ta
     logging.info(f'migrating data since {start_time}')
     logging.info('2. bolus')
     migrate_boluses(conn, start_time)
+    logging.info('3. commands')
+    migrate_commands(conn, start_time)
     logging.info('done. storing update time')
     set_autoapp_migration_time(conn, prev_update, last_autoapp_update)
     logging.info('done')
