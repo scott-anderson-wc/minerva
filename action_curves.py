@@ -17,7 +17,7 @@ There are three CAC curves, roughly in increasing order of their peak
 
 * rescue (fast carbs, reaches the peak soonest)
 * breakfast and lunch, which I'll call brunch
-* dinner 
+* dinner
 
 The curves are represented just as a list of numbers summing to 100
 percent.
@@ -226,7 +226,7 @@ exception if there's no such curve in the database.
     if conn is None:
         conn = dbi.connect()
     curs = dbi.cursor(conn)
-    curs.execute('''SELECT max(curve_date) FROM action_curves 
+    curs.execute('''SELECT max(curve_date) FROM action_curves
                     WHERE uid = %s and kind = %s''',
                  [uid, kind])
     row = curs.fetchone()
@@ -302,9 +302,9 @@ curves individually and on an ad hoc basis.'''
     load_table_from_file(conn, FILENAME_FOR_BRUNCH_CARB_CURVE, 'brunch')
     load_table_from_file(conn, FILENAME_FOR_DINNER_CARB_CURVE, 'dinner')
     load_table_from_file(conn, FILENAME_FOR_INSULIN_ACTION_CURVE, 'insulin')
-    
+
 def ad_hoc_carb_curves():
-    '''A few "from thin air" carb curves for now. 10/21/2022. See 
+    '''A few "from thin air" carb curves for now. 10/21/2022. See
 https://docs.google.com/spreadsheets/d/1bVvAMjRVeu15b2roQ4kw_Ya7pKK2ioSdd5a_hN_jDbM/edit#gid=67539943
 Run this as:
 python
@@ -359,18 +359,16 @@ should be read before running the predictive model.
     brunch_curve = get_action_curve(conn, HUGH_UID, 'brunch')
     dinner_curve = get_action_curve(conn, HUGH_UID, 'dinner')
     insulin_curve = get_action_curve(conn, HUGH_UID, 'insulin')
-    logging.info(curve_stats(rescue_curve, 'rescue'))
-    logging.info(curve_stats(brunch_curve, 'brunch'))
-    logging.info(curve_stats(dinner_curve, 'dinner'))
-    logging.info(curve_stats(insulin_curve, 'insulin'))
+    logging.info(curve_stats_as_str(rescue_curve, 'rescue'))
+    logging.info(curve_stats_as_str(brunch_curve, 'brunch'))
+    logging.info(curve_stats_as_str(dinner_curve, 'dinner'))
+    logging.info(curve_stats_as_str(insulin_curve, 'insulin'))
     action_curves = {'rescue': rescue_curve,
                      'brunch': brunch_curve,
                      'dinner': dinner_curve,
                      'insulin': insulin_curve}
-    action_curves_reversed = {'rescue': reverse(rescue_curve),
-                              'brunch': reverse(brunch_curve),
-                              'dinner': reverse(dinner_curve),
-                              'insulin': reverse(insulin_curve)}
+    action_curves_reversed = {'rescue': list(reversed(rescue_curve)), # Mileva todo
+                              'brunch': list(reversed(brunch_curve)),
+                              'dinner': list(reversed(dinner_curve)),
+                              'insulin': list(reversed(insulin_curve))}
     return action_curves, action_curves_reversed
-
-    

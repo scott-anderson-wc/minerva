@@ -36,6 +36,9 @@ import config
 import cs304dbi as dbi
 import date_ui
 import random
+from action_curves import cache_action_curves
+import pandas as pd
+import numpy as np
 
 # ================================================================
 # Notes are like flashing.
@@ -287,11 +290,13 @@ to the dictionary. Then converting to a table, for easier analysis.
     prev_di = 0
     prev_dc = 0
     # New algorithm. Skip the first N rows because we need N past
-    # inputs to compute DC and DI. N = max(len(percent_curve), len(carb_curve))
+    # inputs to compute DC and DI. N = max(len(iac_curve), len(carb_curve))
     skip_amt = max(len(iac_curve), len(carb_curve))
     skip_rows = past_inputs[0:skip_amt]
     print('initial insulin inputs',insulin_inputs)
     print('initial carb inputs',carb_inputs)
+    # Iterates from t to t+3 hours computing pred_bg, di, dc, delta_di, and delta_dc values.
+    # Currently, assumes past inputs begin at t-5hrs and skip_amt=5hrs.
     for i in range(skip_amt, len(past_inputs)):
         row = past_inputs[i]
         dynamic_insulin = convolve(past_inputs, i, 'insulin', iac_curve)
@@ -339,15 +344,10 @@ def predictive_model_multi_carbs(
         bg_slope = None,
         coef_effect = 1, # c3
         past_inputs = None,
-        insulin_inputs = None,  # replace with past_inputs?
         basal_rate_12 = None,
         isf_function = None,
-        action_curves = None,   # added this (from action_curves.py)
-        iac_curve = None,       # replace by action_curves
-        coef_carbs = 7,         # do we still want this?
-        carb_curve = None,      # replace by action_curves
-        # probably want to delete carb_inputs and use past_inputs instead
-        carb_inputs = None):
+        action_curves = None,
+        coef_carbs = 7):
 
     '''Returns a prediction (a trace of BG values) for a length of time
 (two hours) from the given time_now. The result is suitable for
@@ -396,7 +396,7 @@ dictionary. Then converting to a table, for easier analysis.
                            basal_amt_12
                     from insulin_carb_smoothed_2
                     where rtime >= %s and rtime <= %s''',
-                 [rtime, rtime-timedelta(hours=5), rtime+timedelta(hours=3)])
+                 [rtime, rtime-timedelta(hours=6), rtime+timedelta(hours=3)])
         past_inputs = curs.fetchall()
     if basal_rate_12 is None:
         # should get this from past_inputs instead
@@ -404,36 +404,48 @@ dictionary. Then converting to a table, for easier analysis.
     if isf_function is None:
         isf_function = estimated_isf
     logging.debug('initial ISF %s', isf_function(time_now))
-    # the percent curve is our IAC
-    if iac_curve is None:
-        iac_curve = getIAC(conn=conn)
-        assert(type(iac_curve) is list and len(iac_curve) == 60)
-        # iac_curve.reverse()
-    if carb_curve is None:
-        carb_curve = normalize(CAC)
-        # omit the length check. It'll be 40 and will run out when we
-        # do the convolution, but that's okay
-        assert(type(carb_curve) is list)
-        # carb_curve.reverse()
+    if action_curves is None:
+        action_curves, _ = cache_action_curves(conn)
+        assert(type(action_curves['insulin']) is list and len(action_curves['insulin']) == 60)
+        assert(type(action_curves['rescue']) is list)
+        assert(type(action_curves['brunch']) is list)
+        assert(type(action_curves['dinner']) is list)
+
+    # Add carb information in wide format to past_inputs
+    # (e.g. we represent {carb_code: “rescue”, carbs:16} as {“rescue”: 16, “brunch”:0, ..., “dinner”: 0})
+    carb_entries = [dct['carb_code'] for dct in past_inputs]
+    dummy_carb_encoding = pd.get_dummies(carb_entries)
+    for i in range(len(past_inputs)):
+        # add the dummy encoding to each row in past_inputs
+        row = past_inputs[i]
+        row.update(dummy_carb_encoding.iloc[i] * row['carbs'])
+
     # outputs, predictions (bg units) dynamic insulin and dynamic carbs
     predictions = []
     prev_di = 0
     prev_dc = 0
+
     # New algorithm. Skip the first N rows because we need N past
-    # inputs to compute DC and DI. N = max(len(percent_curve), len(carb_curve))
-    skip_amt = max(len(iac_curve), len(carb_curve))
+    # inputs to compute DC and DI. N = max(len(iac_curve), len(rescue_curve), len(brunch_curve), len(dinner_curve))
+    skip_amt = max([len(curve) for curve in iter(action_curves.values())])
     skip_rows = past_inputs[0:skip_amt]
-    print('initial insulin inputs',insulin_inputs)
-    print('initial carb inputs',carb_inputs)
+    # Iterates from t to t+3 hours computing pred_bg, di, dc, delta_di, and delta_dc values.
+    # Currently, assumes past inputs begin at t-6hrs and skip_amt=6hrs.
     for i in range(skip_amt, len(past_inputs)):
         row = past_inputs[i]
-        dynamic_insulin = convolve(past_inputs, i, 'insulin', iac_curve)
+        dynamic_insulin = convolve(past_inputs, i, 'insulin', action_curves['insulin'])
         effect = -1 * dynamic_insulin * isf_function(time_now)
-        dynamic_carbs = convolve(past_inputs, i, 'carbs', carb_curve)
+
+        # Compute dynamic_carbs
+        dynamic_carbs = 0
+        carb_codes = [code for code in set(carb_entries) if code is not None]
+        for code in set(carb_codes):
+            dynamic_carbs += convolve(past_inputs, i, code, action_curves[carb_code_mapping(code)])
+
         rt = row['rtime']
         logging.debug('RT: %s DT: %s IN: %d BG %.2f DI %.2f Effect %.2f DC: %.2f ',
                       rt, row['delta'],
-                      row['insulin'],
+                      row.get('insulin',0),
                       bg_now,
                       dynamic_insulin,
                       effect,
@@ -491,7 +503,7 @@ This computes a series of dictionaries to replace this:
               'carb_code': None,
               'carbs': 0,
               'basal_amt_12': default_basal }
-             for n in range(0, duration, 5) ]
+             for n in range(0, duration, 5) ] # todo: test_inputs should be from t-6hrs to t+3hrs
     print('len(rows)', len(rows))
     # now iterate over events and update
     for evt in events:
@@ -513,21 +525,38 @@ This computes a series of dictionaries to replace this:
 def test_inputs_1():
     rows = make_test_inputs('2022-11-03 07:00', 180,
                             [(5, 2, None, None), # 2 units insulin first
-                             (10, 0, 20, 'breakfast')])
+                             (10, 0, 'breakfast', 20)])
     return rows
 
 def test_pm_1():
     '''First test case for the PMMC (predictive model multi carb). This
 case is a "normal" breakfast with carbs and insulin.'''
     time_now = '2022-11-03 07:00'
-    duration = 180
+    duration = 720
     past = make_test_inputs(time_now, duration,
                             [(5, 2, None, None), # 2 units insulin first
-                             (10, 0, 20, 'breakfast')])
+                             (10, 0, 'breakfast', 20)])
     return predictive_model_multi_carbs(time_now,
                                         debug = True,
                                         past_inputs = past,
                                         basal_rate_12 = 0.1)
+
+def carb_code_mapping(carb_code):
+    """todo: create a general carb_curve to make this more extensible if:
+    1. New carb_code is entered into the database
+    2. Error handling"""
+    mappings = {'rescue':'rescue',
+                'breakfast':'brunch',
+                'lunch':'brunch',
+                'snack':'brunch',
+                'dinner':'dinner',
+                'after9': 'dinner',
+                'before6': 'brunch'}
+    try:
+        return mappings[carb_code]
+    except KeyError:
+        print(f"Invalid carb_code provided: {carb_code}. Default to brunch curve.")
+        return 'brunch'
 
 # ================================================================
 # convolution
@@ -537,10 +566,9 @@ def convolve(list_of_rows, index, key, curve):
 backwards until either the rows run out or the curve does. Returns the
 result; it's up to the caller to store it. The curve should *not* be
 time-reversed. The algorithm goes back in time, interating forward in
-the curve and backwards through the rows.
-
-    '''
-    sum = 0
+the curve and backwards through the rows.'''
+    sum = 0 # this accounts for multiple insulin events in this time frame
+    # Forward through the curve
     for j in range(len(curve)):
         # j goes from 0 to len(curve)-1 but we will work with i-j for
         # the row index, so the convolution will include the current
@@ -549,10 +577,12 @@ the curve and backwards through the rows.
         if index - j < 0:
             # out of past rows, so return
             break
+        #  Backwards through the rows
         row = list_of_rows[index - j]
-        prod = row[key] * curve[j]
+        # If no insulin is present in past_inputs, substitute 0
+        prod = row.get(key,0) * curve[j]
         # print(row['delta'], '\t', row[key],'\t', curve[j], '\t', prod)
-        sum += row[key] * curve[j]
+        sum += row.get(key, 0) * curve[j]
     return sum
 
 def dict_to_list(dic):
@@ -1655,4 +1685,4 @@ def find_cc_test_1(conn = None):
 
 
 if __name__ == '__main__':
-    tab = pm_test_2()
+    tab = test_pm_1()
