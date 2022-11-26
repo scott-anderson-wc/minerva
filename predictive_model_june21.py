@@ -546,12 +546,13 @@ def carb_code_mapping(carb_code):
     1. New carb_code is entered into the database
     2. Error handling"""
     mappings = {'rescue':'rescue',
+                'before6': 'brunch',
                 'breakfast':'brunch',
                 'lunch':'brunch',
                 'snack':'brunch',
                 'dinner':'dinner',
-                'after9': 'dinner',
-                'before6': 'brunch'}
+                'after9': 'dinner'
+                }
     try:
         return mappings[carb_code]
     except KeyError:
@@ -566,7 +567,7 @@ def convolve(list_of_rows, index, key, curve):
 backwards until either the rows run out or the curve does. Returns the
 result; it's up to the caller to store it. The curve should *not* be
 time-reversed. The algorithm goes back in time, interating forward in
-the curve and backwards through the rows.'''
+the curve and backwards through the rows. This assumes the rows have no time lapses. '''
     sum = 0 # this accounts for multiple insulin events in this time frame
     # Forward through the curve
     for j in range(len(curve)):
@@ -582,7 +583,7 @@ the curve and backwards through the rows.'''
         # If no insulin is present in past_inputs, substitute 0
         prod = row.get(key,0) * curve[j]
         # print(row['delta'], '\t', row[key],'\t', curve[j], '\t', prod)
-        sum += row.get(key, 0) * curve[j]
+        sum += prod
     return sum
 
 def dict_to_list(dic):
