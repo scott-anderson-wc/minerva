@@ -534,8 +534,8 @@ case is a "normal" breakfast with carbs and insulin.'''
     time_now = '2022-11-03 07:00'
     duration = 720
     past = make_test_inputs(time_now, duration,
-                            [(5, 2, None, None), # 2 units insulin first
-                             (10, 0, 'breakfast', 20)])
+                            [(360, 2, None, None), # 2 units insulin first
+                             (600, 0, 'breakfast', 20)])
     return predictive_model_multi_carbs(time_now,
                                         debug = True,
                                         past_inputs = past,
@@ -563,27 +563,34 @@ def carb_code_mapping(carb_code):
 # convolution
 
 def convolve(list_of_rows, index, key, curve):
-    '''Computes the convolution of the curve starting at index and working
-backwards until either the rows run out or the curve does. Returns the
-result; it's up to the caller to store it. The curve should *not* be
-time-reversed. The algorithm goes back in time, interating forward in
-the curve and backwards through the rows. This assumes the rows have no time lapses. '''
-    sum = 0 # this accounts for multiple insulin events in this time frame
-    # Forward through the curve
-    for j in range(len(curve)):
-        # j goes from 0 to len(curve)-1 but we will work with i-j for
-        # the row index, so the convolution will include the current
-        # time step, but the curves talk about the immediate effect
-        # (which is always zero anyhow).
-        if index - j < 0:
-            # out of past rows, so return
+    '''Computes the convolution of the curve starting at the index and working backwards
+    through the rows until either the rows run out or the curve does. Returns the result
+    (e.g. amount of dynamic_carbs or dynamic_insulin) at the given index. The curve
+    should *not* be time-reversed as the algorithm removes the need to do so by iterating
+    backwards through the rows while iterating forward in the curve. This
+    convolve function properly handles the scenario were time lapses are present in the
+    list of rows.'''
+
+    index_rtime = list_of_rows[index]['rtime']
+    sum = 0
+    # iterate backwards through the past_inputs
+    for i in range(index, -1, -1):
+        row = list_of_rows[i]
+        row_rtime = row['rtime']
+
+        # Find the corresponding index/ value in the curve. The curve index is equal
+        # to the time difference (in steps) between the index row and the current row
+        time_diff_in_min = (index_rtime - row_rtime).total_seconds() / 60
+        time_diff_in_steps = int(time_diff_in_min / 5) # 5-minute steps
+
+        # Compute convolution
+        if time_diff_in_steps < len(curve) and time_diff_in_steps >= 0:
+            prod = row.get(key, 0) * curve[time_diff_in_steps]
+            sum += prod
+        else:
+            # curve ran out
             break
-        #  Backwards through the rows
-        row = list_of_rows[index - j]
-        # If no insulin is present in past_inputs, substitute 0
-        prod = row.get(key,0) * curve[j]
-        # print(row['delta'], '\t', row[key],'\t', curve[j], '\t', prod)
-        sum += prod
+
     return sum
 
 def dict_to_list(dic):
@@ -592,22 +599,57 @@ def dict_to_list(dic):
 
 def test_convolve(test):
     def gen_rows(n, val=0):
-        return [ {'row': i, 'x': val} for i in range(n) ]
-    # test 1
-    if test == 1 :
-        curve1 = [ 0.0, 0.4, 0.3, 0.2, 0.1, 0.0 ]
-        rows1 = gen_rows(20)
-        rows1[3]['x'] = 2
-        for i in range(3,20):
-            rows1[i]['y'] = convolve(rows1, i, 'x', curve1)
-    # test 2
+        # Generate 5-minute timesteps based on an arbitrary datetime string
+        base = datetime.strptime('2022-12-03 5:00:00', '%Y-%m-%d %H:%M:%S')
+        rtime_list = [base + timedelta(minutes=(5 * x)) for x in range(n)]
+        # Generate rows
+        return [ {'row': i, 'rtime': rtime_list[i], 'val': val} for i in range(n) ]
+    def gen_rows_timelapse(n, val = 0, timelapse = 15):
+        base = datetime.strptime('2022-12-03 5:00:00', '%Y-%m-%d %H:%M:%S')
+        # Generate 5-minute timesteps with a timelapse in the middle
+        rtimes_before_timelapse = [base - timedelta(minutes=timelapse) - timedelta(minutes=(5 * x)) for x in range(n//2)][::-1]
+        rtimes_after_timelapse = [base + timedelta(minutes=(5 * x)) for x in range(n//2)]
+        # Generate rows
+        rtime_list = rtimes_before_timelapse + rtimes_after_timelapse
+        return [ {'row': i, 'rtime': rtime_list[i], 'val': val} for i in range(n) ]
+    # test 1: single event, no time lapses
+    if test == 1:
+        # Define test inputs
+        curve = [ 0.0, 0.4, 0.3, 0.2, 0.1, 0.0 ]
+        rows = gen_rows(10)
+        rows[3]['val'] = 2 # Insert one event of size 2
+        # Test convolve function
+        for i in range(3,10):
+            rows[i]['y'] = convolve(rows, i, 'val', curve)
+    # test 2: multiple events
     if test == 2:
-        curve1 = [ 0.0, 0.4, 0.3, 0.2, 0.1, 0.0 ]
-        rows1 = gen_rows(30, 0.1)
-        for i in range(0,30):
-            rows1[i]['y'] = convolve(rows1, i, 'x', curve1)
-    # output
-    table = [ dict_to_list(row) for row in rows1 ]
+        # Define test inputs
+        curve = [ 0.0, 0.4, 0.3, 0.2, 0.1, 0.0 ]
+        rows = gen_rows(10)
+        rows[3]['val'] = 2 # Insert one event of size 2
+        rows[5]['val'] = 1 # Insert a second event of size 1
+        # Test convolve function
+        for i in range(3,10):
+            rows[i]['y'] = convolve(rows, i, 'val', curve)
+    #test 3: single event, time lapses
+    if test == 3:
+        # Define test inputs
+        curve = [ 0.0, 0.4, 0.3, 0.2, 0.1, 0.0 ]
+        rows = gen_rows_timelapse(10)
+        rows[3]['val'] = 2 # Insert one event of size 2
+        # Test convolve function
+        for i in range(3,10):
+            rows[i]['y'] = convolve(rows, i, 'val', curve)
+    #test 4: rows run out before curve
+    if test == 4:
+        # Define test inputs
+        curve = [ 0.0, 0.4, 0.3, 0.2, 0.1, 0.0 ]
+        rows = gen_rows(4)
+        rows[3]['val'] = 2 # Insert one event of size 2
+        # Test convolve function
+        for i in range(3,4):
+            rows[i]['y'] = convolve(rows, i, 'val', curve)
+    table = [ dict_to_list(row) for row in rows ]
     tsv_table_out(table)
 
 # ================================================================
