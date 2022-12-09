@@ -18,8 +18,7 @@ def get_conn():
 def compute_dynamic_carbs(conn, rtime):
     """Compute dynamic carbs for a given rtime.
     Next steps:
-    1. Testing required,
-    2. Update database with newest dc."""
+    1. Update database with newest dc."""
 
     rtime = date_ui.to_datetime(rtime)
     rtime = date_ui.to_rtime(rtime)
@@ -31,7 +30,7 @@ def compute_dynamic_carbs(conn, rtime):
 
     longest_carb_curve = max([len(curve) for curve in iter(carb_action_curves.values())])
 
-    # get all past_events that occurred within the duration of the longest carb curve (72 steps = 360 minutes)
+    # get all past_events from the past 6 hrs (length of longest carb curve)
     curs = dbi.dict_cursor(conn)
     curs.execute('''select rtime,
                     timestampdiff(MINUTE,%s,rtime) as delta,
@@ -46,8 +45,8 @@ def compute_dynamic_carbs(conn, rtime):
 
     # Add carb information in wide format to past_inputs
     # (e.g. we represent {carb_code: “rescue”, carbs:16} as {“rescue”: 16, “brunch”:0, ..., “dinner”: 0})
-    carb_codes = [dct['carb_code'] for dct in past_inputs]
-    dummy_carb_encoding = pd.get_dummies(carb_codes)
+    all_carb_codes = [dct['carb_code'] for dct in past_inputs]
+    dummy_carb_encoding = pd.get_dummies(all_carb_codes)
     for i in range(len(past_inputs)):
         # add the dummy encoding to each row in past_inputs
         row = past_inputs[i]
@@ -56,23 +55,18 @@ def compute_dynamic_carbs(conn, rtime):
     print(pd.DataFrame(past_inputs))
 
     # Carb_codes present in past_inputs
-    carb_codes = set([code for code in carb_codes if code is not None])
+    carb_codes = set([code for code in all_carb_codes if code is not None])
     print('unique carb_codes', carb_codes)
-
-    # Computes dynamic carbs if no time lapses are present
-    if len(past_inputs) == (longest_carb_curve + 1):
-        dynamic_carbs = 0
-        for code in carb_codes:
-            # index val might need to be (len(past_inputs) - 2).
-            # We want the (len(past_inputs) - 1)th item at the (len(past_inputs) - 2) index?
-            dynamic_carbs += convolve(past_inputs, len(past_inputs) - 1, code, action_curves[carb_code_mapping(code)])
-    else:
-        print(f"Time lapses present prior to {rtime}")
-        dynamic_carbs = None
+    
+    dynamic_carbs = 0
+    for code in carb_codes:
+        # index val might need to be (len(past_inputs) - 2).
+        # We want the (len(past_inputs) - 1)th item at the (len(past_inputs) - 2) index?
+        dynamic_carbs += convolve(past_inputs, len(past_inputs) - 1, code, action_curves[carb_code_mapping(code)])
 
     return dynamic_carbs
 
-def compute_dynamic_carbs_all(conn):
+def compute_dynamic_carbs_batch(conn):
     """Compute dynamic carbs for the entire database. Testing required.
     Assumes there are no time lapses in the past inputs (incorrect assumption as of 11/26/22)"""
 
@@ -86,8 +80,6 @@ def compute_dynamic_carbs_all(conn):
     # Get action_curves
     action_curves, _ = cache_action_curves(conn)
     carb_action_curves = {key: action_curves[key] for key in action_curves if key != 'insulin'}
-    print("Carb_action_curves:", carb_action_curves.keys())
-
     # Length of longest carb action curve
     skip_amt = max([len(curve) for curve in iter(carb_action_curves.values())])
     print('skip_amt', skip_amt)
@@ -102,27 +94,27 @@ def compute_dynamic_carbs_all(conn):
                         rescue_carbs
                     from insulin_carb_smoothed_2
                     where rtime >= %s''',
-                 [rtime, rtime-timedelta(hours=3)])
+                 [rtime, rtime-timedelta(hours=6)])
     past_inputs = curs.fetchall()
     print('num past inputs', len(past_inputs))
 
     # Add carb information in wide format to past_inputs
     # (e.g. we represent {carb_code: “rescue”, carbs:16} as {“rescue”: 16, “brunch”:0, ..., “dinner”: 0})
-    carb_entries = [dct['carb_code'] for dct in past_inputs]
-    dummy_carb_encoding = pd.get_dummies(carb_entries)
+    all_carb_codes = [dct['carb_code'] for dct in past_inputs]
+    dummy_carb_encoding = pd.get_dummies(all_carb_codes)
     for i in range(len(past_inputs)):
         # add the dummy encoding to each row in past_inputs
         row = past_inputs[i]
         row.update(dummy_carb_encoding.iloc[i] * row['carbs'])
+    # print("Past Inputs")
     # print(pd.DataFrame(past_inputs))
 
     # Carb_codes present in past_inputs
-    carb_codes = set([dct['carb_code'] for dct in past_inputs if dct['carb_code'] is not None])
+    carb_codes = set([code for code in all_carb_codes if code is not None])
     print('unique carb_codes', carb_codes)
 
     # Compute dynamic carbs for all rows with enough (i.e. num steps of longest carb curve) prior data
     # This assumes there are no time lapses in the data (i.e. there is a row for each 5-minute timestep)
-    rows = []
     for i in range(skip_amt, len(past_inputs)):
         row = past_inputs[i]
         # Compute dynamic carbs
@@ -138,7 +130,6 @@ def compute_dynamic_carbs_all(conn):
 
 if __name__ == '__main__':
     conn = get_conn()
-    rtime = "2022-11-25 13:00:00"
-    # rtime = "2022-11-22 13:00:00"
+    rtime = "2022-11-22 19:00:00"
     dc = compute_dynamic_carbs(conn, rtime)
     print(f"Dynamic Carbs at time {rtime}: {dc}")
