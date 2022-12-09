@@ -31,7 +31,7 @@ LOG_DIR = '/home/hugh9/autoapp_to_loop_logic_logs/'
 
 HUGH_USER = 'Hugh'
 HUGH_USER_ID = 7
-
+MATCHING_BOLUS_INTERVAL = 30    # minutes
 
 # the time in minutes for two timestamps to "match"
 TIMEDELTA_MINS = 5
@@ -353,6 +353,54 @@ def matching_bolus_row(conn, timestamp):
     else:
         return row
 
+def argmin(seq, func):
+    '''Return the element of seq for which func is smallest. Returns None
+if seq is empty.'''
+    if len(seq) == 0:
+        return None
+    best = seq[0]
+    best_val = func(best)
+    for elt in seq:
+        elt_val = func(elt)
+        if elt_val < best_val:
+            best, best_val = elt, elt_val
+    return best
+
+def argmin_test():
+    seq = [ {'i': i, 'y': (i-5)*(i-5)} for i in range(10) ]
+    for val in seq:
+        print(val)
+    print('smallest i', argmin(seq, lambda e: e['i']))
+    print('smallest y', argmin(seq, lambda e: e['y']))
+
+
+def matching_bolus_row_within(conn, timestamp, interval_minutes=30):
+    '''Returns the row (as a dictionary) from the `autoapp.bolus` table
+    closest in time to the given timestamp and within the given
+    interval.  While it's possible to do the query entirely in the
+    database, I'm not sure it's worth it. The query is very complex
+    and it's almost certainly easier to fetch the 12 rows around the
+    timestamp to Python and find the best match, if any, here. So,
+    that's what I've done.
+    '''
+    curs = dbi.dict_cursor(conn)
+    query = '''SELECT bolus_id, user_id, date, type, value, duration, server_date 
+               FROM autoapp.bolus
+               WHERE user_id = %s 
+                 AND date between (%s - interval %s minute) and (%s + interval %s minute)
+            '''
+    nr = curs.execute(query, [HUGH_USER_ID,
+                              timestamp, interval_minutes,
+                              timestamp, interval_minutes])
+
+    if nr == 0:
+        # No boluses within time interval, so just return None
+        return None
+    # Okay, a little work to do
+    rows = curs.fetchall()
+    timestamp = date_ui.to_datetime(timestamp)
+    closest = argmin(rows, lambda row : abs(row['date']-timestamp))
+    return closest
 
 def migrate_commands(conn, alt_start_time=None, commit=True,
                      loop_summary_table='loop_logic.loop_summary'):
@@ -387,6 +435,8 @@ def migrate_commands(conn, alt_start_time=None, commit=True,
         logging.debug(f'migrating row {row_str}')
         # shorthands for the column names above
         (cid, uid, ct, ty, comp, err, state, pend, lc, pd, sb_amt, tb_ratio) = row
+        if cid is None:
+            raise Exception('NULL cid')
         # check if it's already there (migrated earlier) by checking command_id
         nrows = update.execute(f'''SELECT created_timestamp 
                                    FROM {loop_summary_table} 
@@ -404,39 +454,48 @@ def migrate_commands(conn, alt_start_time=None, commit=True,
         ‘error’=0, bring it over and set ‘settled’ field to 0.
         '''
         if comp == 1 and ty == 'bolus':
-            # find closest matching timestamp in `bolus` table:
-            bolus_row = matching_bolus_row(conn, ct)
-            bolus_pump_id = bolus_row['bolus_id'] # check whether this is correct
-            bolus_value = bolus_row['value']
+            # find closest matching timestamp in `bolus`
+            # table. Originally, Janice said within 30 minutes
+            # (checking realtime_cgm). Then on 12/1 she said "I spoke
+            # to Hugh--he never puts a glucose value into the pump or
+            # the app when he corrects so if no CGM, there will be
+            # nothing else to use."
+            bolus_row = matching_bolus_row_within(conn, ct, MATCHING_BOLUS_INTERVAL)
+            # might return None, so guard with (bolus_row AND expr)
+            bolus_pump_id = bolus_row and bolus_row['bolus_id']
+            bolus_value = bolus_row and bolus_row['value']
         else:
             bolus_pump_id = None
             bolus_value = None
         # So, now we have a bolus_value but we also have a sb_amt from
         # the commands_single_bolus_data table.  are these the same?
-
         if nrows > 0:
             # eventually, I think we just skip a row that has been
             # migrated, because we'll do things right the first time.
             logging.info(f'command at time {ct} has already been migrated; updating it')
             update.execute(f'''UPDATE {loop_summary_table}
-                              SET bolus_value = %s, command_id = %s 
+                              SET bolus_value = %s, bolus_pump_id = %s, command_id = %s, completed = %s, error = %s
                               WHERE created_timestamp = %s and type='bolus'; ''',
-                           [sb_amt, cid, ct])
+                           [sb_amt, bolus_pump_id, cid, comp, err, ct])
         else:
-            ## 10 columns, first being NULL, the rest are migrated data
+            ## 12 columns, first being NULL, the rest are migrated data,
+            ## in order of the fields in loop_summary_table
             update.execute(f'''INSERT INTO {loop_summary_table}
                                  (loop_summary_id,
                                  user_id,
+                                 bolus_pump_id,
                                  bolus_value,
                                  command_id,
                                  created_timestamp,
-                                 type,
                                  state,
+                                 type,
                                  pending,
+                                 completed,
+                                 error,
                                  loop_command,
                                  parent_decision) VALUES 
-                                 (NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s)''',
-                       [uid, cid, sb_amt, ct, ty, state, pend, lc, pd])
+                               (NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)''',
+                           [uid, bolus_pump_id, sb_amt, cid, ct, state, ty, pend, comp, err, lc, pd])
         # after either INSERT or UPDATE
         if commit:
             conn.commit()
@@ -457,8 +516,23 @@ def test_migrate_commands(conn, alt_start_time, commit):
     print('after migration')
     for row in curs.fetchall():
         print(row)
-    
-    
+
+def re_migrate_commands(conn, alt_start_time, commit):
+    '''clearing out previously migrated commands and re-doing them, when
+there are significant upgrades to the algorithm.'''
+    curs = dbi.cursor(conn)
+    # clear out the old
+    nr = curs.execute('''DELETE FROM loop_logic.loop_summary 
+                         WHERE command_id IS NULL or
+                               command_id IN (SELECT command_id 
+                                              FROM autoapp.commands
+                                              WHERE created_timestamp >= %s)''',
+                 [alt_start_time])
+    print(f'deleting {nr} commands from loop_summary since {alt_start_time}')
+    if commit:
+        conn.commit()
+    # remigrate
+    migrate_commands(conn, alt_start_time, commit)
 
 ## ================================================================
 
