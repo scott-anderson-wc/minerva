@@ -10,9 +10,6 @@ field in the glucose range table).  Use 6 hours if missing.
 
 Testing: start python, and run the functions in 
 
-
-
-
 '''
 
 import os                       # for path.join
@@ -28,6 +25,10 @@ import logging
 
 # probably should have different logs for production vs development
 LOG_DIR = '/home/hugh9/autoapp_to_loop_logic_logs/'
+
+# switch this to the real autoapp when we are ready
+AUTOAPP='autoapp_test'
+
 
 HUGH_USER = 'Hugh'
 HUGH_USER_ID = 7
@@ -119,7 +120,7 @@ migration_status when we are done migrating. See set_migration_time.
 
     '''
     curs = dbi.cursor(conn)
-    curs.execute('''select date from autoapp.dana_history_timestamp where user_id = %s''',
+    curs.execute(f'''select date from {AUTOAPP}.dana_history_timestamp where user_id = %s''',
                  [HUGH_USER_ID])
     last_autoapp_update = curs.fetchone()[0]
     curs.execute('''select prev_autoapp_update from loop_logic.migration_status where user_id = %s''',
@@ -272,8 +273,8 @@ being associated with a command, we'll update the entry later.
     curs = dbi.cursor(conn)
     # ignore type and duration?
     # note: bolus_id is called bolus_pump_id in loop_logic
-    curs.execute('''select user_id, bolus_id, date, value 
-                    from autoapp.bolus
+    curs.execute(f'''select user_id, bolus_id, date, value 
+                    from {AUTOAPP}.bolus
                     where date >= %s''',
                  [start_time])
     return curs.fetchall()
@@ -333,12 +334,12 @@ def matching_bolus_row(conn, timestamp):
     time to the given timestamp.
     '''
     curs = dbi.dict_cursor(conn)
-    query = '''SELECT bolus_id, user_id, date, type, value, duration, server_date 
-               FROM autoapp.bolus
+    query = f'''SELECT bolus_id, user_id, date, type, value, duration, server_date 
+               FROM {AUTOAPP}.bolus
                WHERE user_id = %s AND 
                abs(time_to_sec(timediff(date, %s))) = 
                   (SELECT min(abs(time_to_sec(timediff(date, %s)))) 
-                   FROM autoapp.bolus)'''
+                   FROM {AUTOAPP}.bolus)'''
     nr = curs.execute(query, [HUGH_USER_ID, timestamp, timestamp])
     if nr > 1:
         # ick. could there be two exactly the same distance? 
@@ -384,8 +385,8 @@ def matching_bolus_row_within(conn, timestamp, interval_minutes=30):
     that's what I've done.
     '''
     curs = dbi.dict_cursor(conn)
-    query = '''SELECT bolus_id, user_id, date, type, value, duration, server_date 
-               FROM autoapp.bolus
+    query = f'''SELECT bolus_id, user_id, date, type, value, duration, server_date 
+               FROM {AUTOAPP}.bolus
                WHERE user_id = %s 
                  AND date between (%s - interval %s minute) and (%s + interval %s minute)
             '''
@@ -414,7 +415,7 @@ def migrate_commands(conn, alt_start_time=None, commit=True,
     start = date_ui.to_rtime(start)
     logging.info(f'migrating commands since {start}')
     num_com = read.execute(
-        '''SELECT command_id, user_id, created_timestamp, type, 
+        f'''SELECT command_id, user_id, created_timestamp, type, 
                   if(completed,1,0) as comp,
                   if(error,1,0) as err,
                   state, 
@@ -423,7 +424,7 @@ def migrate_commands(conn, alt_start_time=None, commit=True,
                   if(parent_decision,1,0) as pd, 
                   sb.amount as sb_amount,
                   tb.ratio as tb_ratio
-           FROM autoapp.commands 
+           FROM {AUTOAPP}.commands 
                 LEFT OUTER JOIN commands_single_bolus_data AS sb USING(command_id)
                 LEFT OUTER JOIN commands_temporary_basal_data AS tb USING(command_id)
            WHERE created_timestamp > %s''',
@@ -522,10 +523,10 @@ def re_migrate_commands(conn, alt_start_time, commit):
 there are significant upgrades to the algorithm.'''
     curs = dbi.cursor(conn)
     # clear out the old
-    nr = curs.execute('''DELETE FROM loop_logic.loop_summary 
+    nr = curs.execute(f'''DELETE FROM loop_logic.loop_summary 
                          WHERE command_id IS NULL or
                                command_id IN (SELECT command_id 
-                                              FROM autoapp.commands
+                                              FROM {AUTOAPP}.commands
                                               WHERE created_timestamp >= %s)''',
                  [alt_start_time])
     print(f'deleting {nr} commands from loop_summary since {alt_start_time}')
