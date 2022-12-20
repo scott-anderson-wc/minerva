@@ -299,9 +299,9 @@ to the dictionary. Then converting to a table, for easier analysis.
     # Currently, assumes past inputs begin at t-5hrs and skip_amt=5hrs.
     for i in range(skip_amt, len(past_inputs)):
         row = past_inputs[i]
-        dynamic_insulin = convolve(past_inputs, i, 'insulin', iac_curve)
+        dynamic_insulin = convolve(past_inputs, i, 'insulin', iac_curve, basal_rate_12)
         effect = -1 * dynamic_insulin * isf_function(time_now)
-        dynamic_carbs = convolve(past_inputs, i, 'carbs', carb_curve)
+        dynamic_carbs = convolve(past_inputs, i, 'carbs', carb_curve, 0.0)
         rt = row['rtime']
         logging.debug('RT: %s DT: %s IN: %d BG %.2f DI %.2f Effect %.2f DC: %.2f ',
                       rt, row['delta'],
@@ -433,14 +433,14 @@ dictionary. Then converting to a table, for easier analysis.
     # Currently, assumes past inputs begin at t-6hrs and skip_amt=6hrs.
     for i in range(skip_amt, len(past_inputs)):
         row = past_inputs[i]
-        dynamic_insulin = convolve(past_inputs, i, 'insulin', action_curves['insulin'])
+        dynamic_insulin = convolve(past_inputs, i, 'insulin', action_curves['insulin'], basal_rate_12)
         effect = -1 * dynamic_insulin * isf_function(time_now)
 
         # Compute dynamic_carbs
         dynamic_carbs = 0
         carb_codes = [code for code in set(carb_entries) if code is not None]
         for code in set(carb_codes):
-            dynamic_carbs += convolve(past_inputs, i, code, action_curves[carb_code_mapping(code)])
+            dynamic_carbs += convolve(past_inputs, i, code, action_curves[carb_code_mapping(code)], 0.0)
 
         rt = row['rtime']
         logging.debug('RT: %s DT: %s IN: %d BG %.2f DI %.2f Effect %.2f DC: %.2f ',
@@ -531,7 +531,9 @@ def test_inputs_1():
 def test_pm_1():
     '''First test case for the PMMC (predictive model multi carb). This
 case is a "normal" breakfast with carbs and insulin.'''
-    time_now = '2022-11-03 07:00'
+    # time_now = '2022-11-03 07:00'
+    time_now = '2022-12-09 11:20'
+
     duration = 720
     past = make_test_inputs(time_now, duration,
                             [(360, 2, None, None), # 2 units insulin first
@@ -562,7 +564,7 @@ def carb_code_mapping(carb_code):
 # ================================================================
 # convolution
 
-def convolve(list_of_rows, index, key, curve):
+def convolve(list_of_rows, index, key, curve, default=0):
     '''Computes the convolution of the curve starting at the index and working backwards
     through the rows until either the rows run out or the curve does. Returns the result
     (e.g. amount of dynamic_carbs or dynamic_insulin) at the given index. The curve
@@ -585,7 +587,7 @@ def convolve(list_of_rows, index, key, curve):
 
         # Compute convolution
         if time_diff_in_steps < len(curve) and time_diff_in_steps >= 0:
-            prod = row.get(key, 0) * curve[time_diff_in_steps]
+            prod = row.get(key, default) * curve[time_diff_in_steps]
             sum += prod
         else:
             # curve ran out
@@ -1666,9 +1668,9 @@ to the dictionary. Then converting to a table, for easier analysis.
     rev_carb_curve=[]
     for i in range(skip_amt, len(past_inputs)):
         row = past_inputs[i]
-        dynamic_insulin = convolve(past_inputs, i, 'insulin', iac_curve)
+        dynamic_insulin = convolve(past_inputs, i, 'insulin', iac_curve, basal_rate_12)
         effect = -1 * dynamic_insulin * isf_function(time_now)
-        # dynamic_carbs = convolve(past_inputs, i, 'carbs', carb_curve)
+        # dynamic_carbs = convolve(past_inputs, i, 'carbs', carb_curve, 0.0)
         rt = row['rtime']
         logging.debug('RT: %s DT: %s IN: %d BG %.2f DI %.2f Effect %.2f ',
                       rt, row['delta'],
