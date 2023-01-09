@@ -8,7 +8,19 @@ from all others, so it's pretty easy.
 Next, we migrate all bolus and carb data for the last max_bolus_interval (a
 field in the glucose range table).  Use 6 hours if missing.
 
-Testing: start python, and run the functions in 
+Testing: start python, and run the functions in ...
+
+dest = 'loop_logic'
+src = 'autoapp'
+a.migrate_all(conn, src, dest, '2023-01-01', True)
+
+Changelog:
+
+January 2023. Added flexibility vary SOURCE and DEST: 
+  SOURCE = autoapp or autoapp_test
+  DEST = loop_logic or autoapp_test 
+
+respectively
 
 '''
 
@@ -25,10 +37,6 @@ import logging
 
 # probably should have different logs for production vs development
 LOG_DIR = '/home/hugh9/autoapp_to_loop_logic_logs/'
-
-# switch this to the real autoapp when we are ready
-AUTOAPP='autoapp_test'
-
 
 HUGH_USER = 'Hugh'
 HUGH_USER_ID = 7
@@ -61,21 +69,21 @@ the number of values we need from Dexcom from those.
 
 
 
-def get_cgm_update_times(conn):
+def get_cgm_update_times(conn, dest):
     '''Long discussion about the data to migrate. See
 https://docs.google.com/document/d/1ZCtErlxRQmPUz_vbfLXdg7ap2hIz5g9Lubtog8ZqFys/edit#heading=h.umdjcuqs1gq4
 
 This function also looks in the janice.realtime_cgm2 table and finds
 the most recent value where mgdl is not None (Y). We should probably
 store that useful value somewhere. It also returns the prior value of
-that, we stored as loop_logic.migration_status.prev_cgm_update
+that, we stored as DEST.migration_status.prev_cgm_update
 (PY). Returns both (Y,PY) if Y > Py, otherwise None, None.
 
     '''
     (rtime, dexcom_time) = get_latest_stored_data(conn)
     last_cgm = min(rtime, dexcom_time)
     curs = dbi.cursor(conn)
-    curs.execute('''select prev_cgm_update from loop_logic.migration_status where user_id = %s''',
+    curs.execute(f'''select prev_cgm_update from {dest}.migration_status where user_id = %s''',
                  [HUGH_USER_ID])
     prev_cgm = curs.fetchone()[0]
     logging.debug(f'last update from dexcom was at {last_cgm}; the previous value was {prev_cgm}')
@@ -86,19 +94,19 @@ that, we stored as loop_logic.migration_status.prev_cgm_update
         return None, None
     
 
-def set_cgm_migration_time(conn, prev_update, last_update):
+def set_cgm_migration_time(conn, dest, prev_update, last_update):
     '''Long discussion about the data to migrate. See
 https://docs.google.com/document/d/1ZCtErlxRQmPUz_vbfLXdg7ap2hIz5g9Lubtog8ZqFys/edit#heading=h.umdjcuqs1gq4
 
 This function sets the value of prev_update_time in the
-loop_logic.migration_status table to the time of the lastest real data in janice.realtime_cgm2.
+DEST.migration_status table to the time of the latest real data in janice.realtime_cgm2.
 
 It uses the passed-in values, to avoid issues of simultaneous updates. Ignores prev_update, uses last_update
 
     '''
     logging.debug(f'setting prev {prev_update} and last {last_update} cgm update times')
     curs = dbi.cursor(conn)
-    curs.execute('''UPDATE loop_logic.migration_status 
+    curs.execute(f'''UPDATE {dest}.migration_status 
                     SET prev_cgm_update = %s, prev_cgm_migration = current_timestamp() 
                     WHERE user_id = %s''',
                  # notice this says last_ not prev_; we ignore prev here
@@ -106,13 +114,13 @@ It uses the passed-in values, to avoid issues of simultaneous updates. Ignores p
     conn.commit()
     return 'done'
 
-def get_autoapp_update_times(conn):
+def get_autoapp_update_times(conn, source, dest):
     '''Long discussion about the data to migrate. See
 https://docs.google.com/document/d/1ZCtErlxRQmPUz_vbfLXdg7ap2hIz5g9Lubtog8ZqFys/edit#heading=h.umdjcuqs1gq4
 
 This function looks up the values of
-autoapp.dana_history_timestamp.date (X) and
-loop_logic.migration_status.prev_autoapp_update (PX) and returns (X, PX)
+SOURCE.dana_history_timestamp.date (X) and
+DEST.migration_status.prev_autoapp_update (PX) and returns (X, PX)
 iff X > PX otherwise None,None.
 
 It returns all values so that new values can be stored into
@@ -120,10 +128,10 @@ migration_status when we are done migrating. See set_migration_time.
 
     '''
     curs = dbi.cursor(conn)
-    curs.execute(f'''select date from {AUTOAPP}.dana_history_timestamp where user_id = %s''',
+    curs.execute(f'''select date from {source}.dana_history_timestamp where user_id = %s''',
                  [HUGH_USER_ID])
     last_autoapp_update = curs.fetchone()[0]
-    curs.execute('''select prev_autoapp_update from loop_logic.migration_status where user_id = %s''',
+    curs.execute(f'''select prev_autoapp_update from {dest}.migration_status where user_id = %s''',
                  [HUGH_USER_ID])
     prev_autoapp = curs.fetchone()[0]
     if prev_autoapp < last_autoapp_update:
@@ -132,7 +140,7 @@ migration_status when we are done migrating. See set_migration_time.
     else:
         return None, None
 
-def set_autoapp_migration_time(conn, prev_update, last_update):
+def set_autoapp_migration_time(conn, dest, prev_update, last_update):
     '''Long discussion about the data to migrate. See
 https://docs.google.com/document/d/1ZCtErlxRQmPUz_vbfLXdg7ap2hIz5g9Lubtog8ZqFys/edit#heading=h.umdjcuqs1gq4
 
@@ -145,7 +153,7 @@ It uses the passed-in values, to avoid issues of simultaneous updates.
     '''
     logging.debug(f'setting prev {prev_update} and last {last_update} autoapp update times')
     curs = dbi.cursor(conn)
-    curs.execute('''UPDATE loop_logic.migration_status 
+    curs.execute(f'''UPDATE {dest}.migration_status 
                     SET prev_autoapp_update = %s, prev_autoapp_migration = current_timestamp() 
                     WHERE user_id = %s''',
                  # notice this says last_ not prev_; we ignore prev here
@@ -156,7 +164,7 @@ It uses the passed-in values, to avoid issues of simultaneous updates.
 
 # ================================================================
 
-def migrate_cgm(conn, start_time, commit=True):
+def migrate_cgm(conn, dest, start_time, commit=True):
     '''start_time is a string or a python datetime'''
     if conn is None:
         conn = dbi.connect()
@@ -172,51 +180,52 @@ def migrate_cgm(conn, start_time, commit=True):
         # we can't use on duplicate key, because the key is an auto_increment value that we don't have.
         # So we have to look for matches on timestamp values. 
         (user_id, _, dexcom_timestamp_utc, _) = row
-        nr = ins.execute('''select cgm_id from loop_logic.realtime_cgm 
+        nr = ins.execute(f'''select cgm_id from {dest}.realtime_cgm 
                             where user_id = %s and dexcom_timestamp_utc = %s''',
                          [user_id, dexcom_timestamp_utc])
         logging.debug(f'found {nr} matches (already migrated rows)')
         if nr == 0:
-            ins.execute('''insert into loop_logic.realtime_cgm(cgm_id,user_id,trend,dexcom_timestamp_utc,cgm_value)
+            ins.execute(f'''insert into {dest}.realtime_cgm(cgm_id,user_id,trend,dexcom_timestamp_utc,cgm_value)
                            values(null,%s,%s,%s,%s)''',
                         row)
     if commit:
         conn.commit()
 
-def migrate_cgm_test(conn, start_time):
+def migrate_cgm_test(conn, start_time, dest='loop_logic'):
     if conn is None:
         conn = dbi.connect()
     curs = dbi.cursor(conn)
-    curs.execute('select count(*) from loop_logic.realtime_cgm;')
+    curs.execute(f'select count(*) from {dest}.realtime_cgm;')
     count_before = curs.fetchone()[0]
     print(f'before, there are {count_before}')
     # don't commit when testing. It'll be true in this connection, but not permanent
-    migrate_cgm(conn, start_time, False)
-    curs.execute('select count(*) from loop_logic.realtime_cgm;')
+    migrate_cgm(conn, dest, start_time, False)
+    curs.execute(f'select count(*) from {dest}.realtime_cgm;')
     count_after = curs.fetchone()[0]
     print(f'after, there are {count_after}')
         
-def migrate_cgm_updates(conn):
+def migrate_cgm_updates(conn, dest):
     '''migrate all the new cgm values, since the last time we migrated.'''
-    prev_cgm_update, last_cgm_update = get_cgm_update_times(conn)
+    prev_cgm_update, last_cgm_update = get_cgm_update_times(conn, dest)
     if prev_cgm_update is None:
         # punt, because there's no new data
         return
-    migrate_cgm(conn, prev_cgm_update)
-    set_cgm_migration_time(conn, prev_cgm_update, last_cgm_update)
+    migrate_cgm(conn, dest, prev_cgm_update)
+    set_cgm_migration_time(conn, dest, prev_cgm_update, last_cgm_update)
 
 # ================================================================
 # Bolus functions
 
-def get_max_bolus_interval_mins(conn, user_id=HUGH_USER_ID):
+# this function seems no longer to be used
+def get_max_bolus_interval_mins(conn, dest, user_id=HUGH_USER_ID):
     '''Look up the max_bolus_interval in the glucose_range table for the given user_id'''
     if conn is None:
         conn = dbi.connect()
     curs = dbi.cursor(conn)
     DEFAULT = 6*60
     return DEFAULT
-    nrows = curs.execute('''select max_bolus_interval_mins 
-                            from loop_logic.glucose_range inner join loop_logic.user using(glucose_range_id)
+    nrows = curs.execute(f'''select max_bolus_interval_mins 
+d                            from {dest}.glucose_range inner join {dest}.user using(glucose_range_id)
                             where user_id = %s''',
                          [user_id])
     if nrows == 0:
@@ -226,28 +235,18 @@ def get_max_bolus_interval_mins(conn, user_id=HUGH_USER_ID):
         return DEFAULT
     return row[0]
         
-'''
-  `bolus_id` int NOT NULL AUTO_INCREMENT,
-  `user_id` int NOT NULL,
-  `date` datetime NOT NULL,
-  `type` varchar(2) NOT NULL,
-  `value` double NOT NULL,
-  `duration` double NOT NULL,
-  `server_date` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
-'''
-
-def matching_cgm(conn, timestamp):
+def matching_cgm(conn, dest, timestamp):
     '''Returns two values, the cgm_id and cgm_value value from the
 realtime_cgm table where its timestamp is closest in time to the given
 timestamp, which is probably the timestamp of a bolus.
 
     '''
     curs = dbi.cursor(conn)
-    query = '''SELECT cgm_id, cgm_value from loop_logic.realtime_cgm
+    query = f'''SELECT cgm_id, cgm_value from {dest}.realtime_cgm
                WHERE user_id = %s AND 
                abs(time_to_sec(timediff(dexcom_timestamp_utc, %s))) = 
                   (select min(abs(time_to_sec(timediff(dexcom_timestamp_utc, %s)))) 
-                   from loop_logic.realtime_cgm)'''
+                   from {dest}.realtime_cgm)'''
     nr = curs.execute(query, [HUGH_USER_ID, timestamp, timestamp])
     if nr > 1:
         # ick. could there be two exactly the same distance? 
@@ -263,7 +262,7 @@ timestamp, which is probably the timestamp of a bolus.
         (cgm_id, cgm_value) = row
         return row
 
-def get_boluses(conn, start_time):
+def get_boluses(conn, source, start_time):
     '''Return a list of recent boluses (anything after start_time) as a
 list of tuples. We only need to look at the bolus table, since
 we just want bolus_pump_id, date, value and type. If the bolus ends up
@@ -274,36 +273,47 @@ being associated with a command, we'll update the entry later.
     # ignore type and duration?
     # note: bolus_id is called bolus_pump_id in loop_logic
     curs.execute(f'''select user_id, bolus_id, date, value 
-                    from {AUTOAPP}.bolus
+                    from {source}.bolus
                     where date >= %s''',
                  [start_time])
     return curs.fetchall()
     
-def migrate_boluses(conn, start_time, commit=True):
+# reference for the code later
+'''
+  `bolus_id` int NOT NULL AUTO_INCREMENT,
+  `user_id` int NOT NULL,
+  `date` datetime NOT NULL,
+  `type` varchar(2) NOT NULL,
+  `value` double NOT NULL,
+  `duration` double NOT NULL,
+  `server_date` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+'''
+
+def migrate_boluses(conn, source, dest, start_time, commit=True):
     '''start_time is a string or a python datetime. '''
     if conn is None:
         conn = dbi.connect()
     curs = dbi.cursor(conn)
     # Note that these will probably be *new* rows, but to make this
     # idempotent, we'll look for a match on the date.
-    boluses = get_boluses(conn, start_time)
+    boluses = get_boluses(conn, source, start_time)
     for row in boluses:
         # note: bolus_id is called bolus_pump_id in loop_logic
         (user_id, bolus_pump_id, date, value) = row
         # see if all values match, to avoid re-inserting something already migrated
-        curs.execute('''select loop_summary_id, user_id, bolus_pump_id, bolus_timestamp, bolus_value
-                        from loop_logic.loop_summary
+        curs.execute(f'''select loop_summary_id, user_id, bolus_pump_id, bolus_timestamp, bolus_value
+                        from {dest}.loop_summary
                         where user_id = %s and bolus_pump_id = %s and bolus_timestamp = %s and bolus_value = %s''',
                      row)
         match = curs.fetchone()
         if match is None:
             # the normal case, we'll insert it. First see if there's a CGM at this time
-            cgm = matching_cgm(conn, date)
+            cgm = matching_cgm(conn, dest, date)
             if cgm is not None:
                 (cgm_id, cgm_value) = cgm
             else:
                 (cgm_id, cgm_value) = (None, None)
-            curs.execute('''insert into loop_logic.loop_summary
+            curs.execute(f'''insert into {dest}.loop_summary
                                 (user_id, bolus_pump_id, bolus_timestamp, bolus_value,
                                 linked_cgm_id
                                 )
@@ -311,7 +321,7 @@ def migrate_boluses(conn, start_time, commit=True):
                          [user_id, bolus_pump_id, date, value, cgm_id])
         else:
             # already exists, so update? Ignore? We'll complain if they differ
-            logging.info('bolus match: this bolus is already migrated: %s'.format(row))
+            logging.info('bolus match: this bolus is already migrated: {}'.format(row))
             
     if commit:
         conn.commit()
@@ -329,17 +339,17 @@ actually bit(1). They come into Python as byte arrays of length
         raise ValueError(f'multi-byte value: {bytes_val}')
     raise TypeError(f'not either int or bytes: {bytes_val}')
 
-def matching_bolus_row(conn, timestamp):
-    '''Returns the row (as a dictionary) from the `autoapp.bolus` table closest in
+def matching_bolus_row(conn, source, timestamp):
+    '''Returns the row (as a dictionary) from the `source.bolus` table closest in
     time to the given timestamp.
     '''
     curs = dbi.dict_cursor(conn)
     query = f'''SELECT bolus_id, user_id, date, type, value, duration, server_date 
-               FROM {AUTOAPP}.bolus
+               FROM {source}.bolus
                WHERE user_id = %s AND 
                abs(time_to_sec(timediff(date, %s))) = 
                   (SELECT min(abs(time_to_sec(timediff(date, %s)))) 
-                   FROM {AUTOAPP}.bolus)'''
+                   FROM {source}.bolus)'''
     nr = curs.execute(query, [HUGH_USER_ID, timestamp, timestamp])
     if nr > 1:
         # ick. could there be two exactly the same distance? 
@@ -375,7 +385,7 @@ def argmin_test():
     print('smallest y', argmin(seq, lambda e: e['y']))
 
 
-def matching_bolus_row_within(conn, timestamp, interval_minutes=30):
+def matching_bolus_row_within(conn, source, timestamp, interval_minutes=30):
     '''Returns the row (as a dictionary) from the `autoapp.bolus` table
     closest in time to the given timestamp and within the given
     interval.  While it's possible to do the query entirely in the
@@ -386,7 +396,7 @@ def matching_bolus_row_within(conn, timestamp, interval_minutes=30):
     '''
     curs = dbi.dict_cursor(conn)
     query = f'''SELECT bolus_id, user_id, date, type, value, duration, server_date 
-               FROM {AUTOAPP}.bolus
+               FROM {source}.bolus
                WHERE user_id = %s 
                  AND date between (%s - interval %s minute) and (%s + interval %s minute)
             '''
@@ -403,8 +413,8 @@ def matching_bolus_row_within(conn, timestamp, interval_minutes=30):
     closest = argmin(rows, lambda row : abs(row['date']-timestamp))
     return closest
 
-def migrate_commands(conn, alt_start_time=None, commit=True,
-                     loop_summary_table='loop_logic.loop_summary'):
+def migrate_commands(conn, source, dest, alt_start_time=None, commit=True,
+                     loop_summary_table='loop_summary'):
     '''Migrate commands within the last 40". '''
     if conn is None:
         conn = dbi.connect()
@@ -424,9 +434,9 @@ def migrate_commands(conn, alt_start_time=None, commit=True,
                   if(parent_decision,1,0) as pd, 
                   sb.amount as sb_amount,
                   tb.ratio as tb_ratio
-           FROM {AUTOAPP}.commands 
-                LEFT OUTER JOIN commands_single_bolus_data AS sb USING(command_id)
-                LEFT OUTER JOIN commands_temporary_basal_data AS tb USING(command_id)
+           FROM {source}.commands 
+                LEFT OUTER JOIN {source}.commands_single_bolus_data AS sb USING(command_id)
+                LEFT OUTER JOIN {source}.commands_temporary_basal_data AS tb USING(command_id)
            WHERE created_timestamp > %s''',
         [start])
     logging.info(f'{num_com} commands to migrate')
@@ -440,7 +450,7 @@ def migrate_commands(conn, alt_start_time=None, commit=True,
             raise Exception('NULL cid')
         # check if it's already there (migrated earlier) by checking command_id
         nrows = update.execute(f'''SELECT created_timestamp 
-                                   FROM {loop_summary_table} 
+                                   FROM {dest}.{loop_summary_table} 
                                    WHERE created_timestamp = %s''',
                                [ct])
         '''If ‘completed’=1, the bolus command should be matched to a row
@@ -461,7 +471,7 @@ def migrate_commands(conn, alt_start_time=None, commit=True,
             # to Hugh--he never puts a glucose value into the pump or
             # the app when he corrects so if no CGM, there will be
             # nothing else to use."
-            bolus_row = matching_bolus_row_within(conn, ct, MATCHING_BOLUS_INTERVAL)
+            bolus_row = matching_bolus_row_within(conn, source, ct, MATCHING_BOLUS_INTERVAL)
             # might return None, so guard with (bolus_row AND expr)
             bolus_pump_id = bolus_row and bolus_row['bolus_id']
             bolus_value = bolus_row and bolus_row['value']
@@ -474,14 +484,14 @@ def migrate_commands(conn, alt_start_time=None, commit=True,
             # eventually, I think we just skip a row that has been
             # migrated, because we'll do things right the first time.
             logging.info(f'command at time {ct} has already been migrated; updating it')
-            update.execute(f'''UPDATE {loop_summary_table}
+            update.execute(f'''UPDATE {dest}.{loop_summary_table}
                               SET bolus_value = %s, bolus_pump_id = %s, command_id = %s, completed = %s, error = %s
                               WHERE created_timestamp = %s and type='bolus'; ''',
                            [sb_amt, bolus_pump_id, cid, comp, err, ct])
         else:
             ## 12 columns, first being NULL, the rest are migrated data,
             ## in order of the fields in loop_summary_table
-            update.execute(f'''INSERT INTO {loop_summary_table}
+            update.execute(f'''INSERT INTO {dest}.{loop_summary_table}
                                  (loop_summary_id,
                                  user_id,
                                  bolus_pump_id,
@@ -501,32 +511,32 @@ def migrate_commands(conn, alt_start_time=None, commit=True,
         if commit:
             conn.commit()
 
-def test_migrate_commands(conn, alt_start_time, commit):
+def test_migrate_commands(conn, source, dest, alt_start_time, commit):
     '''this uses a test table that is a copy of the structure of the real
     loop_logic.loop_summary table'''
     if conn is None:
         conn = dbi.connect()
     curs = dbi.cursor(conn)
-    TABLE = 'loop_logic.test_loop_summary'
-    curs.execute(f'drop table if exists {TABLE}')
-    curs.execute(f'create table {TABLE} like loop_logic.loop_summary')
+    TABLE = 'test_loop_summary'
+    curs.execute(f'drop table if exists {dest}.{TABLE}')
+    curs.execute(f'create table {dest}.{TABLE} like {dest}.loop_summary')
     conn.commit()
-    migrate_commands(conn, alt_start_time, commit,
+    migrate_commands(conn, source, dest, alt_start_time, commit,
                      loop_summary_table=TABLE)
-    curs.execute(f'select * from {TABLE}')
+    curs.execute(f'select * from {dest}.{TABLE}')
     print('after migration')
     for row in curs.fetchall():
         print(row)
 
-def re_migrate_commands(conn, alt_start_time, commit):
+def re_migrate_commands(conn, source, dest, alt_start_time, commit):
     '''clearing out previously migrated commands and re-doing them, when
 there are significant upgrades to the algorithm.'''
     curs = dbi.cursor(conn)
     # clear out the old
-    nr = curs.execute(f'''DELETE FROM loop_logic.loop_summary 
+    nr = curs.execute(f'''DELETE FROM {dest}.loop_summary 
                          WHERE command_id IS NULL or
                                command_id IN (SELECT command_id 
-                                              FROM {AUTOAPP}.commands
+                                              FROM {source}.commands
                                               WHERE created_timestamp >= %s)''',
                  [alt_start_time])
     print(f'deleting {nr} commands from loop_summary since {alt_start_time}')
@@ -538,28 +548,35 @@ there are significant upgrades to the algorithm.'''
 ## ================================================================
 
 
-def migrate_all(conn, alt_start_time=None):
+def migrate_all(conn, source, dest, alt_start_time=None, test=False):
     '''This is the function that should, eventually, be called from a cron job every 5 minutes.
 If alt_start_time is supplied, ignore the value from the get_migration_time() table.'''
     if conn is None:
         conn = dbi.connect()
-    logging.info('starting')
+    logging.info(f'starting migrate_all from {source} to {dest}')
     logging.info('1. realtime cgm')
-    migrate_cgm_updates(conn)
-    prev_update, last_autoapp_update = get_autoapp_update_times(conn)
-    if prev_update is None:
+    migrate_cgm_updates(conn, dest)
+    prev_update, last_autoapp_update = get_autoapp_update_times(conn, source, dest)
+    start_time = None
+    if alt_start_time is not None:
+        start_time = alt_start_time
+    elif prev_update is not None:
+        start_time = prev_update
+    else:
         # if prev_update is None, that means there's no new data in autoapp
         # since we last migrated, so save ourselves some work by giving up now
         logging.info('no new data, so giving up')
         return
-    start_time = alt_start_time or prev_update
     logging.info(f'migrating data since {start_time}')
     logging.info('2. bolus')
-    migrate_boluses(conn, start_time)
+    migrate_boluses(conn, source, dest, start_time)
     logging.info('3. commands')
-    migrate_commands(conn, start_time)
-    logging.info('done. storing update time')
-    set_autoapp_migration_time(conn, prev_update, last_autoapp_update)
+    migrate_commands(conn, source, dest, start_time)
+    if test:
+        logging.info('done, but test mode, so not storing update time')
+    else:
+        logging.info('done. storing update time')
+        set_autoapp_migration_time(conn, dest, prev_update, last_autoapp_update)
     logging.info('done')
 
 
@@ -572,6 +589,12 @@ if __name__ == '__main__':
         migrate_cgm(conn, alt_start_time, True)
         set_cgm_migration_time(conn, alt_start_time, alt_start_time)
         sys.exit()
+    if len(sys.argv) > 1 and sys.argv[1] == 'all':
+        alt_start_time = sys.argv[2]
+        print(f'test migrate_all starting at {alt_start_time}')
+        debugging()
+        migrate_all(conn, 'autoapp', 'loop_logic', alt_start_time, True)
+        sys.exit()
     # The default is to run as a cron job
     # when run as a script, log to a logfile 
     today = datetime.today()
@@ -581,5 +604,5 @@ if __name__ == '__main__':
                         filename=logfile,
                         level=logging.DEBUG)
     logging.info('running at {}'.format(datetime.now()))
-    migrate_all(conn)
-
+    migrate_all(conn, 'autoapp', 'loop_logic')
+    migrate_all(conn, 'autoapp_test', 'autoapp_test')
