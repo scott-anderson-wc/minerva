@@ -16,11 +16,27 @@ a.migrate_all(conn, src, dest, '2023-01-01', True)
 
 Changelog:
 
-January 2023. Added flexibility vary SOURCE and DEST: 
+January 10 2023. Added flexibility vary SOURCE and DEST: 
   SOURCE = autoapp or autoapp_test
   DEST = loop_logic or autoapp_test 
-
 respectively
+
+Jan 13 2023. Changed migration time computation so that instead of
+looking back to the last migration, it just looks back based on the
+configuration timeout limits, currently 40 minutes for commands and 6
+hours for other tables.
+
+This was because a single command back in December broke the algorithm
+forever, because it kept trying and failing. Might as well move on.
+
+Jan 19, 2023, rewrote the bolus migration to pick up the commands as
+well as the entries in the bolus table: "Yes, there are boluses in the
+command table and boluses that are only in the bolus table.  The
+latter were initiated on the pump itself and not through a parent
+command.  Both the overlapping (command table + bolus table) and the
+“just in bolus table” should be transferred to loop summary."
+
+
 
 '''
 
@@ -41,6 +57,7 @@ LOG_DIR = '/home/hugh9/autoapp_to_loop_logic_logs/'
 HUGH_USER = 'Hugh'
 HUGH_USER_ID = 7
 MATCHING_BOLUS_INTERVAL = 30    # minutes
+OTHER_DATA_TIMEOUT = 6*60       # minutes
 
 # the time in minutes for two timestamps to "match"
 TIMEDELTA_MINS = 5
@@ -297,6 +314,8 @@ def migrate_boluses(conn, source, dest, start_time, commit=True):
     # Note that these will probably be *new* rows, but to make this
     # idempotent, we'll look for a match on the date.
     boluses = get_boluses(conn, source, start_time)
+    n = len(boluses)
+    logging.info(f'{n} boluses to migrate since {start_time}')
     for row in boluses:
         # note: bolus_id is called bolus_pump_id in loop_logic
         (user_id, bolus_pump_id, date, value) = row
@@ -315,10 +334,10 @@ def migrate_boluses(conn, source, dest, start_time, commit=True):
                 (cgm_id, cgm_value) = (None, None)
             curs.execute(f'''insert into {dest}.loop_summary
                                 (user_id, bolus_pump_id, bolus_timestamp, bolus_value,
-                                linked_cgm_id
+                                linked_cgm_id, linked_cgm_value
                                 )
                             values(%s, %s, %s, %s, %s)''',
-                         [user_id, bolus_pump_id, date, value, cgm_id])
+                         [user_id, bolus_pump_id, date, value, cgm_id, cgm_value])
         else:
             # already exists, so update? Ignore? We'll complain if they differ
             logging.info('bolus match: this bolus is already migrated: {}'.format(row))
@@ -448,11 +467,6 @@ def migrate_commands(conn, source, dest, alt_start_time=None, commit=True,
         (cid, uid, ct, ty, comp, err, state, pend, lc, pd, sb_amt, tb_ratio) = row
         if cid is None:
             raise Exception('NULL cid')
-        # check if it's already there (migrated earlier) by checking command_id
-        nrows = update.execute(f'''SELECT created_timestamp 
-                                   FROM {dest}.{loop_summary_table} 
-                                   WHERE created_timestamp = %s''',
-                               [ct])
         '''If ‘completed’=1, the bolus command should be matched to a row
         with a ‘bolus_pump_id’.  Match can be done by closest
         timestamp.  In addition, the ‘bolus_value’ of the
@@ -480,14 +494,24 @@ def migrate_commands(conn, source, dest, alt_start_time=None, commit=True,
             bolus_value = None
         # So, now we have a bolus_value but we also have a sb_amt from
         # the commands_single_bolus_data table.  are these the same?
+
+        # check if command is already there (migrated earlier) by checking command_id
+        nrows = update.execute(f'''SELECT loop_summary_id 
+                                   FROM {dest}.{loop_summary_table} 
+                                   WHERE command_id = %s''',
+                               [cid])
         if nrows > 0:
+            loop_summary_id = update.fetchone()[0]
             # eventually, I think we just skip a row that has been
             # migrated, because we'll do things right the first time.
-            logging.info(f'command at time {ct} has already been migrated; updating it')
+            logging.info(f'command {cid} at time {ct} has already been migrated as {loop_summary_id}; updating it')
             update.execute(f'''UPDATE {dest}.{loop_summary_table}
-                              SET bolus_value = %s, bolus_pump_id = %s, command_id = %s, completed = %s, error = %s
-                              WHERE created_timestamp = %s and type='bolus'; ''',
-                           [sb_amt, bolus_pump_id, cid, comp, err, ct])
+                              SET user_id = %s, bolus_pump_id = %s, bolus_value = %s, command_id, 
+                                  created_timestamp = %s, state = %s, type = %s, pending = %s, completed = %s,
+                                  error = %s, loop_command = %s, parent_decision = %s
+                              WHERE loop_summary_id = %s;''',
+                           [uid, bolus_pump_id, sb_amt, cid, ct, state, ty, pend, comp, err, lc, pd,
+                            loop_summary_id])
         else:
             ## 12 columns, first being NULL, the rest are migrated data,
             ## in order of the fields in loop_summary_table
@@ -523,7 +547,8 @@ def test_migrate_commands(conn, source, dest, alt_start_time, commit):
     conn.commit()
     migrate_commands(conn, source, dest, alt_start_time, commit,
                      loop_summary_table=TABLE)
-    curs.execute(f'select * from {dest}.{TABLE}')
+    # curs.execute(f'select * from {dest}.{TABLE}')
+    curs.execute(f'select loop_summary_id, command_id, state, type, pending, loop_command, parent_decision from {dest}.{TABLE}')
     print('after migration')
     for row in curs.fetchall():
         print(row)
@@ -543,25 +568,49 @@ there are significant upgrades to the algorithm.'''
     if commit:
         conn.commit()
     # remigrate
-    migrate_commands(conn, alt_start_time, commit)
+    migrate_commands(conn, source, dest, alt_start_time, commit)
 
 ## ================================================================
 
+def read_command_migration_minutes(conn, dest):
+    '''Read the command_timeout_mins from the configuration variables and return that; 
+if none, use 40 minutes.'''
+    curs = dbi.cursor(conn)
+    curs.execute(f'''select command_timeout_mins from {dest}.configuration where user_id = %s''',
+                 [HUGH_USER_ID])
+    rows = curs.fetchall()
+    if len(rows) > 1:
+        raise Exception('multiple configurations; which do you want', rows)
+    if len(rows) == 0:
+        return 40
+    else:
+        return rows[0][0]
+
 
 def migrate_all(conn, source, dest, alt_start_time=None, test=False):
-    '''This is the function that should, eventually, be called from a cron job every 5 minutes.
-If alt_start_time is supplied, ignore the value from the get_migration_time() table.'''
+    '''This is the function that should, eventually, be called from a cron
+job every 5 minutes.  If alt_start_time is supplied, ignore the value
+from the get_migration_time() table. Uses two start times:
+start_time_commands and start_time other.
+
+    '''
     if conn is None:
         conn = dbi.connect()
     logging.info(f'starting migrate_all from {source} to {dest}')
     logging.info('1. realtime cgm')
     migrate_cgm_updates(conn, dest)
+    ## obsolete to use last update? or maybe we should use it if it's later than
     prev_update, last_autoapp_update = get_autoapp_update_times(conn, source, dest)
-    start_time = None
+    cmd_timeout = read_command_migration_minutes(conn, dest)
+    start_time_commands = datetime.now() - timedelta(minutes=cmd_timeout)
+    start_time_other =  datetime.now() - timedelta(minutes=OTHER_DATA_TIMEOUT)
     if alt_start_time is not None:
-        start_time = alt_start_time
+        start_time_commands = alt_start_time
+        start_time_other = alt_start_time
     elif prev_update is not None:
-        start_time = prev_update
+        # use whichever is later
+        start_time_commands = max(prev_update, start_time_commands)
+        start_time_other = max(prev_update, start_time_other)
     else:
         # if prev_update is None, that means there's no new data in autoapp
         # since we last migrated, so save ourselves some work by giving up now
@@ -569,9 +618,9 @@ If alt_start_time is supplied, ignore the value from the get_migration_time() ta
         return
     logging.info(f'migrating data since {start_time}')
     logging.info('2. bolus')
-    migrate_boluses(conn, source, dest, start_time)
+    migrate_boluses(conn, source, dest, start_time_other)
     logging.info('3. commands')
-    migrate_commands(conn, source, dest, start_time)
+    migrate_commands(conn, source, dest, start_time_commands)
     if test:
         logging.info('done, but test mode, so not storing update time')
     else:
