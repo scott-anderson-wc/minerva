@@ -319,7 +319,8 @@ def migrate_boluses(conn, source, dest, start_time, commit=True):
     for row in boluses:
         # note: bolus_id is called bolus_pump_id in loop_logic
         (user_id, bolus_pump_id, date, value) = row
-        # see if all values match, to avoid re-inserting something already migrated
+        # *** fix this ****
+        # see if bolus_pump_id matches, to avoid re-inserting something already migrated
         curs.execute(f'''select loop_summary_id, user_id, bolus_pump_id, bolus_timestamp, bolus_value
                         from {dest}.loop_summary
                         where user_id = %s and bolus_pump_id = %s and bolus_timestamp = %s and bolus_value = %s''',
@@ -616,7 +617,7 @@ start_time_commands and start_time other.
         # since we last migrated, so save ourselves some work by giving up now
         logging.info('no new data, so giving up')
         return
-    logging.info(f'migrating data since {start_time}')
+    logging.info(f'migrating commands since {start_time_commands} and other since {start_time_other}')
     logging.info('2. bolus')
     migrate_boluses(conn, source, dest, start_time_other)
     logging.info('3. commands')
