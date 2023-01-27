@@ -494,6 +494,8 @@ def migrate_commands(conn, source, dest, alt_start_time=None, commit=True,
         (cid, uid, ct, ty, comp, err, state, pend, lc, pd, sb_amt, tb_ratio) = row
         if cid is None:
             raise Exception('NULL cid')
+        ## compute parent_involved as a simple boolean
+        parent_involved = 0 if lc == 1 and pd == 0 else 1
         ## Find matching cgm for this created_timestamp
         (cgm_id, cgm_value) = matching_cgm(conn, dest, ct)
         ## 
@@ -539,9 +541,12 @@ def migrate_commands(conn, source, dest, alt_start_time=None, commit=True,
                               SET user_id = %s, bolus_pump_id = %s, bolus_value = %s, command_id = %s, 
                                   created_timestamp = %s, state = %s, type = %s, pending = %s, completed = %s,
                                   error = %s, loop_command = %s, parent_decision = %s, 
-                                  linked_cgm_id = %s, linked_cgm_value = %s
+                                  linked_cgm_id = %s, linked_cgm_value = %s, 
+                                  parent_involved = %s
                               WHERE loop_summary_id = %s;''',
-                           [uid, bolus_pump_id, sb_amt, cid, ct, state, ty, pend, comp, err, lc, pd, cgm_id, cgm_value,
+                           [uid, bolus_pump_id, sb_amt, cid, ct, state, ty, pend, comp, err, lc, pd,
+                            cgm_id, cgm_value,
+                            parent_involved,
                             loop_summary_id])
         else:
             ## 12 columns, first being NULL, the rest are migrated data,
@@ -561,9 +566,11 @@ def migrate_commands(conn, source, dest, alt_start_time=None, commit=True,
                                  loop_command,
                                  parent_decision,
                                  linked_cgm_id,
-                                 linked_cgm_value) VALUES 
-                               (NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)''',
-                           [uid, bolus_pump_id, sb_amt, cid, ct, state, ty, pend, comp, err, lc, pd, cgm_id, cgm_value])
+                                 linked_cgm_value,
+                                 parent_involve) VALUES 
+                               (NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)''',
+                           [uid, bolus_pump_id, sb_amt, cid, ct, state, ty, pend, comp, err, lc, pd,
+                            cgm_id, cgm_value, parent_involved])
         # after either INSERT or UPDATE
         if commit:
             conn.commit()
