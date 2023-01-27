@@ -337,7 +337,7 @@ def migrate_boluses(conn, source, dest, start_time, commit=True):
                                 (user_id, bolus_pump_id, bolus_timestamp, bolus_value,
                                 linked_cgm_id, linked_cgm_value
                                 )
-                            values(%s, %s, %s, %s, %s)''',
+                            values(%s, %s, %s, %s, %s, %s)''',
                          [user_id, bolus_pump_id, date, value, cgm_id, cgm_value])
         else:
             # already exists, so update? Ignore? We'll complain if they differ
