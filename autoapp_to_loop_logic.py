@@ -507,7 +507,7 @@ def migrate_commands(conn, source, dest, alt_start_time=None, commit=True,
             # migrated, because we'll do things right the first time.
             logging.info(f'command {cid} at time {ct} has already been migrated as {loop_summary_id}; updating it')
             update.execute(f'''UPDATE {dest}.{loop_summary_table}
-                              SET user_id = %s, bolus_pump_id = %s, bolus_value = %s, command_id, 
+                              SET user_id = %s, bolus_pump_id = %s, bolus_value = %s, command_id = %s, 
                                   created_timestamp = %s, state = %s, type = %s, pending = %s, completed = %s,
                                   error = %s, loop_command = %s, parent_decision = %s
                               WHERE loop_summary_id = %s;''',
@@ -622,8 +622,8 @@ start_time_commands and start_time other.
     migrate_boluses(conn, source, dest, start_time_other)
     logging.info('3. commands')
     migrate_commands(conn, source, dest, start_time_commands)
-    if test:
-        logging.info('done, but test mode, so not storing update time')
+    if test or alt_start_time:
+        logging.info('done, but test mode/alt start time, so not storing update time')
     else:
         logging.info('done. storing update time')
         set_autoapp_migration_time(conn, dest, prev_update, last_autoapp_update)
