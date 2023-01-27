@@ -242,7 +242,7 @@ def get_max_bolus_interval_mins(conn, dest, user_id=HUGH_USER_ID):
     DEFAULT = 6*60
     return DEFAULT
     nrows = curs.execute(f'''select max_bolus_interval_mins 
-d                            from {dest}.glucose_range inner join {dest}.user using(glucose_range_id)
+                            from {dest}.glucose_range inner join {dest}.user using(glucose_range_id)
                             where user_id = %s''',
                          [user_id])
     if nrows == 0:
@@ -254,8 +254,8 @@ d                            from {dest}.glucose_range inner join {dest}.user us
         
 def matching_cgm(conn, dest, timestamp):
     '''Returns two values, the cgm_id and cgm_value value from the
-realtime_cgm table where its timestamp is closest in time to the given
-timestamp, which is probably the timestamp of a bolus.
+{dest}.realtime_cgm table where its timestamp is closest in time to the given
+timestamp, which is the timestamp of a bolus or a command.
 
     '''
     curs = dbi.cursor(conn)
@@ -274,7 +274,7 @@ timestamp, which is probably the timestamp of a bolus.
     row = curs.fetchone()
     if row is None:
         logging.error(f'no matching CGM for timestamp {timestamp}')
-        return None
+        return (None, None)
     else:
         (cgm_id, cgm_value) = row
         return row
@@ -306,6 +306,37 @@ being associated with a command, we'll update the entry later.
   `server_date` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
 '''
 
+
+def fix_missing_bolus_timestamps(conn, source, dest, start_command_id, commit=True):
+    '''this is a nonce function to fix older missing bolus timestamps. As
+of 1/27/2023, it didn't match anything since 1/20/2023.'''
+    curs = dbi.cursor(conn)
+    curs.execute(f'''select bolus_pump_id from {dest}.loop_summary
+                     where command_id >= %s
+                       and bolus_timestamp is null''',
+                 [start_command_id])
+    rows = curs.fetchall()
+    print(f'{len(rows)} null bolus_timestamps')
+    for row in rows:
+        bolus_id = row[0]
+        curs.execute(f'select date from {source}.bolus where bolus_id = %s', bolus_id)
+        bolus_rows = curs.fetchone()
+        if len(bolus_rows) == 0:
+            print('weird, no such bolus_id', bolus_id)
+        elif len(bolus_rows) > 1:
+            print('weird, multiple matches', bolus_id)
+        else:
+            num_update = curs.execute(f'''update {dest}.loop_summary 
+                                          set bolus_timestamp = %s 
+                                          where bolus_id = %s''',
+                                      [bolus_rows[0][0], bolus_id])
+            if num_update != 1:
+                print('weird: number updated is not one', num_update)
+            if commit:
+                conn.commit()
+    print('done')
+
+
 def migrate_boluses(conn, source, dest, start_time, commit=True):
     '''start_time is a string or a python datetime. '''
     if conn is None:
@@ -319,20 +350,15 @@ def migrate_boluses(conn, source, dest, start_time, commit=True):
     for row in boluses:
         # note: bolus_id is called bolus_pump_id in loop_logic
         (user_id, bolus_pump_id, date, value) = row
-        # *** fix this ****
         # see if bolus_pump_id matches, to avoid re-inserting something already migrated
         curs.execute(f'''select loop_summary_id, user_id, bolus_pump_id, bolus_timestamp, bolus_value
                         from {dest}.loop_summary
-                        where user_id = %s and bolus_pump_id = %s and bolus_timestamp = %s and bolus_value = %s''',
-                     row)
+                        where user_id = %s and bolus_pump_id = %s''',
+                     [user_id, bolus_pump_id])
         match = curs.fetchone()
         if match is None:
             # the normal case, we'll insert it. First see if there's a CGM at this time
-            cgm = matching_cgm(conn, dest, date)
-            if cgm is not None:
-                (cgm_id, cgm_value) = cgm
-            else:
-                (cgm_id, cgm_value) = (None, None)
+            (cgm_id, cgm_value) = matching_cgm(conn, dest, date)
             curs.execute(f'''insert into {dest}.loop_summary
                                 (user_id, bolus_pump_id, bolus_timestamp, bolus_value,
                                 linked_cgm_id, linked_cgm_value
@@ -468,6 +494,9 @@ def migrate_commands(conn, source, dest, alt_start_time=None, commit=True,
         (cid, uid, ct, ty, comp, err, state, pend, lc, pd, sb_amt, tb_ratio) = row
         if cid is None:
             raise Exception('NULL cid')
+        ## Find matching cgm for this created_timestamp
+        (cgm_id, cgm_value) = matching_cgm(conn, dest, ct)
+        ## 
         '''If ‘completed’=1, the bolus command should be matched to a row
         with a ‘bolus_pump_id’.  Match can be done by closest
         timestamp.  In addition, the ‘bolus_value’ of the
@@ -509,9 +538,10 @@ def migrate_commands(conn, source, dest, alt_start_time=None, commit=True,
             update.execute(f'''UPDATE {dest}.{loop_summary_table}
                               SET user_id = %s, bolus_pump_id = %s, bolus_value = %s, command_id = %s, 
                                   created_timestamp = %s, state = %s, type = %s, pending = %s, completed = %s,
-                                  error = %s, loop_command = %s, parent_decision = %s
+                                  error = %s, loop_command = %s, parent_decision = %s, 
+                                  linked_cgm_id = %s, linked_cgm_value = %s
                               WHERE loop_summary_id = %s;''',
-                           [uid, bolus_pump_id, sb_amt, cid, ct, state, ty, pend, comp, err, lc, pd,
+                           [uid, bolus_pump_id, sb_amt, cid, ct, state, ty, pend, comp, err, lc, pd, cgm_id, cgm_value,
                             loop_summary_id])
         else:
             ## 12 columns, first being NULL, the rest are migrated data,
@@ -529,9 +559,11 @@ def migrate_commands(conn, source, dest, alt_start_time=None, commit=True,
                                  completed,
                                  error,
                                  loop_command,
-                                 parent_decision) VALUES 
-                               (NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)''',
-                           [uid, bolus_pump_id, sb_amt, cid, ct, state, ty, pend, comp, err, lc, pd])
+                                 parent_decision,
+                                 linked_cgm_id,
+                                 linked_cgm_value) VALUES 
+                               (NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)''',
+                           [uid, bolus_pump_id, sb_amt, cid, ct, state, ty, pend, comp, err, lc, pd, cgm_id, cgm_value])
         # after either INSERT or UPDATE
         if commit:
             conn.commit()
@@ -570,6 +602,53 @@ there are significant upgrades to the algorithm.'''
         conn.commit()
     # remigrate
     migrate_commands(conn, source, dest, alt_start_time, commit)
+
+## ================================================================
+
+def get_carbs(conn, source, start_time):
+    '''pull rows from {source}.carbohydrate'''
+    curs = dbi.cursor(conn)
+    # note: carbohydrate_id is called carb_id in loop_summary
+    curs.execute(f'''select user_id, carbohydrate_id, date, value 
+                    from {source}.carbohydrate
+                    where date >= %s''',
+                 [start_time])
+    return curs.fetchall()
+
+def migrate_carbs(conn, source, dest, start_time, commit=True):
+    '''Like the other migrations. start_time is string or python datetime.'''
+    if conn is None:
+        conn = dbi.connect()
+    curs = dbi.cursor(conn)
+    # continue here
+    # Note that these will probably be *new* rows, but to make this
+    # idempotent, we'll look for a match on the date.
+    carbs = get_carbs(conn, source, start_time)
+    n = len(carbs)
+    logging.info(f'{n} carbs to migrate since {start_time}')
+    for row in carbs:
+        # note: carb_id is called carbohydrate_id in the source
+        (user_id, carb_id, date, value) = row
+        # see if carb_id matches, to avoid re-inserting something already migrated
+        curs.execute(f'''select loop_summary_id, user_id, carb_id
+                        from {dest}.loop_summary
+                        where user_id = %s and carb_id = %s''',
+                     [user_id, carb_id])
+        match = curs.fetchone()
+        if match is None:
+            # the normal case, we'll insert it. First see if there's a CGM at this time
+            (cgm_id, cgm_value) = matching_cgm(conn, dest, date)
+            curs.execute(f'''insert into {dest}.loop_summary
+                             (user_id, carb_id, linked_cgm_id, linked_cgm_value)
+                            values(%s, %s, %s, %s)''',
+                         [user_id, carb_id, cgm_id, cgm_value])
+        else:
+            # already exists, so update? Ignore? We'll complain if they differ
+            logging.info('carb match: this carb is already migrated: {}'.format(row))
+    if commit:
+        conn.commit()
+
+
 
 ## ================================================================
 
@@ -622,6 +701,8 @@ start_time_commands and start_time other.
     migrate_boluses(conn, source, dest, start_time_other)
     logging.info('3. commands')
     migrate_commands(conn, source, dest, start_time_commands)
+    logging.info('4. carbs')
+    migrate_carbs(conn, source, dest, start_time_other)
     if test or alt_start_time:
         logging.info('done, but test mode/alt start time, so not storing update time')
     else:
