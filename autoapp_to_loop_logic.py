@@ -627,7 +627,6 @@ def migrate_carbs(conn, source, dest, start_time, commit=True):
     if conn is None:
         conn = dbi.connect()
     curs = dbi.cursor(conn)
-    # continue here
     # Note that these will probably be *new* rows, but to make this
     # idempotent, we'll look for a match on the date.
     carbs = get_carbs(conn, source, start_time)
@@ -646,16 +645,49 @@ def migrate_carbs(conn, source, dest, start_time, commit=True):
             # the normal case, we'll insert it. First see if there's a CGM at this time
             (cgm_id, cgm_value) = matching_cgm(conn, dest, date)
             curs.execute(f'''insert into {dest}.loop_summary
-                             (user_id, carb_id, linked_cgm_id, linked_cgm_value)
-                            values(%s, %s, %s, %s)''',
-                         [user_id, carb_id, cgm_id, cgm_value])
+                             (user_id, carb_id, carb_value, linked_cgm_id, linked_cgm_value)
+                            values(%s, %s, %s, %s, %s)''',
+                         [user_id, carb_id, value, cgm_id, cgm_value])
         else:
             # already exists, so update? Ignore? We'll complain if they differ
             logging.info('carb match: this carb is already migrated: {}'.format(row))
     if commit:
         conn.commit()
 
-
+def re_migrate_carbs(conn, source, dest, start_time, commit=True):
+    # nonce when I added the carb_value field. Want to re-migrate all those
+    if conn is None:
+        conn = dbi.connect()
+    curs = dbi.cursor(conn)
+    # Note that these will probably be *existing* rows, so we'll look
+    # for a match on the date.
+    carbs = get_carbs(conn, source, start_time)
+    n = len(carbs)
+    logging.info(f'{n} carbs to migrate since {start_time}')
+    for row in carbs:
+        # note: carb_id is called carbohydrate_id in the source
+        (user_id, carb_id, date, value) = row
+        # see if carb_id matches, to avoid re-inserting something already migrated
+        curs.execute(f'''select loop_summary_id, user_id, carb_id
+                        from {dest}.loop_summary
+                        where user_id = %s and carb_id = %s''',
+                     [user_id, carb_id])
+        match = curs.fetchone()
+        if match is None:
+            # the normal case, we'll insert it. First see if there's a CGM at this time
+            (cgm_id, cgm_value) = matching_cgm(conn, dest, date)
+            curs.execute(f'''insert into {dest}.loop_summary
+                             (user_id, carb_id, carb_value, linked_cgm_id, linked_cgm_value)
+                            values(%s, %s, %s, %s, %s)''',
+                         [user_id, carb_id, value, cgm_id, cgm_value])
+        else:
+            # already exists, so update.
+            print('updating', carb_id)
+            curs.execute(f'''update {dest}.loop_summary set carb_value = %s where carb_id = %s''',
+                         [value, carb_id])
+    if commit:
+        conn.commit()
+    
 
 ## ================================================================
 
