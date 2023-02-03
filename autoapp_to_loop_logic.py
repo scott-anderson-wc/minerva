@@ -567,7 +567,7 @@ def migrate_commands(conn, source, dest, alt_start_time=None, commit=True,
                                  parent_decision,
                                  linked_cgm_id,
                                  linked_cgm_value,
-                                 parent_involve) VALUES 
+                                 parent_involved) VALUES 
                                (NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)''',
                            [uid, bolus_pump_id, sb_amt, cid, ct, state, ty, pend, comp, err, lc, pd,
                             cgm_id, cgm_value, parent_involved])
