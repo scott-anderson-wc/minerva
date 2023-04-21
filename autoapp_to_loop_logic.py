@@ -79,7 +79,7 @@ the number of values we need from Dexcom from those.
                     FROM janice.realtime_cgm2
                     WHERE user_id = %s and
                           rtime = (SELECT max(rtime) FROM janice.realtime_cgm2
-                                   WHERE user_id = %s and mgdl is not NULL)''',
+                                   WHERE user_id = %s)''',
                  [HUGH_USER_ID, HUGH_USER_ID])
     row = curs.fetchone()
     return row
