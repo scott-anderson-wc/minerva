@@ -55,7 +55,8 @@ create table source_cgm (
 insert into source_cgm
 select user_id, rtime, dexcom_time, mgdl, trend, trend_code, 'NO'
 from janice.realtime_cgm2
-where date(rtime)='2022-09-01';
+where date(rtime)='2022-09-01'
+limit 10;
 
 drop table if exists latest_cgm;
 create table latest_cgm (

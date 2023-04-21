@@ -1,6 +1,6 @@
 -- Scott's additions to the loop_logic database
 
-use loop_logic;                 -- in case we use this on its own
+-- use autoapp_test;                 -- in case we use this on its own
 
 -- The following table added by Scott, to keep track of migration of data from autoapp.
 -- we migrate data from autoapp when prev_autoapp_update < autoapp.dana_history_timestamp
@@ -42,6 +42,6 @@ alter table `migration_status` add foreign key (`user_id`) references `user`(`us
 
 replace into `migration_status` values(7,'2022-09-01','2022-09-01','2022-09-01','2022-09-01');
 
-grant all privileges on loop_logic.* to 'scott'@'localhost';
-grant all privileges on loop_logic.* to 'segun'@'%';
+grant all privileges on autoapp_test.* to 'scott'@'localhost';
+grant all privileges on autoapp_test.* to 'segun'@'%';
 
