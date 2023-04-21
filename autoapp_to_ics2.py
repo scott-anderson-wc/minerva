@@ -158,6 +158,30 @@ start_time.
         save_curr_programmed_rate(curr_prog, rtime)
     return list(output_rows)
 
+'''1/13/2023 This needs to be re-written. We should use the basal_hour
+data for anything older than an hour. The basal_hour will be accurate
+for the hour it's listed. So if it says 1.2 on 1/13/2023 at 4:00, that
+means that the basal rate is 1.2 starting at 4:00. 
+
+We should use the real-time calculation for times past the basal hour:
+determine the current programmed rate, check the command table for any
+non-canceled temporary_basals, join with the
+commands_temporary_basal_data table to determine the ratio and use
+that.
+
+For any past data, if our data is missing, we should use the
+basal_hour data. Otherwise, trust our real-time calculation.
+
+Very often, there will be a long gap of commands during the day when
+Hugh is away from the phone that does the upload. Then he comes home
+and syncs with the phone, and autoapp suddenly has a bunch of incoming
+stuff. Then we have a lot to migrate, so we should use the basal_hour
+for that data.
+
+
+
+'''
+
 # 5/19/2022
 def actual_basal(conn, start_time):
     '''Combines the programmed basal with the command table to determine
