@@ -36,7 +36,10 @@ latter were initiated on the pump itself and not through a parent
 command.  Both the overlapping (command table + bolus table) and the
 “just in bolus table” should be transferred to loop summary."
 
-
+May 12, 2023 We want to be get the matching cgm value from *either*
+janice.realtime_cgm2 or {dest}.latest_cgm, the latter when we are
+testing, which we can determine by looking at the status field of the
+{dest}.testing_command table. I modified matching_cgm to do that.
 
 '''
 
@@ -73,8 +76,6 @@ def get_latest_stored_data(conn):
     '''Looks up the latest data that we stored from previous inquiries.
 Returns rtime and dexcom_time from last non-NULL value. We can infer
 the number of values we need from Dexcom from those.
-
-5/12 Segun needs the latest values from dexcom and he wants to know if they are null, so we are going to 
 
     '''
     curs = dbi.cursor(conn)
@@ -185,14 +186,15 @@ It uses the passed-in values, to avoid issues of simultaneous updates.
 # ================================================================
 
 def migrate_cgm(conn, dest, start_time, commit=True):
-    '''start_time is a string or a python datetime'''
+    '''start_time is a string or a python datetime. '''
     if conn is None:
         conn = dbi.connect()
     curs = dbi.cursor(conn)
     logging.debug(f'migrating realtime_cgm since {start_time}')
+    # must use rtime, not dexcom_time, since the latter can be null
     nrows = curs.execute('''select user_id, dexcom_time, mgdl, trend, trend_code
                             from janice.realtime_cgm2
-                            where dexcom_time > %s''',
+                            where rtime > %s and''',
                  [start_time])
     logging.debug(f'got {nrows} from realtime_cgm2')
     ins = dbi.cursor(conn)
@@ -228,44 +230,10 @@ def migrate_cgm_updates(conn, dest):
     '''migrate all the new cgm values, since the last time we migrated.'''
     prev_cgm_update, last_cgm_update = get_cgm_update_times(conn, dest)
     if prev_cgm_update is None:
-        # punt, because there's no new data
+        logging.debug('no new cgm data to migrate')
         return
     migrate_cgm(conn, dest, prev_cgm_update)
     set_cgm_migration_time(conn, dest, prev_cgm_update, last_cgm_update)
-
-def migrate_cgm_updates_with_nulls(conn, dest):
-    '''migrate all the new cgm values in the last 5 minutes.'''
-    curs = dbi.cursor(conn)
-    # start time could be longer than 5 minutes ago if there was an
-    # outage for some reason, so find out the latest value in
-    # dest.realtime_cgm
-    curs.execute(f'''SELECT max(dexcom_time) FROM {dest}.realtime_cgm''')
-    (max_dexcom_time,) = curs.fetchone()
-    start_time = min( max_dexcom_time, datetime.now() - timedelta(minutes=5))
-    logging.debug(f'migrating cgm to {dest}.realtime_cgm since {start_time}')
-    # dexcom_time can be null when there's no data, so we need to
-    # compare to rtime, which reliably increments.
-    num_copy = curs.execute('''SELECT user_id, dexcom_time, mgdl, trend, trend_code
-                               FROM janice.realtime_cgm2
-                               WHERE rtime > %s''',
-                            [start_time])
-    ins = dbi.cursor(conn)
-    logging.debug(f'migrating {num_copy} rows to {dest}.realtime_cgm')
-    for row in curs.fetchall():
-        (user_id, dexcom_time, mgdl, trend, trend_code) = row
-        nrows = ins.execute(f'''SELECT cgm_id FROM {dest}.realtime_cgm 
-                                WHERE dexcom_time = %s''', [dexcom_time])
-        if nrows == 0:
-            # ordinary insert
-            ins.execute(f'''INSERT INTO {dest}.realtime_cgm(cgm_id, user_id, dexcom_time, mgdl, trend, trend_code) 
-                            VALUES (NULL, %s, %s, %s, %s, %s)''',
-                        [user_id, dexcom_time, mgdl, trend, trend_code])
-        else:
-            (update_cgm_id,) = ins.fetchone()
-            ins.execute(f'''UPDATE {dest}.realtime_cgm 
-                            SET mgdl = %s, trend = %s, trend_code = %s
-                            WHERE cgm_id = %s''',
-                        [mgdl, trend, trend_code, update_cgm_id])
 
 # ================================================================
 # Bolus functions
@@ -289,7 +257,7 @@ def get_max_bolus_interval_mins(conn, dest, user_id=HUGH_USER_ID):
         return DEFAULT
     return row[0]
         
-def matching_cgm(conn, dest, timestamp):
+def matching_cgm(conn, dest, timestamp, from_cgm=None):
     '''Returns two values, the cgm_id and cgm_value value from the
 {dest}.realtime_cgm table where its timestamp is closest in time to the given
 timestamp, which is the timestamp of a bolus or a command.
@@ -298,60 +266,45 @@ timestamp, which is the timestamp of a bolus or a command.
 Apr 8/2023, replaced the algorithm to use the algorithm in closest_time.sql
 Using 1 hour as the max time interval for a match to count.
 
-Ap4 8/2023, But this should probably be replaced by just getting a
+Apr 8/2023, But this should probably be replaced by just getting a
 window of rows around the given time and searching within Python.
-TBD
+
+May 12, 2023. Added a keyword arg to indicate where to look for the
+linked cgm, so that we can pull from latest_cgm when testing.
+
     '''
+    if from_cgm not in [None, 'realtime_cgm', 'latest_cgm']:
+        raise ValueError('wrong value for from_cgm')
     curs = dbi.cursor(conn)
-    if dest not in ['loop_logic', 'loop_logic_test']:
-        raise ValueError
-    query = f'''SELECT cgm_id, mgdl from {dest}.realtime_cgm
+    if from_cgm is None:
+        # figure it out by looking at the testing_command table
+        curs.execute(f'select status from {dest}.testing_command where comm_id = 1')
+        (testing_status,) = curs.fetchone()
+        from_cgm = 'realtime_cgm' if testing_status == 'OFF' else 'latest_cgm'
+        logging.debug(f'using {from_cgm} table for matching cgm values')
+    MM = MAX_MINUTES_FOR_MATCHING_CGM = 30
+    # 5/12 New algorithm: get all values within that range and then find closest in Python
+    query = f'''SELECT cgm_id, dexcom_time, mgdl from {dest}.{from_cgm}
                WHERE user_id = %s AND 
-               abs(time_to_sec(timediff(dexcom_time, %s))) = 
-                  (select min(abs(time_to_sec(timediff(dexcom_time, %s)))) 
-                   from {dest}.realtime_cgm)'''
-    ## nr = curs.execute(query, [HUGH_USER_ID, timestamp, timestamp])
-    MAX_MINUTES_FOR_MATCHING_CGM = '00:30:00'
-    query = f'''SELECT cgm_id, mgdl 
-                FROM {dest}.realtime_cgm use index (realtime_cgm_index_0)
-                WHERE user_id = %s 
-                  AND subtime(%s, %s) < dexcom_time
-                  AND dexcom_time < addtime(%s, %s)
-                  AND abs(unix_timestamp(dexcom_time) - unix_timestamp(%s)) =
-                      (SELECT min(abs(unix_timestamp(dexcom_time) - unix_timestamp(%s)))
-                       FROM {dest}.realtime_cgm use index (realtime_cgm_index_0)
-                       WHERE user_id = %s 
-                       AND subtime(%s, %s) < dexcom_time
-                       AND dexcom_time < addtime(%s, %s))'''
-    nr = curs.execute(query, [HUGH_USER_ID,
-                              timestamp, MAX_MINUTES_FOR_MATCHING_CGM,
-                              timestamp, MAX_MINUTES_FOR_MATCHING_CGM,
-                              timestamp, timestamp,
-                              HUGH_USER_ID,
-                              timestamp, MAX_MINUTES_FOR_MATCHING_CGM,
-                              timestamp, MAX_MINUTES_FOR_MATCHING_CGM,
-                              ])
-    if nr > 1:
-        # ick. could there be two exactly the same distance? 
-        # we will log the fact, but leave them in the cursor and get one of them below
-        logging.error(f'found {nr} matching CGM values for timestamp {timestamp} ')
-    # The following executes whether regardless of the value of 'nr'. Will get the first
-    # match or None
-    row = curs.fetchone()
-    if row is None:
+               (%s - interval {MM} minute) < dexcom_time and 
+               dexcom_time < (%s + interval {MM} minute)'''
+    nr = curs.execute(query, [HUGH_USER_ID, timestamp, timestamp])
+    if nr == 0:
         logging.error(f'no matching CGM for timestamp {timestamp}')
         return (None, None)
-    else:
-        (cgm_id, mgdl) = row
-        return row
+    rows = curs.fetchall()
+    timestamp = date_ui.to_datetime(timestamp)
+    (cgm_id, cgm_time, mgdl) = argmin(rows, lambda row : abs(row[1]-timestamp))
+    logging.debug(f'found matching CGM for timestamp {timestamp}: {cgm_time} id = {cgm_id}, mgdl = {mgdl}')
+    return (cgm_id, mgdl)
 
-def test_matching_cgm(conn, source, dest, start_time, end_time):
+def test_matching_cgm(conn, source, dest, start_time, end_time, from_cgm):
     st = date_ui.to_datetime(start_time)
     et = date_ui.to_datetime(end_time)
     num_non_null = 0
     total_num = 0
     while st < et:
-        cgm_id, mgdl = matching_cgm(conn, dest, st)
+        cgm_id, mgdl = matching_cgm(conn, dest, st, from_cgm=from_cgm)
         total_num += 1
         if mgdl is not None:
             num_non_null += 1
@@ -947,9 +900,10 @@ start_time_commands and start_time other.
         conn = dbi.connect()
     logging.info(f'starting migrate_all from {source} to {dest}')
     logging.info('1. realtime cgm')
-    # Change on 5/12. We are migrating latest data from realtime_cgm2 *including the nulls.
-    # migrate_cgm_updates(conn, dest)
-    migrate_cgm_updates_with_nulls(conn, dest)
+    # Change on 5/12. We are migrating latest data from realtime_cgm2 *including* the nulls.
+    # cancel that; we are only migrating non-null values.
+    migrate_cgm_updates(conn, dest)
+    # migrate_cgm_updates_with_nulls(conn, dest)
     ## obsolete to use last update? or maybe we should use it if it's later than
     prev_update, last_autoapp_update = get_autoapp_update_times(conn, source, dest)
     cmd_timeout = read_command_migration_minutes(conn, dest)
@@ -988,8 +942,9 @@ if __name__ == '__main__':
     if len(sys.argv) > 1 and sys.argv[1] == 'migrate_cgm':
         alt_start_time = sys.argv[2]
         debugging()
-        migrate_cgm(conn, alt_start_time, True)
-        set_cgm_migration_time(conn, alt_start_time, alt_start_time)
+        migrate_cgm(conn, 'loop_logic', alt_start_time, True)
+        migrate_cgm(conn, 'loop_logic_test', alt_start_time, True)
+        # set_cgm_migration_time(conn, alt_start_time, alt_start_time)
         sys.exit()
     if len(sys.argv) > 1 and sys.argv[1] == 'all':
         alt_start_time = sys.argv[2]
