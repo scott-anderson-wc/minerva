@@ -187,7 +187,7 @@ def migrate_cgm(conn, dest, start_time, commit=True):
         conn = dbi.connect()
     curs = dbi.cursor(conn)
     logging.debug(f'migrating realtime_cgm since {start_time}')
-    nrows = curs.execute('''select user_id,trend,dexcom_time,mgdl 
+    nrows = curs.execute('''select user_id, dexcom_time, mgdl, trend, trend_code
                             from janice.realtime_cgm2
                             where dexcom_time > %s''',
                  [start_time])
@@ -196,14 +196,14 @@ def migrate_cgm(conn, dest, start_time, commit=True):
     for row in curs.fetchall():
         # we can't use on duplicate key, because the key is an auto_increment value that we don't have.
         # So we have to look for matches on timestamp values. 
-        (user_id, _, dexcom_timestamp_utc, _) = row
+        (user_id, dexcom_time, _, _, _) = row
         nr = ins.execute(f'''select cgm_id from {dest}.realtime_cgm 
-                            where user_id = %s and dexcom_timestamp_utc = %s''',
-                         [user_id, dexcom_timestamp_utc])
+                             where user_id = %s and dexcom_time = %s''',
+                         [user_id, dexcom_time])
         logging.debug(f'found {nr} matches (already migrated rows)')
         if nr == 0:
-            ins.execute(f'''insert into {dest}.realtime_cgm(cgm_id,user_id,trend,dexcom_timestamp_utc,cgm_value)
-                           values(null,%s,%s,%s,%s)''',
+            ins.execute(f'''insert into {dest}.realtime_cgm(cgm_id,user_id,dexcom_time,mgdl,trend,trend_code)
+                           values(null,%s,%s,%s,%s,%s)''',
                         row)
     if commit:
         conn.commit()
@@ -229,6 +229,31 @@ def migrate_cgm_updates(conn, dest):
         return
     migrate_cgm(conn, dest, prev_cgm_update)
     set_cgm_migration_time(conn, dest, prev_cgm_update, last_cgm_update)
+
+# This function will replace the ones above, once I get the approval on the column renaming
+def migrate_cgm_updates_with_nulls(conn, dest):
+    '''migrate all the new cgm values in the last 5 minutes.'''
+    start_time = datetime.now() - timedelta(minutes=5)
+    curs = dbi.cursor(conn)
+    curs.execute('''SELECT user_id, dexcom_time, mgdl, trend, trend_code
+                            FROM janice.realtime_cgm2
+                            WHERE dexcom_time > %s''')
+    ins = dbi.cursor(conn)
+    for row in curs.fetchall():
+        (user_id, dexcom_time, mgdl, trend, trend_code) = row
+        nrows = ins.execute(f'''SELECT cgm_id FROM {dest}.realtime_cgm 
+                                WHERE dexcom_time = %s''', [dexcom_time])
+        if nrows == 0:
+            # ordinary insert
+            ins.execute(f'''INSERT INTO {dest}.realtime_cgm(cgm_id, user_id, dexcom_time, mgdl, trend, trend) 
+                            VALUES (NULL, %s, %s, %s, %s)''',
+                        [user_id, dexcom_time, mgdl, trend, trend_code])
+        else:
+            (update_cgm_id,) = ins.fetchone()
+            ins.execute(f'''UPDATE {dest}.realtime_cgm 
+                            SET mgdl = %s, trend = %s, trend_code = %s
+                            WHERE cgm_id = %s''',
+                        [mgdl, trend, trend_code, update_cgm_id])
 
 # ================================================================
 # Bolus functions
@@ -258,10 +283,10 @@ def matching_cgm(conn, dest, timestamp):
 timestamp, which is the timestamp of a bolus or a command.
 {dest} is a database like loop_logic
 
-8/4/2023, replaced the algorithm to use the algorithm in closest_time.sql
+Apr 8/2023, replaced the algorithm to use the algorithm in closest_time.sql
 Using 1 hour as the max time interval for a match to count.
 
-8/4/2023, But this should probably be replaced by just getting a
+Ap4 8/2023, But this should probably be replaced by just getting a
 window of rows around the given time and searching within Python.
 TBD
     '''
@@ -270,22 +295,22 @@ TBD
         raise ValueError
     query = f'''SELECT cgm_id, cgm_value from {dest}.realtime_cgm
                WHERE user_id = %s AND 
-               abs(time_to_sec(timediff(dexcom_timestamp_utc, %s))) = 
-                  (select min(abs(time_to_sec(timediff(dexcom_timestamp_utc, %s)))) 
+               abs(time_to_sec(timediff(dexcom_time, %s))) = 
+                  (select min(abs(time_to_sec(timediff(dexcom_time, %s)))) 
                    from {dest}.realtime_cgm)'''
     ## nr = curs.execute(query, [HUGH_USER_ID, timestamp, timestamp])
     MAX_MINUTES_FOR_MATCHING_CGM = '00:30:00'
     query = f'''SELECT cgm_id, cgm_value 
                 FROM {dest}.realtime_cgm use index (realtime_cgm_index_0)
                 WHERE user_id = %s 
-                  AND subtime(%s, %s) < dexcom_timestamp_utc
-                  AND dexcom_timestamp_utc < addtime(%s, %s)
-                  AND abs(unix_timestamp(dexcom_timestamp_utc) - unix_timestamp(%s)) =
-                      (SELECT min(abs(unix_timestamp(dexcom_timestamp_utc) - unix_timestamp(%s)))
+                  AND subtime(%s, %s) < dexcom_time
+                  AND dexcom_time < addtime(%s, %s)
+                  AND abs(unix_timestamp(dexcom_time) - unix_timestamp(%s)) =
+                      (SELECT min(abs(unix_timestamp(dexcom_time) - unix_timestamp(%s)))
                        FROM {dest}.realtime_cgm use index (realtime_cgm_index_0)
                        WHERE user_id = %s 
-                       AND subtime(%s, %s) < dexcom_timestamp_utc
-                       AND dexcom_timestamp_utc < addtime(%s, %s))'''
+                       AND subtime(%s, %s) < dexcom_time
+                       AND dexcom_time < addtime(%s, %s))'''
     nr = curs.execute(query, [HUGH_USER_ID,
                               timestamp, MAX_MINUTES_FOR_MATCHING_CGM,
                               timestamp, MAX_MINUTES_FOR_MATCHING_CGM,
