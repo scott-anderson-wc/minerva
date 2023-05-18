@@ -41,6 +41,10 @@ janice.realtime_cgm2 or {dest}.latest_cgm, the latter when we are
 testing, which we can determine by looking at the status field of the
 {dest}.testing_command table. I modified matching_cgm to do that.
 
+May 18, 2023. Scratch the previous. Let's get the matching CGM value
+from {dest}.realtime_cgm, which will *either* be the real data or the
+fake data. As long as the CGM values are
+
 '''
 
 import os                       # for path.join
@@ -51,6 +55,8 @@ import cs304dbi as dbi
 from datetime import datetime, timedelta
 import date_ui
 import logging
+
+from loop_logic_testing_cgm_cron import in_test_mode as in_loop_logic_test_mode
 
 # Configuration Constants
 
@@ -225,9 +231,23 @@ def migrate_cgm_test(conn, start_time, dest='loop_logic'):
     curs.execute(f'select count(*) from {dest}.realtime_cgm;')
     count_after = curs.fetchone()[0]
     print(f'after, there are {count_after}')
+
+def try_in_loop_logic_test_mode(conn, dest):
+    try:
+        return in_loop_logic_test_mode(conn, dest)
+    except Exception as error:
+        logging.debug("error in 'in_loop_logic_test_mode':  "+str(error))
+        return False
         
 def migrate_cgm_updates(conn, dest):
-    '''migrate all the new cgm values, since the last time we migrated.'''
+    '''migrate all the new cgm values, since the last time we migrated.
+5/18 calls imported function in_test_mode to determine whether a test
+is running in dest.
+
+    '''
+    if try_in_loop_logic_test_mode(conn, dest):
+        logging.debug(f'skipping cgm migration because in test mode for {dest}')
+        return
     prev_cgm_update, last_cgm_update = get_cgm_update_times(conn, dest)
     if prev_cgm_update is None:
         logging.debug('no new cgm data to migrate')
@@ -257,7 +277,7 @@ def get_max_bolus_interval_mins(conn, dest, user_id=HUGH_USER_ID):
         return DEFAULT
     return row[0]
         
-def matching_cgm(conn, dest, timestamp, from_cgm=None):
+def matching_cgm(conn, dest, timestamp, test_mode=False):
     '''Returns two values, the cgm_id and cgm_value value from the
 {dest}.realtime_cgm table where its timestamp is closest in time to the given
 timestamp, which is the timestamp of a bolus or a command.
@@ -270,21 +290,17 @@ Apr 8/2023, But this should probably be replaced by just getting a
 window of rows around the given time and searching within Python.
 
 May 12, 2023. Added a keyword arg to indicate where to look for the
-linked cgm, so that we can pull from latest_cgm when testing.
+linked cgm, so that we can test this function by looking for matching
+values in janice.realtime_cgm2.
+
+May 18, 2023. Removed that keyword, because we will always search
+realtime_cgm. Added a test_mode keyword to be more verbose.
 
     '''
-    if from_cgm not in [None, 'realtime_cgm', 'latest_cgm']:
-        raise ValueError('wrong value for from_cgm')
     curs = dbi.cursor(conn)
-    if from_cgm is None:
-        # figure it out by looking at the testing_command table
-        curs.execute(f'select status from {dest}.testing_command where comm_id = 1')
-        (testing_status,) = curs.fetchone()
-        from_cgm = 'realtime_cgm' if testing_status == 'OFF' else 'latest_cgm'
-        logging.debug(f'using {from_cgm} table for matching cgm values')
     MM = MAX_MINUTES_FOR_MATCHING_CGM = 30
     # 5/12 New algorithm: get all values within that range and then find closest in Python
-    query = f'''SELECT cgm_id, dexcom_time, mgdl from {dest}.{from_cgm}
+    query = f'''SELECT cgm_id, dexcom_time, mgdl from {dest}.realtime_cgm
                WHERE user_id = %s AND 
                (%s - interval {MM} minute) < dexcom_time and 
                dexcom_time < (%s + interval {MM} minute)'''
@@ -294,22 +310,40 @@ linked cgm, so that we can pull from latest_cgm when testing.
         return (None, None)
     rows = curs.fetchall()
     timestamp = date_ui.to_datetime(timestamp)
+    if test_mode:
+        print(f'found {len(rows)} rows for time {timestamp}')
     (cgm_id, cgm_time, mgdl) = argmin(rows, lambda row : abs(row[1]-timestamp))
     logging.debug(f'found matching CGM for timestamp {timestamp}: {cgm_time} id = {cgm_id}, mgdl = {mgdl}')
     return (cgm_id, mgdl)
 
-def test_matching_cgm(conn, source, dest, start_time, end_time, from_cgm):
-    st = date_ui.to_datetime(start_time)
-    et = date_ui.to_datetime(end_time)
+def test_matching_cgm(conn, dest, test_time):
+    '''test given timestamp'''
+    cgm_id, mgdl = matching_cgm(conn, dest, test_time, test_mode=True)
+
+def test_matching_cgm_all(conn, dest):
+    '''test every timestamp between start_time and end_time by steps of 5
+minutes. Returns (1) the number of successes (non-null values) from
+(2) the total number of rows and (3) the times with no match. The
+latter can be investigated individually, but mostly, we're looking to
+see if there are any runtime errors.
+
+    '''
+    curs = dbi.cursor(conn)
+    curs.execute(f'select min(dexcom_time), max(dexcom_time) from {dest}.realtime_cgm')
+    (st, et) = curs.fetchone()
+    print(f'trying all values from {st} to {et}')
     num_non_null = 0
     total_num = 0
+    no_match = []
     while st < et:
-        cgm_id, mgdl = matching_cgm(conn, dest, st, from_cgm=from_cgm)
+        cgm_id, mgdl = matching_cgm(conn, dest, st)
         total_num += 1
         if mgdl is not None:
             num_non_null += 1
+        else:
+            no_match.append(st)
         st += timedelta(minutes=5)
-    print(num_non_null, total_num)
+    return (num_non_null, total_num, no_match)
 
 def get_boluses(conn, source, start_time):
     '''Return a list of recent boluses (anything after start_time) as a
