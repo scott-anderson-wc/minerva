@@ -44,7 +44,7 @@ REALTIME_CGM = 'realtime_cgm'
 SOURCE_CGM = 'source_cgm'
 
 # I wonder if this should be an environment variable, to avoid having to edit this file
-TESTING_THE_TESTING = True
+TESTING_THE_TESTING = False
 
 def in_test_mode(conn, dest='loop_logic_test'):
     '''Returns boolean, whether we are in testing mode or
