@@ -172,7 +172,8 @@ look like JSON, list of dictionaries of length max_count.'''
     if resp.ok:
         return resp.text
     else:
-        logging.error('bad CGM request or response: '+resp.text)
+        logging.error(f'bad CGM request or response. status_code: {resp.status_code} ')
+        logging.error(resp.text.replace('\n',' '))
         raise Exception('bad CGM request or response', resp)
 
 def parse_cgm_values(raw_data):
