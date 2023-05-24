@@ -101,10 +101,16 @@ fake; instead they'll be identified by timestamp.
     curs = conn.cursor()
     curs.execute(f'''UPDATE {dest}.{SOURCE_CGM} SET used = 'YES' WHERE rtime = %s''', [rtime])
     conn.commit()
-    # Insert it into the real table, substituting current_timestamp() for rtime
-    curs.execute(f'''INSERT INTO {dest}.{REALTIME_CGM}
-                    VALUES(NULL, 7, current_timestamp(), %s, %s, %s)''',
-                 [mgdl, trend, trend_code])
+    USE_FAKE_TIME = True
+    if USE_FAKE_TIME:
+        curs.execute(f'''INSERT INTO {dest}.{REALTIME_CGM}
+                         VALUES(NULL, 7, %s, %s, %s, %s)''',
+                     [rtime, mgdl, trend, trend_code])
+    else:
+        # Insert it into the real table, substituting current_timestamp() for rtime
+        curs.execute(f'''INSERT INTO {dest}.{REALTIME_CGM}
+                         VALUES(NULL, 7, current_timestamp(), %s, %s, %s)''',
+                     [mgdl, trend, trend_code])
     conn.commit()
     # For debugging, let's put a message in the command table
     msg = f'copied {rtime}, {mgdl}, {trend}, {trend_code}'

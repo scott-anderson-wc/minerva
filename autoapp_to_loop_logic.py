@@ -45,6 +45,12 @@ May 18, 2023. Scratch the previous. Let's get the matching CGM value
 from {dest}.realtime_cgm, which will *either* be the real data or the
 fake data. As long as the CGM values are
 
+May 19, 2023. Janice said that for bolus and carbs to be matched to
+each other, they should be within *5* minutes, not 30. That will
+vastly decrease the chance that we will have multiple matches and,
+furthermore, we won't have to worry about one entry in loop_summary
+trying to comprise multiple boluses and/or multiple carbs.
+
 '''
 
 import os                       # for path.join
@@ -57,6 +63,8 @@ import date_ui
 import logging
 
 from loop_logic_testing_cgm_cron import in_test_mode as in_loop_logic_test_mode
+import loop_logic_testing_cgm_cron as lltcc
+
 
 # Configuration Constants
 
@@ -65,8 +73,9 @@ LOG_DIR = '/home/hugh9/autoapp_to_loop_logic_logs/'
 
 HUGH_USER = 'Hugh'
 HUGH_USER_ID = 7
-MATCHING_BOLUS_INTERVAL = 30    # minutes
-OTHER_DATA_TIMEOUT = 6*60       # minutes
+MATCHING_BOLUS_INTERVAL = 30    # minutes between command and bolus to match them.
+OTHER_DATA_TIMEOUT = 6*60       # minutes to look back for non-command (bolus, carbs)
+MATCHING_BOLUS_WITH_CARB_INTERVAL = 5 # minutes between bolus and carbs to match them and put them in a single loop_summary entry. 
 
 # the time in minutes for two timestamps to "match"
 TIMEDELTA_MINS = 5
@@ -145,6 +154,11 @@ def get_autoapp_update_times(conn, source, dest):
     '''Long discussion about the data to migrate. See
 https://docs.google.com/document/d/1ZCtErlxRQmPUz_vbfLXdg7ap2hIz5g9Lubtog8ZqFys/edit#heading=h.umdjcuqs1gq4
 
+Note that the dana_history_timestamp table records the time that data
+(bolus, carbs) was last posted to autoapp from the child pump. So this
+function returns times for migration of data (bolus, carbs), not for
+commands or for CGM.
+
 This function looks up the values of
 SOURCE.dana_history_timestamp.date (X) and
 DEST.migration_status.prev_autoapp_update (PX) and returns (X, PX)
@@ -157,10 +171,18 @@ migration_status when we are done migrating. See set_migration_time.
     curs = dbi.cursor(conn)
     curs.execute(f'''select date from {source}.dana_history_timestamp where user_id = %s''',
                  [HUGH_USER_ID])
-    last_autoapp_update = curs.fetchone()[0]
+    row = curs.fetchone()
+    if row is None:
+        logging.error(f'no value in {source}.dana_history_timestamp')
+        return None, None
+    last_autoapp_update = row[0]
     curs.execute(f'''select prev_autoapp_update from {dest}.migration_status where user_id = %s''',
                  [HUGH_USER_ID])
-    prev_autoapp = curs.fetchone()[0]
+    row = curs.fetchone()
+    if row is None:
+        logging.error(f'no value in {dest}.migration_status')
+        return None, None
+    prev_autoapp = row[0]
     if prev_autoapp < last_autoapp_update:
         # new data since last migration, so return the time to migrate since
         return prev_autoapp, last_autoapp_update # increasing order
@@ -171,7 +193,7 @@ def set_autoapp_migration_time(conn, dest, prev_update, last_update):
     '''Long discussion about the data to migrate. See
 https://docs.google.com/document/d/1ZCtErlxRQmPUz_vbfLXdg7ap2hIz5g9Lubtog8ZqFys/edit#heading=h.umdjcuqs1gq4
 
-This function sets the value of prev_autoappupdate in the
+This function sets the value of prev_autoapp_update in the
 loop_logic.migration_status table to the time of the lastest real data
 in autoapp.dana_history_timestamp
 
@@ -300,6 +322,7 @@ realtime_cgm. Added a test_mode keyword to be more verbose.
     curs = dbi.cursor(conn)
     MM = MAX_MINUTES_FOR_MATCHING_CGM = 30
     # 5/12 New algorithm: get all values within that range and then find closest in Python
+    # This might be re-written more concisely using the BETWEEN operator, but this is equivalent
     query = f'''SELECT cgm_id, dexcom_time, mgdl from {dest}.realtime_cgm
                WHERE user_id = %s AND 
                (%s - interval {MM} minute) < dexcom_time and 
@@ -407,21 +430,53 @@ of 1/27/2023, it didn't match anything since 1/20/2023.'''
     print('done')
 
 
-def carbs_within_interval(conn, source, dest, timestamp):
+def carbs_within_interval(conn, source, dest, timestamp, interval_width):
+    '''returns loop_summary_id, carb_id, carb_timestamp, carb_value
+searching for carb value in loop_summary within plus or minus
+interval_width of timestamp. Returns None if no match.
+
+    '''
     if conn is None:
         conn = dbi.connect()
     curs = dbi.cursor(conn)
-    nr = curs.execute(f'''SELECT carb_id FROM {dest}.loop_summary 
-                     WHERE user_id = %s  
-                     AND carb_timestamp 
-                     BETWEEN (%s - interval %s minute) 
-                     AND (%s + interval %s minute)''',
-                 [HUGH_USER_ID, timestamp, 30, timestamp, 30])
+    nr = curs.execute(f'''SELECT loop_summary_id, carb_id, carb_timestamp, carb_value 
+                          FROM {dest}.loop_summary 
+                          WHERE user_id = %s  
+                          AND carb_timestamp 
+                          BETWEEN (%s - interval %s minute) 
+                              AND (%s + interval %s minute)''',
+                 [HUGH_USER_ID, timestamp, interval_width, timestamp, interval_width])
     rows = curs.fetchall()
-    for row in rows:
-        print(row[0])
-    return nr != 0
+    # hopefully the normal case
+    if nr == 1:
+        return rows[0]
+    if nr == 0:
+        logging.debug(f'no carbs in interval around {timestamp}')
+        return None
+    if nr > 1:
+        logging.debug(f'multiple carbs in interval around {timestamp}; using largest')
+        biggest = argmax(rows, lambda r: r[3])
+        return biggest
 
+def carbs_within_interval_test(conn, source, dest, start_time, width=5):
+    '''This is for basic robustness and correctness. Modifies no data, so safe to use in any database.'''
+    if conn is None:
+        conn = dbi.connect()
+    curs = dbi.cursor(conn)
+    for bolus_row in get_boluses(conn, source, start_time):
+        (user_id, bolus_pump_id, bolus_time, value) = bolus_row
+        match = carbs_within_interval(conn, source, dest, bolus_time, width)
+        if match is None:
+            print(f'correction bolus at {bolus_time}')
+        else:
+            (id, carb_id, carb_time, carb_value) = match
+            diff = abs(date_ui.to_datetime(bolus_time) - date_ui.to_datetime(carb_time))
+            if diff.total_seconds() >= width*60:
+                print(f'ERROR at {start_time}')
+                print(f'{id}, {carb_id}, {carb_time}, {carb_value}')
+                raise Exception
+            print(f'loop summary id {id} for carb_id {carb_id} matches')
+        
 def migrate_boluses(conn, source, dest, start_time, commit=True):
     '''start_time is a string or a python datetime. '''
     if conn is None:
@@ -446,16 +501,31 @@ def migrate_boluses(conn, source, dest, start_time, commit=True):
         if match is None:
             # the normal case, we'll insert it. First see if there's a CGM at this time
             (cgm_id, mgdl) = matching_cgm(conn, dest, date)
-            # next, see if there are carbs w/in an interval
-            some_carbs = carbs_within_interval(conn, source, dest, date)
-            bolus_type = 'carb' if some_carbs else 'correction'
-            print('bolus type', bolus_type)
-            curs.execute(f'''insert into {dest}.loop_summary
+            # next, see if there are carbs w/in an interval.
+            # 5/19. Get info about the carbs, to fill into loop_summary fields
+            carb_row = carbs_within_interval(conn, source, dest, date, MATCHING_BOLUS_WITH_CARB_INTERVAL)
+            if carb_row is None:
+                logging.debug(f'CASE C: migrate bolus at time {date} has no matching carbs')
+                # have to insert into loop_summary
+                bolus_type = 'correction' # since no carbs
+                curs.execute(f'''INSERT INTO {dest}.loop_summary
                                 (user_id, bolus_pump_id, bolus_timestamp, bolus_type, bolus_value,
-                                linked_cgm_id, linked_cgm_value
+                                linked_cgm_id, linked_cgm_value                                
                                 )
                             values(%s, %s, %s, %s, %s, %s, %s)''',
                          [user_id, bolus_pump_id, date, bolus_type, value, cgm_id, mgdl])
+            else:
+                # since there are matching carbs, update that row instead
+                # we actually don't need the other data, since it's already in the row
+                (loop_summary_id, carb_id, carb_timestamp, carb_value) = carb_row
+                logging.debug(f'CASE D: migrate bolus at time {date} has matching carbs {carb_value} at time {carb_timestamp}')
+                bolus_type = 'carb'
+                curs.execute(f'''UPDATE {dest}.loop_summary
+                                 SET bolus_pump_id = %s, bolus_timestamp = %s, bolus_type = %s, bolus_value = %s,
+                                     linked_cgm_id = %s, linked_cgm_value = %s
+                                 WHERE loop_summary_id = %s''',
+                         [bolus_pump_id, date, bolus_type, value, cgm_id, mgdl, loop_summary_id])
+                
         else:
             # already exists, so update? Ignore? We'll complain if they differ
             logging.info('bolus match: this bolus is already migrated: {}'.format(row))
@@ -463,6 +533,17 @@ def migrate_boluses(conn, source, dest, start_time, commit=True):
     if commit:
         conn.commit()
     
+def migrate_boluses_test(conn, source, dest, start_time, commit=True):
+    curs = dbi.cursor(conn)
+    nr = curs.execute('''select carb_timestamp from lltt.loop_summary where carb_timestamp is not null''')
+    print(f'{nr} carbs for testing')
+    carb_times = [r[0] for r in curs.fetchall()]
+    migrate_boluses(conn, source, 'lltt', start_time, commit=commit)
+
+def nonce_merge_boluses_with_carbs(conn, dest, start_time, end_time):
+    pass
+
+
 def bytes_to_int(bytes_val):
     '''0/1 values are stored in autoapp as single-byte quantities,
 actually bit(1). They come into Python as byte arrays of length
@@ -688,6 +769,35 @@ def get_carbs(conn, source, start_time):
                  [start_time])
     return curs.fetchall()
 
+def bolus_within_interval(conn, source, dest, timestamp, interval_width):
+    '''returns loop_summary_id, bolus_pump_id, bolus_timestamp,
+type_bolus_value searching for bolus in loop_summary within plus or
+minus interval_width of timestamp. Returns None if no match.
+
+    '''
+    if conn is None:
+        conn = dbi.connect()
+    curs = dbi.cursor(conn)
+    nr = curs.execute(f'''SELECT loop_summary_id, bolus_pump_id, bolus_timestamp, bolus_value 
+                          FROM {dest}.loop_summary 
+                          WHERE user_id = %s  
+                          AND bolus_timestamp 
+                          BETWEEN (%s - interval %s minute) 
+                              AND (%s + interval %s minute)''',
+                 [HUGH_USER_ID, timestamp, interval_width, timestamp, interval_width])
+    rows = curs.fetchall()
+    # hopefully the normal case
+    if nr == 1:
+        return rows[0]
+    if nr == 0:
+        logging.debug(f'no bolus in interval around {timestamp}')
+        return None
+    if nr > 1:
+        logging.debug(f'multiple boluses in interval around {timestamp}; using largest')
+        biggest = argmax(rows, lambda r: r[3])
+        return biggest
+
+
 def migrate_carbs(conn, source, dest, start_time, commit=True):
     '''Like the other migrations. start_time is string or python datetime.'''
     if conn is None:
@@ -700,7 +810,7 @@ def migrate_carbs(conn, source, dest, start_time, commit=True):
     logging.info(f'{n} carbs to migrate since {start_time}')
     for row in carbs:
         # note: carb_id is called carbohydrate_id in the source
-        (user_id, carb_id, date, value) = row
+        (user_id, carb_id, carb_date, value) = row
         # see if carb_id matches, to avoid re-inserting something already migrated
         curs.execute(f'''select loop_summary_id, user_id, carb_id
                         from {dest}.loop_summary
@@ -709,17 +819,36 @@ def migrate_carbs(conn, source, dest, start_time, commit=True):
         match = curs.fetchone()
         if match is None:
             # the normal case, we'll insert it. First see if there's a CGM at this time
-            (cgm_id, cgm_value) = matching_cgm(conn, dest, date)
-            curs.execute(f'''insert into {dest}.loop_summary
-                             (user_id, carb_id, carb_value, linked_cgm_id, linked_cgm_value)
-                            values(%s, %s, %s, %s, %s)''',
-                         [user_id, carb_id, value, cgm_id, cgm_value])
+            (cgm_id, cgm_value) = matching_cgm(conn, dest, carb_date)
+            # 5/23. Get info about the carbs at this time. If so, use that row.
+            bolus_row = bolus_within_interval(conn, source, dest, carb_date, MATCHING_BOLUS_WITH_CARB_INTERVAL)
+            if bolus_row is None:
+                logging.debug(f'CASE A: new carbs, no matching bolus')
+                curs.execute(f'''insert into {dest}.loop_summary
+                                 (user_id, carb_id, carb_timestamp, carb_value, linked_cgm_id, linked_cgm_value)
+                                 values(%s, %s, %s, %s, %s, %s)''',
+                             [user_id, carb_id, carb_date, value, cgm_id, cgm_value])
+            else:
+                # reuse existing row. Note that this revision means
+                # that the bolus is now associate with carbs, so
+                # change its type
+                (loop_summary_id, bolus_pump_id, bolus_timestamp, bolus_value) = bolus_row
+                logging.debug(f'CASE B. migrate carbs at time {carb_date} has matching bolus {bolus_pump_id} at time {bolus_timestamp}')
+                bolus_type = 'carb'
+                curs.execute(f'''UPDATE {dest}.loop_summary
+                                 SET carb_id = %s, carb_timestamp = %s, carb_value = %s, 
+                                     bolus_type = 'carb', 
+                                     linked_cgm_id = %s, linked_cgm_value = %s
+                                 WHERE loop_summary_id = %s''',
+                         [carb_id, carb_date, value, cgm_id, cgm_value, loop_summary_id])
+
         else:
             # already exists, so update? Ignore? We'll complain if they differ
             logging.info('carb match: this carb is already migrated: {}'.format(row))
     if commit:
         conn.commit()
 
+# This function is not currently used. 
 def migrate_carbs_to_bolus(conn, source, dest, start_time, commit=True):
     '''This version looks for row with a bolus within 30 (configurable)
 minutes and updates that row to put the carbs into that.  If the carbs
@@ -817,7 +946,7 @@ def identify_correction_boluses_nonce(conn, source, dest):
     corrections = 0
     for bolus_row in curs.fetchall():
         id, bolus_value, bolus_timestamp = bolus_row
-        some_carbs = carbs_within_interval(conn, source, dest, bolus_timestamp)
+        some_carbs = carbs_within_interval(conn, source, dest, bolus_timestamp, MATCHING_BOLUS_WITH_CARB_INTERVAL)
         bolus_type = 'carb' if some_carbs else 'correction'
         q = f'''update {dest}.loop_summary set bolus_type = %s where loop_summary_id = %s'''
         curs.execute(q, [bolus_type, id])
@@ -968,6 +1097,148 @@ start_time_commands and start_time other.
         logging.info('done. storing update time')
         set_autoapp_migration_time(conn, dest, prev_update, last_autoapp_update)
     logging.info('done')
+
+
+# ================================================================
+# testing this code
+
+''' there are lots of little tests above, but it's hard to test
+something that runs the way this does. I'm going to create databases
+autoapp_scott and loop_logic_scott with tables like the originals, but
+empty. This code empties them out, then successively adds data to
+them, and then runs the migration function. 
+
+See sql/scott_setup.sql for the setup of the tables.
+
+If I also use the testing_command table, I can put the cgm values in
+loop_logic_scott.source_cgm. But that means I have to use lots of
+functions from loop_logic_testing_cgm_cron (lltcc).
+
+Tables the code above uses:
+
+{source}.dana_history_timestamp (for command migration)
+{dest}.migration_status (for last command migration)
+{dest}.testing_command (to turn on a test)
+{dest}.source_cgm (for the cgm values)
+{dest}.realtime_cgm (to find the matching cgm values)
+{source}.bolus (for bolus data)
+{dest}.loop_summary (where everything goes)
+{source}.commmands
+{source}.commmands_single_bolus_data
+{source}.commmands_temporarary_basal_data
+{source}.carbohydrate (for carbs to migrate)
+{dest}.configuration (to read config params)
+
+That's it!
+
+'''
+
+def test_clear_scott_db_and_start(conn):
+    curs = dbi.cursor(conn)
+    dest = 'loop_logic_scott'
+    source = 'autoapp_scott'
+    curs.execute(f'delete from {dest}.loop_summary')
+    curs.execute(f'delete from {dest}.realtime_cgm')
+    curs.execute(f'delete from {source}.bolus')
+    curs.execute(f'delete from {source}.carbohydrate')
+    curs.execute(f'delete from {source}.commands_single_bolus_data')
+    curs.execute(f'delete from {source}.commands_temporary_basal_data')
+    curs.execute(f'delete from {source}.commands')
+    curs.execute(f'delete from {dest}.source_cgm')
+    curs.execute(f'delete from {dest}.testing_command')
+    conn.commit();
+
+def init_cgm(conn, start):
+    print('init_cgm')
+    curs = dbi.cursor(conn)
+    dest = 'loop_logic_scott'
+    source = 'autoapp_scott'
+    curs.execute(f'delete from {dest}.testing_command')
+    curs.execute(f"insert into {dest}.testing_command values (1, 'start', 'on', %s, 'testing migration')",
+                 [start])
+    conn.commit()
+    # a few test cgm values
+    for mins in range(0, 100, 5):
+        dt = start + timedelta(minutes=mins)
+        # we'll use 100+mins for mgdl
+        curs.execute(f"insert into {dest}.source_cgm values(7, %s, %s, %s, 1, 1, 'NO')",
+                     [dt, dt, 100+mins])
+    conn.commit();
+
+def set_data_migration(conn, source, dest, start):
+    '''set values saying there's no data (bolus, carbs) prior to 'start'.'''
+    # the two tables are initialized with the one row from their sources
+    curs = dbi.cursor(conn)
+    curs.execute(f'''UPDATE {source}.dana_history_timestamp SET date = %s WHERE user_id = %s''',
+                 [start, HUGH_USER_ID])
+    # comparison is for < so equality will mean no new data
+    curs.execute(f'''UPDATE {dest}.migration_status 
+                     SET prev_autoapp_update = %s, prev_autoapp_migration = %s
+                    WHERE user_id = %s''',
+                 [start, start, HUGH_USER_ID])
+    conn.commit()
+
+
+def test_1():
+    conn = dbi.connect()
+    test_clear_scott_db_and_start(conn)
+    # times will always be in minutes since the following start
+    start = date_ui.to_datetime('2023-05-01 12:00:00')
+    dest = 'loop_logic_scott'
+    source = 'autoapp_scott'
+    set_data_migration(conn, source, dest, start)
+
+    def dt(mins):
+        t0 = start + timedelta(minutes=mins)
+        return date_ui.str(t0)
+    def insert(conn, desc):
+        curs = dbi.cursor(conn)
+        if desc['table'] == 'bolus':
+            # 6 placeholders
+            curs.execute(f'insert into autoapp_scott.bolus values(%s, %s, %s, %s, %s, %s, current_timestamp())',
+                         desc['vals'])
+        elif desc['table'] == 'carbohydrate':
+            # 4 placeholders
+            curs.execute(f'insert into autoapp_scott.carbohydrate values(%s, %s, %s, %s, current_timestamp())',
+                         desc['vals'])
+        curs.execute('update autoapp_scott.dana_history_timestamp set date = %s WHERE user_id = %s',
+                     [desc['time'], HUGH_USER_ID])
+        conn.commit()
+        
+    USER = 7
+    init_cgm(conn, start)
+    for data_in in [
+            [ {'table': 'bolus', 'time': dt(1), 'vals': [None, USER, dt(1), 'S', 4.0, 0]}, ],
+            # this is much later, so previous bolus is correction
+            [ {'table': 'carbohydrate', 'time': dt(12), 'vals': [None, USER, dt(12), 40]} ],
+            # this is also later, so previous carbs is alone
+            [ {'table': 'bolus', 'time': dt(23), 'vals': [None, USER, dt(23), 'S', 5.0, 0]}, ],
+            # but this is soon, so will be combined:
+            [ {'table': 'carbohydrate', 'time': dt(24), 'vals': [None, USER, dt(24), 50]} ],
+            # this pair is much later, carbs first
+            [ {'table': 'carbohydrate', 'time': dt(35), 'vals': [None, USER, dt(35), 45]} ],
+            [ {'table': 'bolus', 'time': dt(36), 'vals': [None, USER, dt(36), 'S', 4.5, 0]}, ]
+            ]:
+        for data1_in in data_in:
+            print('data in', data1_in)
+            # insert data into chosen table
+            insert(conn, data1_in)
+            # migrate test cgm
+            lltcc.cron_copy(conn, 'loop_logic_scott')
+            # migrate data at test time
+            migrate_all(conn, 'autoapp_scott', 'loop_logic_scott', data1_in['time'])
+            curs = dbi.cursor(conn)
+            curs.execute('''select loop_summary_id, 
+                                   bolus_pump_id, time(bolus_timestamp), bolus_type, bolus_value,
+                                   carb_id, time(carb_timestamp), carb_value
+                            from loop_logic_scott.loop_summary''')
+            print('after', data_in)
+            print_results(curs.fetchall())
+
+def print_results(row_list):
+    for row in row_list:
+        print('\t'+'\t'.join([str(x) for x in row]))
+        
 
 
 if __name__ == '__main__': 
