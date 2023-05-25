@@ -38,8 +38,14 @@ if [ ! -d "$repo" ]; then
 fi
 
 $python $repo/dexcom_cgm_sample.py 
-$python $repo/autoapp_to_ics2.py cron 
+
+# temporary removal until migration time is fixed
+# $python $repo/autoapp_to_ics2.py cron 
+
 $python $repo/autoapp_to_loop_logic.py 
+run this separately, every 5 minutes
 $python $repo/loop_logic_testing_cgm_cron.py
-$python $repo/pull_data_from_diamond.py
+
+# temporary removal until we know this is working
+# $python $repo/pull_data_from_diamond.py
 

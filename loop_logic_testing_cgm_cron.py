@@ -78,7 +78,7 @@ def cron_stop(conn, dest='loop_logic'):
                  [msg])
     conn.commit()
 
-def cron_copy(conn, dest='loop_logic'):
+def cron_copy(conn, dest='loop_logic', use_fake_time=False):
     '''Normal processing. Take the next value from the source_cgm table,
 determined by the min rtime where used is NO.  This is coded under the
 assumption that it might run until we run out of fake entries in
@@ -101,8 +101,7 @@ fake; instead they'll be identified by timestamp.
     curs = conn.cursor()
     curs.execute(f'''UPDATE {dest}.{SOURCE_CGM} SET used = 'YES' WHERE rtime = %s''', [rtime])
     conn.commit()
-    USE_FAKE_TIME = True
-    if USE_FAKE_TIME:
+    if use_fake_time:
         curs.execute(f'''INSERT INTO {dest}.{REALTIME_CGM}
                          VALUES(NULL, 7, %s, %s, %s, %s)''',
                      [rtime, mgdl, trend, trend_code])
@@ -206,6 +205,10 @@ if __name__ == '__main__':
         print('testing the testing code')
         run_as_cron(dest='lltt')
     else:
-        # normal operation
-        run_as_cron(dest='loop_logic')
-        run_as_cron(dest='loop_logic_test')
+        # normal operation, but every 5 minutes, so test the time
+        now = datetime.now()
+        if (now.minute % 5) == 0:
+            run_as_cron(dest='loop_logic')
+            run_as_cron(dest='loop_logic_test')
+        else:
+            pass

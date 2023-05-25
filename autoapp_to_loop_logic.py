@@ -1234,7 +1234,7 @@ def test_1():
             # insert data into chosen table
             insert(conn, data1_in)
             # migrate test cgm
-            lltcc.cron_copy(conn, 'loop_logic_scott')
+            lltcc.cron_copy(conn, 'loop_logic_scott', True)
             # migrate data at test time
             migrate_all(conn, 'autoapp_scott', 'loop_logic_scott', data1_in['time'])
             curs = dbi.cursor(conn)
@@ -1292,7 +1292,7 @@ def test_2():
             # insert data into chosen table
             insert(conn, data1_in)
             # migrate test cgm
-            lltcc.cron_copy(conn, 'loop_logic_scott')
+            lltcc.cron_copy(conn, 'loop_logic_scott', True)
             # migrate data at test time
             migrate_all(conn, 'autoapp_scott', 'loop_logic_scott', data1_in['time'])
             curs = dbi.cursor(conn)
