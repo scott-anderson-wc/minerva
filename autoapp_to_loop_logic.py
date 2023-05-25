@@ -514,6 +514,8 @@ def migrate_boluses(conn, source, dest, start_time, commit=True):
                                 )
                             values(%s, %s, %s, %s, %s, %s, %s)''',
                          [user_id, bolus_pump_id, date, bolus_type, value, cgm_id, mgdl])
+                # since it's a correction, check if it's an anchor or top-up
+                identify_anchor_bolus(conn, source, dest, date)
             else:
                 # since there are matching carbs, update that row instead
                 # we actually don't need the other data, since it's already in the row
@@ -830,14 +832,14 @@ def migrate_carbs(conn, source, dest, start_time, commit=True):
                              [user_id, carb_id, carb_date, value, cgm_id, cgm_value])
             else:
                 # reuse existing row. Note that this revision means
-                # that the bolus is now associate with carbs, so
-                # change its type
+                # that the bolus is now associated with carbs, so
+                # change its type to 'carb' and its anchor to NULL
                 (loop_summary_id, bolus_pump_id, bolus_timestamp, bolus_value) = bolus_row
                 logging.debug(f'CASE B. migrate carbs at time {carb_date} has matching bolus {bolus_pump_id} at time {bolus_timestamp}')
                 bolus_type = 'carb'
                 curs.execute(f'''UPDATE {dest}.loop_summary
                                  SET carb_id = %s, carb_timestamp = %s, carb_value = %s, 
-                                     bolus_type = 'carb', 
+                                     bolus_type = 'carb', anchor = NULL,
                                      linked_cgm_id = %s, linked_cgm_value = %s
                                  WHERE loop_summary_id = %s''',
                          [carb_id, carb_date, value, cgm_id, cgm_value, loop_summary_id])
@@ -989,7 +991,13 @@ start_time, where N is a configuration variable:
 bolus_interval_minutes. Only consults dest; source is ignored.
 Anchor is largest. top-up is most recent (latest) after the anchor.
 
-Note on 3/16: only correction boluses count.'''
+Note on 3/16: only correction boluses count.
+
+5/25 as a practical matter, this code will run when a bolus is
+identified as a correction, which will mean its the newest bolus in
+the table, so this will always be searching back 120 minutes from now. 
+
+    '''
     curs = dbi.cursor(conn)
     curs.execute(f'select bolus_interval_mins from {dest}.configuration')
     interval = curs.fetchone()[0]
@@ -1000,7 +1008,8 @@ Note on 3/16: only correction boluses count.'''
     # be vacuous
     curs.execute(f'''SELECT loop_summary_id,bolus_value,bolus_timestamp 
                      FROM {dest}.loop_summary 
-                     WHERE bolus_value > 0 
+                     WHERE bolus_type = 'correction' 
+                        AND bolus_value > 0 
                         AND bolus_timestamp > %s 
                         AND bolus_timestamp <= %s''',
                  [past, start_time])
@@ -1180,6 +1189,7 @@ def set_data_migration(conn, source, dest, start):
 
 
 def test_1():
+    '''tests that boluses near carbs are identified as carbs, not corrections'''
     conn = dbi.connect()
     test_clear_scott_db_and_start(conn)
     # times will always be in minutes since the following start
@@ -1229,7 +1239,65 @@ def test_1():
             migrate_all(conn, 'autoapp_scott', 'loop_logic_scott', data1_in['time'])
             curs = dbi.cursor(conn)
             curs.execute('''select loop_summary_id, 
-                                   bolus_pump_id, time(bolus_timestamp), bolus_type, bolus_value,
+                                   bolus_pump_id, time(bolus_timestamp), bolus_type, bolus_value, anchor
+                                   carb_id, time(carb_timestamp), carb_value
+                            from loop_logic_scott.loop_summary''')
+            print('after', data_in)
+            print_results(curs.fetchall())
+
+def test_2():
+    '''checks that boluses are properly identified as anchor and/or top-up.'''
+    conn = dbi.connect()
+    test_clear_scott_db_and_start(conn)
+    # times will always be in minutes since the following start
+    start = date_ui.to_datetime('2023-05-01 12:00:00')
+    dest = 'loop_logic_scott'
+    source = 'autoapp_scott'
+    set_data_migration(conn, source, dest, start)
+
+    def dt(mins):
+        t0 = start + timedelta(minutes=mins)
+        return date_ui.str(t0)
+    def insert(conn, desc):
+        curs = dbi.cursor(conn)
+        if desc['table'] == 'bolus':
+            # 6 placeholders
+            curs.execute(f'insert into autoapp_scott.bolus values(%s, %s, %s, %s, %s, %s, current_timestamp())',
+                         desc['vals'])
+        elif desc['table'] == 'carbohydrate':
+            # 4 placeholders
+            curs.execute(f'insert into autoapp_scott.carbohydrate values(%s, %s, %s, %s, current_timestamp())',
+                         desc['vals'])
+        curs.execute('update autoapp_scott.dana_history_timestamp set date = %s WHERE user_id = %s',
+                     [desc['time'], HUGH_USER_ID])
+        conn.commit()
+        
+    USER = 7
+    init_cgm(conn, start)
+    for data_in in [
+            # carbs and bolus at the same time, so carbs
+            [ {'table': 'carbohydrate', 'time': dt(1), 'vals': [None, USER, dt(1), 40]},
+              {'table': 'bolus', 'time': dt(1), 'vals': [None, USER, dt(1), 'S', 4.0, 0]} ],
+            # this is later and alone, so a correction. Should be marked as anchor
+            [ {'table': 'bolus', 'time': dt(23), 'vals': [None, USER, dt(23), 'S', 5.0, 0]}, ],
+            # this is much later and alone, so a correction, but smaller than preceding.
+            # Should be marked as top-up
+            [ {'table': 'bolus', 'time': dt(80), 'vals': [None, USER, dt(80), 'S', 3.0, 0]}, ],
+            # Here's another bolus, that will be briefly considered an anchor, but then changes to carbs
+            [ {'table': 'bolus', 'time': dt(120), 'vals': [None, USER, dt(120), 'S', 3.0, 0]}, ],
+            [ {'table': 'carbohydrate', 'time': dt(121), 'vals': [None, USER, dt(121), 50]} ],
+            ]:
+        for data1_in in data_in:
+            print('data in', data1_in)
+            # insert data into chosen table
+            insert(conn, data1_in)
+            # migrate test cgm
+            lltcc.cron_copy(conn, 'loop_logic_scott')
+            # migrate data at test time
+            migrate_all(conn, 'autoapp_scott', 'loop_logic_scott', data1_in['time'])
+            curs = dbi.cursor(conn)
+            curs.execute('''select loop_summary_id, 
+                                   bolus_pump_id, time(bolus_timestamp), bolus_type, bolus_value, anchor
                                    carb_id, time(carb_timestamp), carb_value
                             from loop_logic_scott.loop_summary''')
             print('after', data_in)
