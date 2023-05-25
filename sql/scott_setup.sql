@@ -19,3 +19,6 @@ create table loop_summary like loop_logic.loop_summary;
 create table configuration like loop_logic.configuration;
 
 insert into migration_status select * from loop_logic.migration_status;
+
+insert into configuration select * from loop_logic.configuration;
+
