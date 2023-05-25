@@ -1262,13 +1262,16 @@ if __name__ == '__main__':
     today = datetime.today()
     logfile = os.path.join(LOG_DIR, 'day'+str(today.day))
     now = datetime.now()
+    if now.hour == 0 and now.minute==0:
+        try:
+            os.unlink(logfile)
+        except FileNotFound:
+            pass
     logging.basicConfig(format='%(asctime)s %(levelname)s %(message)s',
                         datefmt='%H:%M',
                         filename=logfile,
                         level=logging.DEBUG)
     if now.hour == 0 and now.minute==0:
-        # eventually, we'll move this before the logging config and
-        # delete any existing logfile
         logging.info('================ first run of the day!!'+str(now))
     logging.info('running at {}'.format(datetime.now()))
     migrate_all(conn, 'autoapp', 'loop_logic')
