@@ -61,13 +61,14 @@ def cron_start(conn, dest='loop_logic'):
     curs.execute(f'''UPDATE {dest}.{TESTING_COMMAND} 
                     SET command = '', status = 'ON', start = current_timestamp(), msg = ''
                     WHERE comm_id = 1''')
-    # this will update all rows, so we can reuse the testing data
+    # this will update all rows, so we can reuse the testing
+    # data. Yes, we do this at the end, too.
     curs.execute(f'''UPDATE {dest}.{SOURCE_CGM}
                     SET used = 'NO'; ''')
     conn.commit()
 
 def cron_stop(conn, dest='loop_logic'):
-    '''Set status back to OFF to turn off the migration. '''
+    '''Set status back to OFF to turn off the migration, and mark all source_cgm values as unused. '''
     curs = conn.cursor()
     now_raw = datetime.now()
     now = now_raw.replace(microsecond=0) # ugly to have the microsecond in a msg, so truncate
@@ -76,6 +77,9 @@ def cron_stop(conn, dest='loop_logic'):
                     SET command = '', status = 'OFF', start = NULL, msg = %s
                     WHERE comm_id = 1''',
                  [msg])
+    # this will update all rows, so we can reuse the testing data
+    curs.execute(f'''UPDATE {dest}.{SOURCE_CGM}
+                    SET used = 'NO'; ''')
     conn.commit()
 
 def cron_copy(conn, dest='loop_logic', use_fake_time=False):
@@ -103,12 +107,12 @@ fake; instead they'll be identified by timestamp.
     conn.commit()
     if use_fake_time:
         curs.execute(f'''INSERT INTO {dest}.{REALTIME_CGM}
-                         VALUES(NULL, 7, %s, %s, %s, %s)''',
+                         VALUES(NULL, 7, %s, %s, %s, %s, 'fake')''',
                      [rtime, mgdl, trend, trend_code])
     else:
         # Insert it into the real table, substituting current_timestamp() for rtime
         curs.execute(f'''INSERT INTO {dest}.{REALTIME_CGM}
-                         VALUES(NULL, 7, current_timestamp(), %s, %s, %s)''',
+                         VALUES(NULL, 7, current_timestamp(), %s, %s, %s, 'fake')''',
                      [mgdl, trend, trend_code])
     conn.commit()
     # For debugging, let's put a message in the command table
@@ -201,7 +205,8 @@ to test this procedure:
 '''
 
 if __name__ == '__main__': 
-    if TESTING_THE_TESTING:
+    if len(sys.argv) > 1 and sys.argv[1] == 'test':
+        TESTING_THE_TESTING = True
         print('testing the testing code')
         run_as_cron(dest='lltt')
     else:
