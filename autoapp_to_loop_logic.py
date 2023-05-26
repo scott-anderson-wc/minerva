@@ -220,6 +220,7 @@ def migrate_cgm(conn, dest, start_time, commit=True):
     curs = dbi.cursor(conn)
     logging.debug(f'migrating realtime_cgm since {start_time}')
     # must use rtime, not dexcom_time, since the latter can be null
+    # but we retrieve the dexcom_time, to be be consistent with {dest}.realtime_cgm
     nrows = curs.execute('''select user_id, dexcom_time, mgdl, trend, trend_code
                             from janice.realtime_cgm2
                             where rtime > %s and mgdl is not NULL''',
@@ -235,8 +236,8 @@ def migrate_cgm(conn, dest, start_time, commit=True):
                          [user_id, dexcom_time])
         logging.debug(f'found {nr} matches (already migrated rows)')
         if nr == 0:
-            ins.execute(f'''insert into {dest}.realtime_cgm(cgm_id,user_id,dexcom_time,mgdl,trend,trend_code)
-                           values(null,%s,%s,%s,%s,%s)''',
+            ins.execute(f'''insert into {dest}.realtime_cgm(cgm_id,user_id,dexcom_time,mgdl,trend,trend_code,src)
+                           values(null,%s,%s,%s,%s,%s,'real')''',
                         row)
     if commit:
         conn.commit()
