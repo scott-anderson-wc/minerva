@@ -646,6 +646,7 @@ def migrate_commands(conn, source, dest, alt_start_time=None, commit=True,
         parent_involved = 0 if lc == 1 and pd == 0 else 1
         ## Find matching cgm for this created_timestamp
         (cgm_id, cgm_value) = matching_cgm(conn, dest, ct)
+        logging.debug(f'CGM matching this command: {cgm_id}, {cgm_value}')
         ## 
         '''If ‘completed’=1, the bolus command should be matched to a row
         with a ‘bolus_pump_id’.  Match can be done by closest
@@ -666,25 +667,49 @@ def migrate_commands(conn, source, dest, alt_start_time=None, commit=True,
             # the app when he corrects so if no CGM, there will be
             # nothing else to use."
             bolus_row = matching_bolus_row_within(conn, source, ct, MATCHING_BOLUS_INTERVAL)
+            logging.debug('matching bolus row for this command'+str(bolus_row))
             # might return None, so guard with (bolus_row AND expr)
             bolus_pump_id = bolus_row and bolus_row['bolus_id']
             bolus_value = bolus_row and bolus_row['value']
         else:
             bolus_pump_id = None
             bolus_value = None
-        # So, now we have a bolus_value but we also have a sb_amt from
-        # the commands_single_bolus_data table.  are these the same?
-
-        # check if command is already there (migrated earlier) by checking command_id
+        # update on 6/22/2023. Need to check if there's already a
+        # loop_summary entry because of a bolus migration or previous
+        # migration of this command. So, two scenarios for updating:
+        # (1) command already migrated or (2) loop summary row exists
+        # due to bolus having been processed.
+        
+        loop_summary_id_1 = None
+        # TO DO: check this for efficiency. Currently O(n)
         nrows = update.execute(f'''SELECT loop_summary_id 
                                    FROM {dest}.{loop_summary_table} 
                                    WHERE command_id = %s''',
                                [cid])
         if nrows > 0:
-            loop_summary_id = update.fetchone()[0]
-            # eventually, I think we just skip a row that has been
-            # migrated, because we'll do things right the first time.
-            logging.info(f'command {cid} at time {ct} has already been migrated as {loop_summary_id}; updating it')
+            loop_summary_id_1 = update.fetchone()[0]
+            logging.info(f'command {cid} at time {ct} has already been migrated as {loop_summary_id_1}; updating it')
+
+        loop_summary_id_2 = None
+        if bolus_pump_id is not None:
+            # look up existing loop summary entry, if any
+            # TO DO: check this for efficiency. Currently O(n)
+            nrows = update.execute(f'''SELECT loop_summary_id 
+                                       FROM {dest}.{loop_summary_table}
+                                       WHERE bolus_pump_id = %s''',
+                                   [bolus_pump_id])
+            if nrows > 0:
+                loop_summary_id_2 = update.fetchone()[0]
+                logging.info(f'bolus {bolus_pump_id} already migrated. Updating {loop_summary_id_2}')
+        # conflicts?
+        if (loop_summary_id_1 is not None and
+            loop_summary_id_2 is not None and
+            loop_summary_id_1 != loop_summary_id_2):
+            err_msg = f'command already migrated as {loop_summary_id_1} but matches bolus in {loop_summary_id_2}'
+            logging.error(err_msg)
+            raise Exception(err_msg)
+        loop_summary_id = loop_summary_id_1 or loop_summary_id_2
+        if loop_summary_id is not None:
             update.execute(f'''UPDATE {dest}.{loop_summary_table}
                               SET user_id = %s, bolus_pump_id = %s, bolus_value = %s, command_id = %s, 
                                   created_timestamp = %s, state = %s, type = %s, pending = %s, completed = %s,
@@ -1301,10 +1326,82 @@ def test_2():
             print('after', data_in)
             print_results(curs.fetchall())
 
-def print_results(row_list):
-    for row in row_list:
-        print('\t'+'\t'.join([str(x) for x in row]))
+def test_3():
+    '''checks that bolus commands result in one loop_summary entry, not two.'''
+    conn = dbi.connect()
+    test_clear_scott_db_and_start(conn)
+    # times will always be in minutes since the following start
+    start = date_ui.to_datetime('2023-05-01 12:00:00')
+    dest = 'loop_logic_scott'
+    source = 'autoapp_scott'
+    set_data_migration(conn, source, dest, start)
+
+    def dt(mins):
+        t0 = start + timedelta(minutes=mins)
+        return date_ui.str(t0)
+    def insert(conn, desc):
+        curs = dbi.cursor(conn)
+        if desc['table'] == 'bolus':
+            # 6 placeholders
+            curs.execute(f"insert into autoapp_scott.bolus values(%s, %s, %s, %s, %s, %s, %s)",
+                         desc['vals'])
+        elif desc['table'] == 'bolus_command':
+            # 1 placeholder, though maybe we should allow entering the whole row, as with the others
+            curs.execute(f"insert into autoapp_scott.commands(user_id, completed, type, created_timestamp) values(%s, %s, %s, %s)",
+                         desc['com_vals'])
+            curs.execute('select last_insert_id()')
+            comm_id = curs.fetchone()[0]
+            curs.execute('insert into autoapp_scott.commands_single_bolus_data values(%s, %s, 99, %s)',
+                         [comm_id, desc['amt'], desc['amt']])
+            curs.execute('update autoapp_scott.dana_history_timestamp set date = %s WHERE user_id = %s',
+                         [desc['time'], HUGH_USER_ID])
+        conn.commit()
         
+    USER = 7
+    init_cgm(conn, start)
+    for idx, scenario in enumerate([
+            # 3 unit bolus first, command 1 minute later
+            [ {'table': 'bolus', 'time': dt(1), 'vals': [None, USER, dt(1), 'S', 3.0, 0, dt(1)]},
+              {'table': 'bolus_command', 'time': dt(2), 'com_vals': [USER, 1, 'bolus', dt(2)], 'amt': 3},
+             ],
+            # command first, 4 unit bolus 1 minute later
+            [ {'table': 'bolus_command', 'time': dt(10), 'com_vals': [USER, 1, 'bolus', dt(10)], 'amt': 4},
+              {'table': 'bolus', 'time': dt(11), 'vals': [None, USER, dt(11), 'S', 4.0, 0, dt(11)]},
+             ],
+    ]):
+        print(f'==== scenario {idx} ===========')
+        for data_in in scenario:
+            print('data in', data_in)
+            # insert data into chosen table
+            insert(conn, data_in)
+            # migrate test cgm
+            lltcc.cron_copy(conn, 'loop_logic_scott', True)
+            # migrate data at test time
+            migrate_all(conn, 'autoapp_scott', 'loop_logic_scott', data_in['time'])
+            curs = dbi.cursor(conn)
+            curs.execute('''select loop_summary_id, 
+                                   bolus_pump_id, time(bolus_timestamp), bolus_type, bolus_value
+                            from loop_logic_scott.loop_summary''')
+            print('after', data_in)
+            print_results(curs.fetchall())
+
+def col_widths(row_list):
+    if len(row_list) == 0:
+        raise ValueError('empty list')
+    widths = [0] * len(row_list[0])
+    for row in row_list:
+        for idx,col in enumerate(row):
+            widths[idx] = max(widths[idx], len(str(col)))
+    return widths
+
+def print_results(row_list):
+    widths = col_widths(row_list)
+    for row in row_list:
+        out = ''
+        for idx,col in enumerate(row):
+            out += '\t'+str(col).rjust(widths[idx])
+        print(out)
+    # print('\t'+'|'.join([str(x) for x in row]))
 
 
 if __name__ == '__main__': 
