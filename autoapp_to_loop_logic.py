@@ -906,9 +906,8 @@ def re_migrate_carbs(conn, source, dest, start_time, commit=True):
     logging.info(f'{n} carbs to migrate since {start_time}')
     for row in carbs:
         # note: carb_id is called carbohydrate_id in the source
+        # also value has always been an int, but datatype is double
         (user_id, carb_id, date, value) = row
-        if value != round(value):
-            print('non-int', value, 'at', carb_id)
         # see if carb_id matches, to avoid re-inserting something already migrated
         curs.execute(f'''select loop_summary_id, user_id, carb_id
                         from {dest}.loop_summary
