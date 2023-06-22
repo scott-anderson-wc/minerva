@@ -51,6 +51,8 @@ import date_ui
 import requests
 import json
 import logging
+import random                   # for error_id numbers
+import html2text                # for readable messages from the Dexcom server
 import cs304dbi as dbi
 
 # Configuration Constants
@@ -130,8 +132,17 @@ def dexcom_login(creds):
         session_cookies = resp.cookies
     if resp.ok:
         return trim_quotes(resp.text)
+    # 6/22/2023 Sometimes the service isn't available. That's not a
+    # bug, so let's try to detect it and just log the fact
+    if resp.status == 503 and resp.reason == 'Service Unavailable':
+        logging.info('Service Unavailable')
+        sys.exit()
+    # similarly 504
+    if resp.status == 504 and resp.reason == 'Gateway Time-out':
+        logging.info('Gateway Time-out')
+        sys.exit()
     raise Exception('bad login request or response',
-                    [resp.status_code, resp.reason, resp.text] )
+                    [resp.status_code, resp.reason, html2text.html2.text(resp.text)] )
 
 def extract_unix_epoch(dexcom_date_string):
     '''Given a string like Date(1659091309000) or Date(1659091309000-0400) returns the string of digits'''
@@ -171,10 +182,21 @@ look like JSON, list of dictionaries of length max_count.'''
                          })
     if resp.ok:
         return resp.text
-    else:
-        logging.error(f'bad CGM request or response. status_code: {resp.status_code} ')
-        logging.error(resp.text.replace('\n',' '))
-        raise Exception('bad CGM request or response', resp)
+    # 6/22/2023 Sometimes the service isn't available. That's not a
+    # bug, so let's try to detect it and just log the fact
+    if resp.status == 503 and resp.reason == 'Service Unavailable':
+        logging.info('Service Unavailable')
+        sys.exit()
+    # similarly 504
+    if resp.status == 504 and resp.reason == 'Gateway Time-out':
+        logging.info('Gateway Time-out')
+        sys.exit()
+    # something else went wrong. Give it an id
+    error_id = random.randint(1, 1000)
+    logging.error(f'{error_id} bad CGM request or response. status_code: {resp.status_code} ')
+    logging.error(str(error_id)+html2text.html2.text(resp.text).replace('\n',' '))
+    raise Exception(f'bad cgm request or response, search logs for {error_id}',
+                    [resp.status_code, resp.reason, html2text.html2.text(resp.text)] )
 
 def parse_cgm_values(raw_data):
     json_data = json.loads(raw_data)
