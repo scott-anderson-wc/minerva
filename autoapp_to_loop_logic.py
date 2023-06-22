@@ -491,8 +491,6 @@ def migrate_boluses(conn, source, dest, start_time, commit=True):
     for row in boluses:
         # note: bolus_id is called bolus_pump_id in loop_logic
         (user_id, bolus_pump_id, date, value) = row
-        if value != round(value):
-            print('non-int', value, 'at', bolus_pump_id, 'on', date)
         # see if bolus_pump_id matches, to avoid re-inserting something already migrated
         curs.execute(f'''select loop_summary_id, user_id, bolus_pump_id, bolus_timestamp, bolus_value
                         from {dest}.loop_summary
