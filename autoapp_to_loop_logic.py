@@ -1095,7 +1095,7 @@ start_time_commands and start_time other.
         conn = dbi.connect()
     logging.info(f'starting migrate_all from {source} to {dest}')
     logging.info('1. realtime cgm')
-    # Change on 5/12. We are migrating latest data from realtime_cgm2 *including* the nulls.
+    # Change on 5/12/2023. We are migrating latest data from realtime_cgm2 *including* the nulls.
     # cancel that; we are only migrating non-null values.
     migrate_cgm_updates(conn, dest)
     # migrate_cgm_updates_with_nulls(conn, dest)
@@ -1109,27 +1109,24 @@ start_time_commands and start_time other.
         start_time_other = alt_start_time
     elif prev_update is not None:
         # use whichever is later
-        start_time_commands = max(prev_update, start_time_commands)
+        # 6/23/2023, ignore prev_update for commands
+        # start_time_commands = max(prev_update, start_time_commands)
         start_time_other = max(prev_update, start_time_other)
-    else:
-        # if prev_update is None, that means there's no new data in autoapp
-        # since we last migrated, so save ourselves some work by giving up now
-        logging.info('no new autoapp data, so giving up')
-        return
-    logging.info(f'migrating commands since {start_time_commands} and other since {start_time_other}')
+    logging.info(f'migrating commands since {start_time_commands} and bolus/carbs since {start_time_other}')
     logging.info('2. bolus')
     migrate_boluses(conn, source, dest, start_time_other)
-    logging.info('3. commands')
+    logging.info(f'3. commands since {start_time_commands}')
     migrate_commands(conn, source, dest, start_time_commands)
     logging.info('4. carbs')
     migrate_carbs(conn, source, dest, start_time_other)
     if test or alt_start_time:
         logging.info('done, but test mode/alt start time, so not storing update time')
     else:
-        logging.info('done. storing update time')
-        set_autoapp_migration_time(conn, dest, prev_update, last_autoapp_update)
-    logging.info('done')
-
+        if last_autoapp_update is not None:
+            logging.info('done. storing update time')
+            set_autoapp_migration_time(conn, dest, prev_update, last_autoapp_update)
+        else:
+            logging.info('done. skip storing update time, because it is None')
 
 # ================================================================
 # testing this code
