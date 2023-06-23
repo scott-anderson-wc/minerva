@@ -114,7 +114,8 @@ CREATE TABLE `configuration` (
   `topup_interval_mins` int,
   `max_bolus_interval_mins` int,
   `single_bolus_max` int,
-  `running_bolus_max` int
+  `running_bolus_max` int,
+  `carb_interval_mins` int
 );
 
 CREATE TABLE `datetime_program` (

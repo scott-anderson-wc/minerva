@@ -3,6 +3,6 @@
 
 -- also dropping the realtime_cgm_copy which we no longer need
 
-use loop_logic_test;
+-- use loop_logic_test;
 
 alter table realtime_cgm add column `src` enum('real','fake');

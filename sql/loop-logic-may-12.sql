@@ -85,7 +85,6 @@ CREATE TABLE `realtime_cgm` (
     -- index(rtime)
 );
 
-drop index if exists realtime_cgm_index_0;
 create index realtime_cgm_index_0
 on realtime_cgm(dexcom_time);
 
@@ -96,8 +95,10 @@ CREATE TABLE `loop_summary` (
   `user_id` int NOT NULL,
   `bolus_pump_id` int,
   `bolus_timestamp` datetime,
+  `bolus_type` enum('correction', 'carb'),  -- added on 3/16/2023
   `bolus_value` double,            -- was int. Fixed on 2/24/2023
   `carb_id` int,
+  `carb_timestamp` datetime,    -- Scott added on 3/16/2023, to make it easier to identify bolus_type
   `carb_value` double, -- added on Feb 3, 2023. was int. Fixed on 2/24/2023
   `running_carb_interval` int,
   `command_id` int,
@@ -111,6 +112,7 @@ CREATE TABLE `loop_summary` (
   `loop_command` int,
   `parent_decision` int,
   `linked_cgm_id` int comment 'will be null if no cgm found with matching timestamp',
+  `linked_cgm_value` int comment 'the value that goes with the cgm_id. might be null', -- added 12/23/2022
   `temp_basal_timestamp` datetime,
   `temp_basal_percent` int,
   `running` int,
@@ -119,7 +121,8 @@ CREATE TABLE `loop_summary` (
   `parent_involved` int,
   `running_bolus_interval` int,
   `running_topup_bolus_interval` int,
-  `running_interval_max` int
+  `running_interval_max` int,
+  `loop_processed` integer
 );
 
 CREATE TABLE `configuration` (
