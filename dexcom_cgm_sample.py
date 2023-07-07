@@ -142,7 +142,7 @@ def dexcom_login(creds):
         logging.info('Gateway Time-out')
         sys.exit()
     raise Exception('bad login request or response',
-                    [resp.status_code, resp.reason, html2text.html2.text(resp.text)] )
+                    [resp.status_code, resp.reason, html2text.html2text(resp.text)] )
 
 def extract_unix_epoch(dexcom_date_string):
     '''Given a string like Date(1659091309000) or Date(1659091309000-0400) returns the string of digits'''
@@ -194,9 +194,9 @@ look like JSON, list of dictionaries of length max_count.'''
     # something else went wrong. Give it an id
     error_id = random.randint(1, 1000)
     logging.error(f'{error_id} bad CGM request or response. status_code: {resp.status_code} ')
-    logging.error(str(error_id)+html2text.html2.text(resp.text).replace('\n',' '))
+    logging.error(str(error_id)+html2text.html2text(resp.text).replace('\n',' '))
     raise Exception(f'bad cgm request or response, search logs for {error_id}',
-                    [resp.status_code, resp.reason, html2text.html2.text(resp.text)] )
+                    [resp.status_code, resp.reason, html2text.html2text(resp.text)] )
 
 def parse_cgm_values(raw_data):
     json_data = json.loads(raw_data)
