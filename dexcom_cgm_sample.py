@@ -191,6 +191,10 @@ look like JSON, list of dictionaries of length max_count.'''
     if resp.status_code == 504 and resp.reason == 'Gateway Time-out':
         logging.info('Gateway Time-out')
         sys.exit()
+    # 7/11/2023 Sometimes we get an Internal Server Error
+    if resp.status_code == 500:
+        logging.info('Internal Server Error')
+        sys.exit()
     # something else went wrong. Give it an id
     error_id = random.randint(1, 1000)
     logging.error(f'{error_id} bad CGM request or response. status_code: {resp.status_code} ')
