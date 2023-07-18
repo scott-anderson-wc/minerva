@@ -702,6 +702,48 @@ def matching_bolus_row_within(conn, source, bolus_amount, timestamp, interval_mi
     closest = argmin(rows, lambda row : abs(row['date']-timestamp))
     return closest
 
+def remove_cancel_temporary_basal(rows):
+    '''iterate over rows in pairs, removing cancel_temporary_basal
+commands that are immediately followed by a temporary_basal command
+with the same timestamp. Rows are lists of the form 
+[command_id, user_id, created_timestamp, type...]'''
+    if len(rows) < 2:
+        return rows
+    results = []
+    prev = [None, None, None, None]
+    for curr in rows:
+        (_, _, pct, ptype,*_) = prev
+        (_, _, cct, ctype,*_) = curr
+        if pct == cct and ptype == 'cancel_temporary_basal' and ctype == 'temporary_basal':
+            results.pop()       # remove previous command
+        results.append(curr)
+        prev = curr
+    return results
+
+def remove_cancel_temporary_basal_test():
+    CAN='cancel_temporary_basal'
+    TMP='temporary_basal'
+    return remove_cancel_temporary_basal(
+        [ [1,7,1,CAN],
+          [2,7,1,TMP],
+          [3,7,3,CAN],
+          [4,7,3,TMP],
+          [5,7,5,CAN],
+          ])
+
+def remove_repeats(rows):
+    '''iterate over rows in pairs, removing repeats. so [1,2,2,3,3,4] => [1,2,3,4]'''
+    if len(rows) < 2:
+        return rows
+    results = []
+    prev = None
+    for curr in rows:
+        if curr == prev:
+            continue
+        results.append(curr)
+        prev = curr
+    return results
+
 def migrate_commands(conn, source, dest, alt_start_time=None, commit=True,
                      loop_summary_table='loop_summary'):
     '''Migrate commands within the last 40". '''
@@ -729,7 +771,12 @@ def migrate_commands(conn, source, dest, alt_start_time=None, commit=True,
         [start])
     logging.info(f'{num_com} commands to migrate')
     update = dbi.cursor(conn)
-    for row in read.fetchall():
+    rows = read.fetchall()
+    ## July 18 2023, removed cancel-temporary-basal commands that are
+    ## immediate followed by a temporary-basal command with the same
+    ## timestamp.
+    rows = remove_cancel_temporary_basal(rows)
+    for row in rows:
         row_str = ','.join([str(e) for e in row])
         logging.debug(f'migrating row {row_str}')
         # shorthands for the column names above
@@ -1516,6 +1563,74 @@ function tests those 4 scenarios.
                             from loop_logic_scott.loop_summary''')
             print('after', data_in)
             print_results(curs.fetchall())
+
+def test_4():
+    '''This test is about removing cancel_temp_basal that immediately precedes a temp_basal command'''
+    conn = dbi.connect()
+    test_clear_scott_db_and_start(conn)
+    # times will always be in minutes since the following start
+    start = date_ui.to_datetime('2023-05-01 12:00:00')
+    dest = 'loop_logic_scott'
+    source = 'autoapp_scott'
+    set_data_migration(conn, source, dest, start)
+
+    def dt(mins):
+        t0 = start + timedelta(minutes=mins)
+        return date_ui.str(t0)
+    def insert(conn, desc):
+        curs = dbi.cursor(conn)
+        if desc['table'] == 'bolus':
+            # 6 placeholders
+            curs.execute(f"insert into autoapp_scott.bolus values(%s, %s, %s, %s, %s, %s, %s)",
+                         desc['vals'])
+        elif desc['table'] == 'bolus_command':
+            # 1 placeholder, though maybe we should allow entering the whole row, as with the others
+            curs.execute(f"insert into autoapp_scott.commands(user_id, completed, type, created_timestamp) values(%s, %s, %s, %s)",
+                         desc['com_vals'])
+            curs.execute('select last_insert_id()')
+            comm_id = curs.fetchone()[0]
+            curs.execute('insert into autoapp_scott.commands_single_bolus_data values(%s, %s, 99, %s)',
+                         [comm_id, desc['amt'], desc['amt']])
+            curs.execute('update autoapp_scott.dana_history_timestamp set date = %s WHERE user_id = %s',
+                         [desc['time'], HUGH_USER_ID])
+        elif desc['table'] == 'carbs':
+            curs.execute(f"insert into autoapp_scott.carbohydrate(user_id,date,value) values(%s, %s, %s)",
+                         desc['vals'])
+        elif desc['table'] == 'commands':
+            curs.execute(f"insert into autoapp_scott.commands(user_id,created_timestamp,type) values(%s, %s, %s)",
+                         desc['vals'])
+        conn.commit()
+        
+    USER = 7
+    CAN_TEMP = 'cancel_temporary_basal'
+    TEMP_BASAL = 'temporary_basal'
+    init_cgm(conn, start)
+    for idx, scenario in enumerate([
+            [
+                {'table': 'commands', 'time': dt(1), 'vals': [USER, dt(1), CAN_TEMP]},
+                {'table': 'commands', 'time': dt(1), 'vals': [USER, dt(1), TEMP_BASAL]},
+                {'table': 'commands', 'time': dt(3), 'vals': [USER, dt(3), CAN_TEMP]},
+                {'table': 'commands', 'time': dt(3), 'vals': [USER, dt(3), TEMP_BASAL]},
+                {'table': 'commands', 'time': dt(7), 'vals': [USER, dt(7), CAN_TEMP]},
+                {'table': 'commands', 'time': dt(7), 'vals': [USER, dt(7), TEMP_BASAL]},
+                {'table': 'commands', 'time': dt(9), 'vals': [USER, dt(9), CAN_TEMP]},
+             ],
+    ]):
+        print(f'==== scenario {idx} ===========')
+        # all at once, unlike test_3
+        for data_in in scenario:
+            print('data in', data_in)
+            insert(conn, data_in)
+        # migrate test cgm
+        lltcc.cron_copy(conn, 'loop_logic_scott', True)
+        # migrate data; another difference from test_3
+        migrate_all(conn, 'autoapp_scott', 'loop_logic_scott', start)
+        curs = dbi.cursor(conn)
+        curs.execute('''select loop_summary_id, 
+                               command_id, created_timestamp, type
+                       from loop_logic_scott.loop_summary''')
+        print('after', data_in)
+        print_results(curs.fetchall())
 
 def col_widths(row_list):
     if len(row_list) == 0:
