@@ -598,7 +598,7 @@ def migrate_boluses(conn, source, dest, start_time, commit=True):
             logging.debug(f'no command matched bolus of {value} on {date}')
         # the normal case, we'll insert it. First see if there's a CGM at this time
         (cgm_id, mgdl) = matching_cgm(conn, dest, date)
-        # next, see if there are carbs w/in an interval.
+        # next, see if there are carbs w/in an interval. if so, update that row
         # 5/19. Get info about the carbs, to fill into loop_summary fields
         carb_row = carbs_within_interval(conn, source, dest, date, MATCHING_BOLUS_WITH_CARB_INTERVAL)
         if carb_row is None:
@@ -712,7 +712,6 @@ def migrate_commands(conn, source, dest, alt_start_time=None, commit=True,
              if alt_start_time is not None
              else datetime.now() - timedelta(minutes=40))
     start = date_ui.to_rtime(start)
-    logging.info(f'migrating commands since {start}')
     num_com = read.execute(
         f'''SELECT command_id, user_id, created_timestamp, type, 
                   if(completed,1,0) as comp,
@@ -765,17 +764,21 @@ def migrate_commands(conn, source, dest, alt_start_time=None, commit=True,
             # TODO: what are we doing with bolus_value versus sb_amt; they should be the same, right?
             # ANS: we don't do anything with bolus_value. 
             bolus_row = matching_bolus_row_within(conn, source, sb_amt, ct, MATCHING_BOLUS_INTERVAL)
-            logging.debug('matching bolus row for this command'+str(bolus_row))
+            logging.debug('matching bolus row for this command '+str(bolus_row))
             # might return None, so guard with (bolus_row AND expr)
             bolus_pump_id = bolus_row and bolus_row['bolus_id']
         else:
             bolus_pump_id = None
         # update on 6/22/2023. Need to check if there's already a
         # loop_summary entry because of a bolus migration or previous
-        # migration of this command. So, two scenarios for updating:
-        # (1) command already migrated or (2) loop summary row exists
-        # due to bolus having been processed.
-        
+        # migration of this command. So, three scenarios for updating:
+        # (1) command already migrated, (2) loop summary row exists
+        # due to bolus having been processed, or (3) loop summary row
+        # exists because of an associated carb event. Note that in
+        # migrating other events, we can skip them if they've already
+        # been migrated, but commands can update (eg state), so we
+        # need to update them.
+
         loop_summary_id_1 = None
         # TO DO: check this for efficiency. Currently O(n)
         nrows = update.execute(f'''SELECT loop_summary_id 
@@ -797,15 +800,23 @@ def migrate_commands(conn, source, dest, alt_start_time=None, commit=True,
             if nrows > 0:
                 loop_summary_id_2 = update.fetchone()[0]
                 logging.info(f'bolus {bolus_pump_id} already migrated. Updating {loop_summary_id_2}')
+        loop_summary_id_3 = None
+        carb_row = carbs_within_interval(conn, source, dest, ct, MATCHING_BOLUS_WITH_CARB_INTERVAL)
+        if carb_row is not None:
+            loop_summary_id_3 = carb_row[0]
+            logging.debug(f'found carbs matching command at time {str(ct)} in loop_summary row {loop_summary_id_3}')
         # conflicts?
+        logging.debug(f'three ids: command: {loop_summary_id_1}, bolus: {loop_summary_id_2}, carbs: {loop_summary_id_3}')
         if (loop_summary_id_1 is not None and
             loop_summary_id_2 is not None and
-            loop_summary_id_1 != loop_summary_id_2):
-            err_msg = f'command already migrated as {loop_summary_id_1} but matches bolus in {loop_summary_id_2}'
+            loop_summary_id_3 is not None and
+            not(loop_summary_id_1 == loop_summary_id_2 == loop_summary_id_3)):
+            err_msg = f'command already migrated as {loop_summary_id_1} but matches bolus in {loop_summary_id_2} and/or carbs in {loop_summary_id_3}'
             logging.error(err_msg)
             raise Exception(err_msg)
-        loop_summary_id = loop_summary_id_1 or loop_summary_id_2
+        loop_summary_id = loop_summary_id_1 or loop_summary_id_2 or loop_summary_id_3
         if loop_summary_id is not None:
+            logging.debug(f'updating existing row {loop_summary_id}')
             update.execute(f'''UPDATE {dest}.{loop_summary_table}
                               SET user_id = %s, bolus_pump_id = %s, bolus_value = %s, command_id = %s, 
                                   created_timestamp = %s, state = %s, type = %s, pending = %s, completed = %s,
@@ -1467,8 +1478,9 @@ function tests those 4 scenarios.
               {'table': 'bolus_command', 'time': dt(2), 'com_vals': [USER, 1, 'bolus', dt(2)], 'amt': 3},
              ],
             # command first, 4 unit bolus 1 minute later
-            [ {'table': 'bolus_command', 'time': dt(10), 'com_vals': [USER, 1, 'bolus', dt(10)], 'amt': 4},
-              {'table': 'bolus', 'time': dt(11), 'vals': [None, USER, dt(11), 'S', 4.0, 0, dt(11)]},
+            [
+                {'table': 'bolus_command', 'time': dt(10), 'com_vals': [USER, 1, 'bolus', dt(10)], 'amt': 4},
+                {'table': 'bolus', 'time': dt(11), 'vals': [None, USER, dt(11), 'S', 4.0, 0, dt(11)]},
              ],
             # 100 minutes later, 30 carbs first, 5 unit bolus 1 minute later
             [ {'table': 'carbs', 'time': dt(110), 'vals': [USER, dt(110), 30]},
@@ -1479,6 +1491,12 @@ function tests those 4 scenarios.
             [
                 {'table': 'bolus', 'time': dt(210), 'vals': [None, USER, dt(210), 'S', 6.0, 0, dt(210)]},
                 {'table': 'carbs', 'time': dt(211), 'vals': [USER, dt(211), 40]},
+             ],
+            # finally, a three-event combo
+            [
+                {'table': 'carbs', 'time': dt(310), 'vals': [USER, dt(310), 50]},
+                {'table': 'bolus_command', 'time': dt(311), 'com_vals': [USER, 1, 'bolus', dt(311)], 'amt': 7},
+                {'table': 'bolus', 'time': dt(312), 'vals': [None, USER, dt(312), 'S', 7.0, 0, dt(312)]},
              ],
             
     ]):
