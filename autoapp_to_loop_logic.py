@@ -735,6 +735,8 @@ def remove_repeats(rows):
     '''iterate over rows in pairs, removing repeats. so [1,2,2,3,3,4] => [1,2,3,4]'''
     if len(rows) < 2:
         return rows
+    ## This algorithm skips the second of a pair, while the previous
+    ## algorithm removes the first of a pair.
     results = []
     prev = None
     for curr in rows:
@@ -898,6 +900,12 @@ def migrate_commands(conn, source, dest, alt_start_time=None, commit=True,
                                (NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)''',
                            [uid, bolus_pump_id, sb_amt, cid, ct, state, ty, pend, comp, err, lc, pd,
                             cgm_id, cgm_value, parent_involved])
+        # update the migration_status table
+        curs2 = dbi.cursor(conn)
+        curs2.execute(f'''UPDATE {dest}.migration_status 
+                          SET most_recent_command_id = %s, most_recent_command_timestamp = %s
+                          WHERE user_id = %s''',
+                      [cid, ct, uid])
         # after either INSERT or UPDATE
         if commit:
             conn.commit()
