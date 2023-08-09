@@ -434,7 +434,7 @@ of 1/27/2023, it didn't match anything since 1/20/2023.'''
 def carbs_within_interval(conn, source, dest, timestamp, interval_width):
     '''returns loop_summary_id, carb_id, carb_timestamp, carb_value
 searching for carb value in loop_summary within plus or minus
-interval_width of timestamp. Returns None if no match.
+interval_width of timestamp. The carbs are *not* already matched with a bolus. Returns None if no match.
 
     '''
     if conn is None:
@@ -443,6 +443,7 @@ interval_width of timestamp. Returns None if no match.
     nr = curs.execute(f'''SELECT loop_summary_id, carb_id, carb_timestamp, carb_value 
                           FROM {dest}.loop_summary 
                           WHERE user_id = %s  
+                          AND bolus_pump_id is NULL
                           AND carb_timestamp 
                           BETWEEN (%s - interval %s minute) 
                               AND (%s + interval %s minute)''',
@@ -452,7 +453,7 @@ interval_width of timestamp. Returns None if no match.
     if nr == 1:
         return rows[0]
     if nr == 0:
-        logging.debug(f'no carbs in interval around {timestamp}')
+        logging.debug(f'no carbs w/o bolus in interval around {timestamp}')
         return None
     if nr > 1:
         logging.debug(f'multiple carbs in interval around {timestamp}; using largest')
@@ -500,7 +501,9 @@ Returns the loop_summary_id of the updated row, otherwise None.
     # 15 minutes) around the time of the bolus. Typically, there will
     # be zero or one such command, but conceivably more than one, in
     # which case, do we take the closest? Probably.
-    curs.execute(f'''select loop_summary_id, bolus_timestamp, bolus_value
+
+    # 8/9/2023 bolus_timestamp is NULL for row 11545. don't know why.
+    curs.execute(f'''select loop_summary_id, bolus_timestamp, bolus_value, bolus_type
                      from {dest}.loop_summary
                      where user_id = %s 
                      and type = 'bolus'
@@ -526,14 +529,21 @@ Returns the loop_summary_id of the updated row, otherwise None.
     # based on the time of the command, not the bolus, and the CGM
     # should already be set it the command. (though we should check)
 
+    # Update closest match
+    (loop_summary_id, bolus_timestamp, bolus_value, bolus_type) = closest
+    
     # also before we do the update, we need to determine if there are
     # matching carbs. If so, it's bolus_type='carb' otherwise it's
-    # bolus_type = 'correction'.
-    carb_row = carbs_within_interval(conn, source, dest, date, MATCHING_BOLUS_WITH_CARB_INTERVAL)
-    bolus_type = 'correction' if carb_row is None else 'carb'
+    # bolus_type = 'correction'. We look for carbs that aren't already
+    # matched.
+    if bolus_type != 'carb':
+        carb_row = carbs_within_interval(conn, source, dest, date, MATCHING_BOLUS_WITH_CARB_INTERVAL)
+        bolus_type = 'correction' if carb_row is None else 'carb'
+        if carb_row is not None:
+            (ls_id, carb_id, carb_timestamp, carb_value) = carb_row
+            if loop_summary_id != ls_id:
+                logging.error('loop summary has both {loop_summary_id} and {ls_id}; the first is a bolus and the second is carbs; should be just one row.')
 
-    # Update closest match
-    (loop_summary_id, bolus_timestamp, bolus_value) = closest
     logging.info(f'bolus {bolus_pump_id} matches prior bolus command, so updating loop summary row {loop_summary_id}')
     curs.execute(f'''update {dest}.loop_summary 
                      set bolus_pump_id = %s, bolus_timestamp = %s, bolus_type = %s
@@ -601,6 +611,17 @@ def migrate_boluses(conn, source, dest, start_time, commit=True):
         # next, see if there are carbs w/in an interval. if so, update that row
         # 5/19. Get info about the carbs, to fill into loop_summary fields
         carb_row = carbs_within_interval(conn, source, dest, date, MATCHING_BOLUS_WITH_CARB_INTERVAL)
+        if carb_row is not None:
+            # 8/7/23 check to see if this loop summary entry already has a bolus info in it. If not, we can update it.
+            # it should not have bolus info in it, because the function above now checks.
+            # TODO: combine the check below with the function above, to save time.
+            loop_id = carb_row[0]
+            logging.debug(f'checking to see if loop_summary row {loop_id} already has bolus info in it; it should not')
+            curs.execute(f'SELECT bolus_pump_id FROM {dest}.loop_summary WHERE loop_summary_id = %s', loop_id)
+            curr_row = curs.fetchone()
+            if curr_row[0] is not None:
+                logging.error('carb_row {loop_id} was not None, but it had info in it. setting carb_row to None so we will insert a new row')
+                carb_row = None
         if carb_row is None:
             logging.debug(f'CASE C: migrate bolus at time {date} has no matching carbs')
             # have to insert into loop_summary
@@ -610,19 +631,25 @@ def migrate_boluses(conn, source, dest, start_time, commit=True):
                              linked_cgm_id, linked_cgm_value)
                              values(%s, %s, %s, %s, %s, %s, %s)''',
                          [user_id, bolus_pump_id, date, bolus_type, value, cgm_id, mgdl])
-            # since it's a correction, check if it's an anchor or top-up
-            identify_anchor_bolus(conn, source, dest, date)
         else:
             # since there are matching carbs, update that row instead
             # we actually don't need the other data, since it's already in the row
             (loop_summary_id, carb_id, carb_timestamp, carb_value) = carb_row
             logging.debug(f'CASE D: migrate bolus at time {date} has matching carbs {carb_value} at time {carb_timestamp}')
             bolus_type = 'carb'
+            # we change the anchor value to None/Null, because if it
+            # *is* the carb anchor, it'll be identified as such below,
+            # and if not, we don't want it to erroneously stay as 1 or
+            # 2, since it's now a carb bolus.
+            anchor_value = None
             curs.execute(f'''UPDATE {dest}.loop_summary
                              SET bolus_pump_id = %s, bolus_timestamp = %s, bolus_type = %s, bolus_value = %s,
+                                 anchor = %s,
                                  linked_cgm_id = %s, linked_cgm_value = %s
                              WHERE loop_summary_id = %s''',
-                         [bolus_pump_id, date, bolus_type, value, cgm_id, mgdl, loop_summary_id])
+                         [bolus_pump_id, date, bolus_type, value, anchor_value, cgm_id, mgdl, loop_summary_id])
+        # check for anchors and top-up
+        identify_anchor_bolus(conn, source, dest, date)
     if commit:
         conn.commit()
     
@@ -632,6 +659,71 @@ def migrate_boluses_test(conn, source, dest, start_time, commit=True):
     print(f'{nr} carbs for testing')
     carb_times = [r[0] for r in curs.fetchall()]
     migrate_boluses(conn, source, 'lltt', start_time, commit=commit)
+
+## ================================================================
+
+def get_latest_temp_basal_since_time(conn, source, user_id, start_time):
+    '''Return the most recent temp basal (anything after start_time) as a
+tuple, or None. We only need to look at the temp_basal_state table,
+since we just want temp_basal_in_progress (1 or 0), date, and
+temp_basal_percent. 
+
+Janice said we only need the latest, so just look for max ID, so this
+returns one tuple or None.
+
+The Loop Summary Table document
+https://docs.google.com/document/d/1q4dZxhWAhJvpTycH-U17Es44d4eqjoIH/edit
+says that we only need the latest row and only if
+temp_basal_in_progress=1, so that's what I've done. See additional notes in migrate_temp_basal.
+
+    '''
+    curs = dbi.cursor(conn)
+    curs.execute(f'''select temp_basal_state_id, temp_basal_in_progress, temp_basal_percent, date 
+                    from {source}.temp_basal_state
+                    where temp_basal_state_id = (select max(temp_basal_state_id) 
+                                             from {source}.temp_basal_state
+                                             where user_id = %s and error = 0 and date >= %s)
+                    ''',
+                 [user_id, start_time])
+    return curs.fetchone()
+
+def migrate_temp_basal(conn, source, dest, user_id, start_time, commit=True):
+    '''start_time is a string or a python datetime.  Migrating temp basal
+is fairly easy: we look for any non-error rows later than start_time
+and we migrate the latest such row. We migrate both in_progress=0 and
+in_progress=1; that way, loop will know both the current state and a
+timestamp for it. Note that the temp_basal_state table is not
+voluminous. For all of July 2023, there are only 218 non-error rows,
+so that's about 7 per day.
+
+We are not sure why there are more rows with in_progress=0 versus
+in_progress=1.
+
+    '''
+    if conn is None:
+        conn = dbi.connect()
+    curs = dbi.cursor(conn)
+    basal = get_latest_temp_basal_since_time(conn, source, user_id, start_time)
+    if basal is None:
+        logging.info(f'no temp basal to migrate since {start_time}')
+        return
+    (id, in_progress, percent, date) = basal
+    in_progress = bytes_to_int(in_progress)
+    logging.info(f'migrating temp basal {id}: in_progress: {in_progress}, {percent}% at {date}')
+    # TODO: this needs the user_id
+    # Check back to https://docs.google.com/document/d/1q4dZxhWAhJvpTycH-U17Es44d4eqjoIH/edit
+    # which says to set command_id to NULL and type='temporary_basal'
+    (cgm_id, mgdl) = matching_cgm(conn, dest, date)
+    # have to insert into loop_summary
+    curs.execute(f'''INSERT INTO {dest}.loop_summary
+                     (user_id, command_id, type, temp_basal_timestamp, temp_basal_percent, running,
+                      linked_cgm_id, linked_cgm_value)
+                     VALUES(%s, NULL, 'temporary_basal', %s, %s, %s, %s, %s)''',
+                 [user_id, date, percent, in_progress, cgm_id, mgdl])
+    if commit:
+        conn.commit()
+
+## ================================================================
 
 def nonce_merge_boluses_with_carbs(conn, dest, start_time, end_time):
     pass
@@ -816,8 +908,10 @@ def migrate_commands(conn, source, dest, alt_start_time=None, commit=True,
             logging.debug('matching bolus row for this command '+str(bolus_row))
             # might return None, so guard with (bolus_row AND expr)
             bolus_pump_id = bolus_row and bolus_row['bolus_id']
+            bolus_time = bolus_row and bolus_row['date']
         else:
             bolus_pump_id = None
+            bolus_time = None
         # update on 6/22/2023. Need to check if there's already a
         # loop_summary entry because of a bolus migration or previous
         # migration of this command. So, three scenarios for updating:
@@ -867,13 +961,13 @@ def migrate_commands(conn, source, dest, alt_start_time=None, commit=True,
         if loop_summary_id is not None:
             logging.debug(f'updating existing row {loop_summary_id}')
             update.execute(f'''UPDATE {dest}.{loop_summary_table}
-                              SET user_id = %s, bolus_pump_id = %s, bolus_value = %s, command_id = %s, 
+                              SET user_id = %s, bolus_pump_id = %s, bolus_timestamp = %s, bolus_value = %s, command_id = %s, 
                                   created_timestamp = %s, state = %s, type = %s, pending = %s, completed = %s,
                                   error = %s, loop_command = %s, parent_decision = %s, 
                                   linked_cgm_id = %s, linked_cgm_value = %s, 
                                   parent_involved = %s
                               WHERE loop_summary_id = %s;''',
-                           [uid, bolus_pump_id, sb_amt, cid, ct, state, ty, pend, comp, err, lc, pd,
+                           [uid, bolus_pump_id, bolus_time, sb_amt, cid, ct, state, ty, pend, comp, err, lc, pd,
                             cgm_id, cgm_value,
                             parent_involved,
                             loop_summary_id])
@@ -884,6 +978,7 @@ def migrate_commands(conn, source, dest, alt_start_time=None, commit=True,
                                  (loop_summary_id,
                                  user_id,
                                  bolus_pump_id,
+                                 bolus_timestamp,
                                  bolus_value,
                                  command_id,
                                  created_timestamp,
@@ -897,8 +992,8 @@ def migrate_commands(conn, source, dest, alt_start_time=None, commit=True,
                                  linked_cgm_id,
                                  linked_cgm_value,
                                  parent_involved) VALUES 
-                               (NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)''',
-                           [uid, bolus_pump_id, sb_amt, cid, ct, state, ty, pend, comp, err, lc, pd,
+                               (NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)''',
+                           [uid, bolus_pump_id, bolus_time, sb_amt, cid, ct, state, ty, pend, comp, err, lc, pd,
                             cgm_id, cgm_value, parent_involved])
         # update the migration_status table
         curs2 = dbi.cursor(conn)
@@ -1014,6 +1109,16 @@ def migrate_carbs(conn, source, dest, start_time, commit=True):
         (cgm_id, cgm_value) = matching_cgm(conn, dest, carb_date)
         # 5/23. Get info about the carbs at this time. If so, use that row of loop_summary
         bolus_row = bolus_within_interval(conn, source, dest, carb_date, MATCHING_BOLUS_WITH_CARB_INTERVAL)
+        # 8/7/23. Check that the row with the bolus doesn't already have carbs in it.
+        # TODO: combine the check below with the function above, to save time.
+        if bolus_row is not None:
+            loop_id = bolus_row[0]
+            logging.debug(f'loop summary row {loop_id} with bolus exists. Check that it does not already have carbs')
+            curs.execute(f'SELECT carb_id FROM {dest}.loop_summary WHERE loop_summary_id = %s',[loop_id])
+            curr_row = curs.fetchone()
+            if curr_row[0] is not None:
+                logging.debug('setting bolus_row to None so that we will insert a new row')
+                bolus_row = None
         if bolus_row is None:
             logging.debug(f'CASE A: new carbs, no matching bolus')
             curs.execute(f'''INSERT INTO {dest}.loop_summary
@@ -1024,20 +1129,59 @@ def migrate_carbs(conn, source, dest, start_time, commit=True):
             # reuse existing row. Note that this revision means
             # that the bolus is now associated with carbs, so
             # change its type to 'carb' and its anchor to NULL
+            # Change on 7/26, anchor might not be NULL; might be 3
             (loop_summary_id, bolus_pump_id, bolus_timestamp, bolus_value) = bolus_row
             logging.debug(f'CASE B. migrate carbs at time {carb_date} has matching bolus {bolus_pump_id} at time {bolus_timestamp}')
             bolus_type = 'carb'
+            # check for anchor
+            anchor = compute_carb_anchor(conn, source, dest, value, loop_summary_id, start_time)
             curs.execute(f'''UPDATE {dest}.loop_summary
                              SET carb_id = %s, carb_timestamp = %s, carb_value = %s, 
-                                 bolus_type = 'carb', anchor = NULL,
+                                 bolus_type = 'carb', anchor = %s,
                                  linked_cgm_id = %s, linked_cgm_value = %s
                              WHERE loop_summary_id = %s''',
-                         [carb_id, carb_date, value, cgm_id, cgm_value, loop_summary_id])
+                         [carb_id, carb_date, value, anchor, cgm_id, cgm_value, loop_summary_id])
     if commit:
         conn.commit()
 
+def compute_carb_anchor(conn, source, dest, curr_bolus_value, curr_loop_summary_id, start_time, commit=True):
+    '''When a bolus switches from correction to carb, we have to compute
+whether it's the current anchor. This function looks in the interval
+preceding start_time and determines the bolus value and
+loop_summary_id of the anchor (largest carb bolus). If the new carb
+bolus beats it, we return 3 otherwise None.
+
+    '''
+    logging.info(f'determining carb anchor in interval preceding {start_time}')
+    curs = dbi.cursor(conn)
+    curs.execute(f'select bolus_interval_mins from {dest}.configuration')
+    interval = curs.fetchone()[0]
+    past = date_ui.to_datetime(start_time) - timedelta(minutes=interval)
+    # get all boluses in last interval.  We need to check that they
+    # are before start_time because we might identify historical
+    # anchor_boluses. In practice, start_time==now and the test will
+    # be vacuous
+    curs.execute(f'''SELECT loop_summary_id, bolus_type, bolus_value, bolus_timestamp 
+                     FROM {dest}.loop_summary 
+                     WHERE bolus_type = 'carb' 
+                        AND bolus_value > 0 
+                        AND bolus_timestamp > %s 
+                        AND bolus_timestamp <= %s''',
+                 [past, start_time])
+    rows = curs.fetchall()
+    anchor_row = argmax(rows, lambda r: r[2])
+    # since we haven't updated the row yet, it won't be in the
+    # rows. If anchor_row is None, curr is the winner. Otherwise, we
+    # have to compare.
+    if anchor_row is None:
+        return 3
+    if anchor_row[2] < curr_bolus_value:
+        return 3
+    return None
+
 # This function is not currently used. 
 def migrate_carbs_to_bolus(conn, source, dest, start_time, commit=True):
+
     '''This version looks for row with a bolus within 30 (configurable)
 minutes and updates that row to put the carbs into that.  If the carbs
 are within 30 minutes of *now*, they might have preceded the bolus, in
@@ -1159,14 +1303,14 @@ def identify_correction_boluses_nonce(conn, source, dest):
 
 def argmax(seq, func):
     '''Return the element of seq for which func is largest. Returns None
-if seq is empty.'''
+if seq is empty. In the event of a tie, returns the last such.'''
     if len(seq) == 0:
         return None
     best = seq[0]
     best_val = func(best)
     for elt in seq:
         elt_val = func(elt)
-        if elt_val > best_val:
+        if elt_val >= best_val:
             best, best_val = elt, elt_val
     return best
 
@@ -1182,6 +1326,10 @@ Note on 3/16: only correction boluses count.
 identified as a correction, which will mean its the newest bolus in
 the table, so this will always be searching back 120 minutes from now. 
 
+7/26, Janice asked for anchor=3 to be the largest carb bolus within
+the interval, so added that. I changed the query to look for all
+boluses in the interval, and then I'll filter them here.
+
     '''
     curs = dbi.cursor(conn)
     curs.execute(f'select bolus_interval_mins from {dest}.configuration')
@@ -1191,33 +1339,46 @@ the table, so this will always be searching back 120 minutes from now.
     # are before start_time because we might identify historical
     # anchor_boluses. In practice, start_time==now and the test will
     # be vacuous
-    curs.execute(f'''SELECT loop_summary_id,bolus_value,bolus_timestamp 
+    curs.execute(f'''SELECT loop_summary_id, bolus_type, bolus_value, bolus_timestamp 
                      FROM {dest}.loop_summary 
-                     WHERE bolus_type = 'correction' 
-                        AND bolus_value > 0 
+                     WHERE bolus_value > 0 
                         AND bolus_timestamp > %s 
                         AND bolus_timestamp <= %s''',
                  [past, start_time])
     rows = curs.fetchall()
+    # print('recent boluses')
+    # for r in rows: print(r)
     if len(rows) == 0:
         # no anchor because no boluses
         logging.info(f'no boluses in last {interval} minutes from {start_time}')
         return
-    # find largest
-    anchor_row = argmax(rows, lambda r: r[1])
-    logging.info(f'anchor bolus of {anchor_row[1]} at time {anchor_row[2]} ')
-    curs.execute(f'update {dest}.loop_summary set anchor=1 where loop_summary_id = %s',
-                 [anchor_row[0]])
+    correction_boluses = [ r for r in rows if r[1] == 'correction' ]
+    if len(correction_boluses) > 0:
+        # find largest correction bolus
+        anchor_row = argmax(correction_boluses, lambda r: r[2])
+        logging.info(f'anchor bolus of {anchor_row[1]} at time {anchor_row[2]} ')
+        curs.execute(f'update {dest}.loop_summary set anchor=1 where loop_summary_id = %s',
+                     [anchor_row[0]])
+        # Now, look for top-up, latest after. 
+        anchor_index = correction_boluses.index(anchor_row)
+        if anchor_index < len(correction_boluses)-1:
+            # there are rows *after* the anchor, so latest is the top-up
+            topup_row = correction_boluses[-1]
+            logging.info(f'top-up bolus of {topup_row[2]} at time {topup_row[3]}')
+            curs.execute(f'update {dest}.loop_summary set anchor=2 where loop_summary_id = %s',
+                         [topup_row[0]])
+    # finally, look at carb boluses
+    carb_boluses = [ r for r in rows if r[1] == 'carb' ]
+    if len(carb_boluses) == 0:
+        logging.debug(f'no carb bolus in interval')
+    else:
+        anchor_row = argmax(carb_boluses, lambda r: r[2])
+        logging.debug(f'carb bolus is anchor=3 for loop_summary_id = {anchor_row[0]}')
+        curs.execute(f'update {dest}.loop_summary set anchor=3 where loop_summary_id = %s',
+                     [anchor_row[0]])
     if commit:
         conn.commit()
-    # Now, look for top-up, latest after. 
-    anchor_index = rows.index(anchor_row)
-    if anchor_index < len(rows)-1:
-        # there are rows *after* the anchor, so latest is the top-up
-        topup_row = rows[-1]
-        logging.info(f'top-up bolus of {topup_row[1]} at time {topup_row[2]}')
-        curs.execute(f'update {dest}.loop_summary set anchor=2 where loop_summary_id = %s',
-                     [topup_row[0]])
+
 
 ## Used to test whether identify_anchor_bolus is going to get an error
 
@@ -1277,9 +1438,11 @@ start_time_commands and start_time other.
     logging.info(f'migrating commands since {start_time_commands} and bolus/carbs since {start_time_other}')
     logging.info('2. bolus')
     migrate_boluses(conn, source, dest, start_time_other)
-    logging.info(f'3. commands since {start_time_commands}')
+    logging.info('3. migrating temp basal')
+    migrate_temp_basal(conn, source, dest, HUGH_USER_ID, start_time_other)
+    logging.info(f'4. commands since {start_time_commands}')
     migrate_commands(conn, source, dest, start_time_commands)
-    logging.info('4. carbs')
+    logging.info('5. carbs')
     migrate_carbs(conn, source, dest, start_time_other)
     if test or alt_start_time:
         logging.info('done, but test mode/alt start time, so not storing update time')
@@ -1371,7 +1534,8 @@ def set_data_migration(conn, source, dest, start):
 
 
 def test_1():
-    '''tests that boluses near carbs are identified as carbs, not corrections'''
+    '''tests that boluses near carbs are identified as carbs, not
+corrections. Also tests their categorizations as anchors.'''
     conn = dbi.connect()
     test_clear_scott_db_and_start(conn)
     # times will always be in minutes since the following start
@@ -1399,33 +1563,59 @@ def test_1():
         
     USER = 7
     init_cgm(conn, start)
-    for data_in in [
-            [ {'table': 'bolus', 'time': dt(1), 'vals': [None, USER, dt(1), 'S', 4.0, 0]}, ],
-            # this is much later, so previous bolus is correction
-            [ {'table': 'carbohydrate', 'time': dt(12), 'vals': [None, USER, dt(12), 40]} ],
-            # this is also later, so previous carbs is alone
-            [ {'table': 'bolus', 'time': dt(23), 'vals': [None, USER, dt(23), 'S', 5.0, 0]}, ],
-            # but this is soon, so will be combined:
-            [ {'table': 'carbohydrate', 'time': dt(24), 'vals': [None, USER, dt(24), 50]} ],
-            # this pair is much later, carbs first
-            [ {'table': 'carbohydrate', 'time': dt(35), 'vals': [None, USER, dt(35), 45]} ],
-            [ {'table': 'bolus', 'time': dt(36), 'vals': [None, USER, dt(36), 'S', 4.5, 0]}, ]
-            ]:
+    for scenario, data_in in enumerate([
+            # scenario 0, bolus w/o carbs, so correction and anchor=1
+            [ {'table': 'bolus', 'time': (1), 'vals': [None, USER, dt(1), 'S', 4.0, 0]}, ],
+            # this is much later (> 20 minutes), so previous bolus is still correction and will be anchor=1
+            [ {'table': 'carbohydrate', 'time': (32), 'vals': [None, USER, dt(32), 40]} ],
+            # this is also later, so previous carbs is alone, and this is a correction bolus and anchor=1
+            [ {'table': 'bolus', 'time': (62), 'vals': [None, USER, dt(62), 'S', 5.0, 0]}, ],
+            # but these carbs are soon, so will be combined with the bolus at time 62, changing to carbs bolus and anchor=3
+            [ {'table': 'carbohydrate', 'time': (64), 'vals': [None, USER, dt(64), 50]} ],
+            # this pair is a little later, carbs first. This will be a
+            # carbs bolus, and will be the anchor=None, because it's
+            # smaller than the previous carb bolus at 64
+            [ {'table': 'carbohydrate', 'time': (85), 'vals': [None, USER, dt(85), 45]} ],
+            [ {'table': 'bolus', 'time': (86), 'vals': [None, USER, dt(86), 'S', 4.5, 0]}, ],
+            # this pair is much later, carbs first. This will be a carbs bolus, and will be the anchor=3
+            [ {'table': 'carbohydrate', 'time': (285), 'vals': [None, USER, dt(285), 60]} ],
+            [ {'table': 'bolus', 'time': (286), 'vals': [None, USER, dt(286), 'S', 6, 0]}, ],
+            # this pair is just a little later than the last pair, but
+            # same carb value, so the new row will be the anchor (ties
+            # go to the most recent)
+            [ {'table': 'carbohydrate', 'time': (305), 'vals': [None, USER, dt(305), 30]} ],
+            [ {'table': 'bolus', 'time': (306), 'vals': [None, USER, dt(306), 'S', 6, 0]}, ],
+            # two corrections; the second will be a top-up
+            [ {'table': 'bolus', 'time': (401), 'vals': [None, USER, dt(401), 'S', 7, 0]}, ],
+            [ {'table': 'bolus', 'time': (432), 'vals': [None, USER, dt(432), 'S', 3, 0]}, ],
+            
+            ]):
         for data1_in in data_in:
-            print('data in', data1_in)
+            time = data1_in['time']
+            local_time = dt(time)
+            data1_in['time'] = local_time
+            print(f'****************\n scenario {scenario} \n time: {time} == {local_time}\n', data1_in)
             # insert data into chosen table
             insert(conn, data1_in)
             # migrate test cgm
             lltcc.cron_copy(conn, 'loop_logic_scott', True)
             # migrate data at test time
-            migrate_all(conn, 'autoapp_scott', 'loop_logic_scott', data1_in['time'])
+            migrate_all(conn, 'autoapp_scott', 'loop_logic_scott', local_time)
             curs = dbi.cursor(conn)
             curs.execute('''select loop_summary_id, 
-                                   bolus_pump_id, time(bolus_timestamp), bolus_type, bolus_value, anchor
-                                   carb_id, time(carb_timestamp), carb_value
+                                   bolus_pump_id, time(bolus_timestamp), bolus_type, bolus_value, anchor,
+                                   carb_id, time(carb_timestamp), carb_value, '&'
                             from loop_logic_scott.loop_summary''')
             print('after', data_in)
             print_results(curs.fetchall())
+
+'''A test function consists of set of scenarios. Each scenario has a
+text description, and a sequence of inputs. Each input might need to
+update several tables, so the input is also a list of table
+insertions, though usually a list of only one.'''
+
+def test_1a():
+    pass
 
 def test_2():
     '''checks that boluses are properly identified as anchor and/or top-up.'''
@@ -1460,17 +1650,18 @@ def test_2():
             # carbs and bolus at the same time, so carbs
             [ {'table': 'carbohydrate', 'time': dt(1), 'vals': [None, USER, dt(1), 40]},
               {'table': 'bolus', 'time': dt(1), 'vals': [None, USER, dt(1), 'S', 4.0, 0]} ],
-            # this is later and alone, so a correction. Should be marked as anchor
+            # this is later and alone, so a correction. Should be marked as anchor=1
             [ {'table': 'bolus', 'time': dt(23), 'vals': [None, USER, dt(23), 'S', 5.0, 0]}, ],
             # this is much later and alone, so a correction, but smaller than preceding.
-            # Should be marked as top-up
+            # Should be marked as top-up (anchor=2)
             [ {'table': 'bolus', 'time': dt(80), 'vals': [None, USER, dt(80), 'S', 3.0, 0]}, ],
-            # Here's another bolus, that will be briefly considered an anchor, but then changes to carbs
+            # Here's another bolus, that will be briefly considered an correction, but then changes to carbs
+            # will have anchor=3
             [ {'table': 'bolus', 'time': dt(120), 'vals': [None, USER, dt(120), 'S', 3.0, 0]}, ],
             [ {'table': 'carbohydrate', 'time': dt(121), 'vals': [None, USER, dt(121), 50]} ],
             ]:
         for data1_in in data_in:
-            print('data in', data1_in)
+            print('data in', data1_in, 'time', (date_ui.to_datetime(data1_in['time'])-start).seconds/60)
             # insert data into chosen table
             insert(conn, data1_in)
             # migrate test cgm
@@ -1491,6 +1682,12 @@ loop_summary row. A bolus event and an bolus command, in either order,
 results in just one loop_summary row. Similarly, a carbs and a bolus,
 in either order, should result in just one loop_summary row. This
 function tests those 4 scenarios.
+
+It also checks for a scenario with dinner+dessert, where carbs and
+boluses come in quick succession, but we want *two* loop_summary
+entries, not one.
+
+It also tests identification of anchors.
 
     '''
     conn = dbi.connect()
@@ -1528,32 +1725,45 @@ function tests those 4 scenarios.
     USER = 7
     init_cgm(conn, start)
     for idx, scenario in enumerate([
-            # 3 unit bolus first, command 1 minute later
+            # 3 unit bolus first, command 1 minute later. No carbs, so this is a correction bolus
             [ {'table': 'bolus', 'time': dt(1), 'vals': [None, USER, dt(1), 'S', 3.0, 0, dt(1)]},
               {'table': 'bolus_command', 'time': dt(2), 'com_vals': [USER, 1, 'bolus', dt(2)], 'amt': 3},
              ],
-            # command first, 4 unit bolus 1 minute later
+            # command first, 4 unit bolus 1 minute later. Another correction bolus
             [
                 {'table': 'bolus_command', 'time': dt(10), 'com_vals': [USER, 1, 'bolus', dt(10)], 'amt': 4},
                 {'table': 'bolus', 'time': dt(11), 'vals': [None, USER, dt(11), 'S', 4.0, 0, dt(11)]},
              ],
-            # 100 minutes later, 30 carbs first, 5 unit bolus 1 minute later
+            # 100 minutes later, 30 carbs first, 5 unit bolus 1 minute later. This is a carb bolus
             [ {'table': 'carbs', 'time': dt(110), 'vals': [USER, dt(110), 30]},
               {'table': 'bolus', 'time': dt(111), 'vals': [None, USER, dt(111), 'S', 5.0, 0, dt(111)]},
              ],
             # another 100 minutes later, 40 carbs second, 6 unit bolus 1 minute earlier
-            # note that the carbs needs to update the bolus type to 'correction'
+            # note that the carbs needs to update the bolus type to 'carbs'
             [
                 {'table': 'bolus', 'time': dt(210), 'vals': [None, USER, dt(210), 'S', 6.0, 0, dt(210)]},
                 {'table': 'carbs', 'time': dt(211), 'vals': [USER, dt(211), 40]},
              ],
-            # finally, a three-event combo
+            # a three-event combo. A carbs bolus
             [
                 {'table': 'carbs', 'time': dt(310), 'vals': [USER, dt(310), 50]},
                 {'table': 'bolus_command', 'time': dt(311), 'com_vals': [USER, 1, 'bolus', dt(311)], 'amt': 7},
                 {'table': 'bolus', 'time': dt(312), 'vals': [None, USER, dt(312), 'S', 7.0, 0, dt(312)]},
              ],
-            
+            # three successive boluses with carbs. First is anchor=3, last is top-up
+            [
+                {'table': 'carbs', 'time': dt(410), 'vals': [USER, dt(410), 50]},
+                {'table': 'bolus', 'time': dt(412), 'vals': [None, USER, dt(412), 'S', 7.0, 0, dt(412)]},
+                {'table': 'bolus', 'time': dt(422), 'vals': [None, USER, dt(422), 'S', 2.0, 0, dt(422)]},
+                {'table': 'bolus', 'time': dt(432), 'vals': [None, USER, dt(432), 'S', 2.0, 0, dt(432)]},
+             ],
+            # dinner + dessert
+            [
+                {'table': 'carbs', 'time': dt(601), 'vals': [USER, dt(601), 60]},
+                {'table': 'bolus', 'time': dt(602), 'vals': [None, USER, dt(602), 'S', 8.0, 0, dt(602)]},
+                {'table': 'carbs', 'time': dt(603), 'vals': [USER, dt(603), 20]},
+                {'table': 'bolus', 'time': dt(604), 'vals': [None, USER, dt(604), 'S', 3.0, 0, dt(604)]},
+            ],
     ]):
         print(f'==== scenario {idx} ===========')
         for data_in in scenario:
@@ -1567,7 +1777,8 @@ function tests those 4 scenarios.
             curs = dbi.cursor(conn)
             curs.execute('''select loop_summary_id, 
                                    bolus_pump_id, time(bolus_timestamp), bolus_type, bolus_value, 
-                                   carb_id, carb_timestamp, carb_value
+                                   carb_id, carb_timestamp, carb_value, 
+                                   anchor
                             from loop_logic_scott.loop_summary''')
             print('after', data_in)
             print_results(curs.fetchall())
@@ -1640,6 +1851,72 @@ def test_4():
         print('after', data_in)
         print_results(curs.fetchall())
 
+def test_5():
+    '''Testing the various anchor types'''
+    conn = dbi.connect()
+    test_clear_scott_db_and_start(conn)
+    # times will always be in minutes since the following start
+    start = date_ui.to_datetime('2023-05-01 12:00:00')
+    dest = 'loop_logic_scott'
+    source = 'autoapp_scott'
+    set_data_migration(conn, source, dest, start)
+
+    def dt(mins):
+        t0 = start + timedelta(minutes=mins)
+        return date_ui.str(t0)
+    def insert(conn, desc):
+        curs = dbi.cursor(conn)
+        if desc['table'] == 'bolus':
+            # 6 placeholders. server_time can't be null.
+            curs.execute(f"insert into autoapp_scott.bolus values(NULL, %s, %s, %s, %s, %s, %s)",
+                         desc['vals'])
+        elif desc['table'] == 'bolus_command':
+            # 1 placeholder, though maybe we should allow entering the whole row, as with the others
+            curs.execute(f"insert into autoapp_scott.commands(user_id, completed, type, created_timestamp) values(%s, %s, %s, %s)",
+                         desc['com_vals'])
+            curs.execute('select last_insert_id()')
+            comm_id = curs.fetchone()[0]
+            curs.execute('insert into autoapp_scott.commands_single_bolus_data values(%s, %s, 99, %s)',
+                         [comm_id, desc['amt'], desc['amt']])
+            curs.execute('update autoapp_scott.dana_history_timestamp set date = %s WHERE user_id = %s',
+                         [desc['time'], HUGH_USER_ID])
+        elif desc['table'] == 'carbs':
+            curs.execute(f"insert into autoapp_scott.carbohydrate(user_id,date,value) values(%s, %s, %s)",
+                         desc['vals'])
+        elif desc['table'] == 'commands':
+            curs.execute(f"insert into autoapp_scott.commands(user_id,created_timestamp,type) values(%s, %s, %s)",
+                         desc['vals'])
+        conn.commit()
+        
+    USER = 7
+    init_cgm(conn, start)
+    for idx, scenario in enumerate([
+            [
+                {'table': 'bolus', 'time': dt(1), 'vals': [USER, dt(1), 'S', 3, 30, dt(1)]},
+                {'table': 'bolus', 'time': dt(2), 'vals': [USER, dt(2), 'S', 4, 40, dt(2)]}, # largest, hence anchor
+                {'table': 'bolus', 'time': dt(3), 'vals': [USER, dt(3), 'S', 1, 20, dt(3)]},
+                {'table': 'bolus', 'time': dt(4), 'vals': [USER, dt(4), 'S', 1, 30, dt(4)]}, # top-up
+                {'table': 'carbs', 'time': dt(5), 'vals': [USER, dt(20), 100]}, # lotsa carbs, so previous should be carb anchor
+                {'table': 'bolus', 'time': dt(5), 'vals': [USER, dt(20), 'S', 5, 50, dt(20)]}, # carb anchor
+             ],
+    ]):
+        print(f'==== scenario {idx} ===========')
+        # all at once, unlike test_3
+        for data_in in scenario:
+            print('data in', data_in)
+            insert(conn, data_in)
+        # migrate test cgm
+        lltcc.cron_copy(conn, 'loop_logic_scott', True)
+        # migrate data; another difference from test_3
+        migrate_all(conn, 'autoapp_scott', 'loop_logic_scott', start)
+        curs = dbi.cursor(conn)
+        curs.execute('''select loop_summary_id, 
+                               bolus_pump_id, time(bolus_timestamp), bolus_type, bolus_value, anchor
+                               carb_id, time(carb_timestamp), carb_value
+                        from loop_logic_scott.loop_summary''')
+        print('after', data_in)
+        print_results(curs.fetchall())
+
 def col_widths(row_list):
     if len(row_list) == 0:
         raise ValueError('empty list')
@@ -1656,7 +1933,7 @@ def print_results(row_list):
         for idx,col in enumerate(row):
             out += '\t'+str(col).rjust(widths[idx])
         print(out)
-    # print('\t'+'|'.join([str(x) for x in row]))
+        # print('\t'+'|'.join([str(x) for x in row]))
 
 
 if __name__ == '__main__': 
