@@ -1484,7 +1484,7 @@ start_time_commands and start_time other.
     # Now, to commands. These are done only with a timeout
     start_time_commands = (alt_start_time if alt_start_time is not None
                            else datetime.now() - timedelta(minutes=cmd_timeout))
-    logging.info(f'5. migrating commands since {start_time_commands}')
+    logging.info(f'3. migrating commands since {start_time_commands}')
     migrate_commands(conn, source, dest, HUGH_USER_ID, start_time_commands)
     if test or alt_start_time:
         logging.info('done, but test mode/alt start time, so not storing update time')
@@ -1494,7 +1494,7 @@ start_time_commands and start_time other.
             logging.info('done. storing update time')
             set_autoapp_migration_time(conn, dest, prev_update, last_autoapp_update)
         else:
-            logging.info('done. skip storing update time, because it is None')
+            logging.info('done. skip storing data update time, because it is None')
         # always note successful completion
         stop_run(conn, source, dest, HUGH_USER_ID, 'success')
 
