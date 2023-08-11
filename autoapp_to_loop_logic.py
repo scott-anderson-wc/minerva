@@ -1473,7 +1473,9 @@ start_time_commands and start_time other.
             start_time_data_default =  datetime.now() - timedelta(minutes=OTHER_DATA_TIMEOUT)
             start_time_data = max(prev_update, start_time_data_default)
 
-    if start_time_data is not None:
+    if start_time_data is None:
+        logging.debug(f'2. no data to migrate since {start_time_data}')
+    else:
         logging.info(f'2. migrating data since {start_time_data}')
         logging.info('2a. migrating bolus since {start_time_data}')
         migrate_boluses(conn, source, dest, start_time_data)
