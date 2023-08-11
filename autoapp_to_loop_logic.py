@@ -84,6 +84,36 @@ def debugging():
     '''Run this in the Python REPL to turn on debug logging. The default is just error'''
     logging.basicConfig(level=logging.DEBUG)
 
+# ================================================================
+
+'''When we start a run, we stored the time and the value
+'starting'. When we end a run normally (without raising an exception
+and crashing), we store the final status. If the value says
+'starting', we can assume the most recent run resulted in a crash (or
+we happen to be looking at the table during the few seconds that the
+migration code is running). Otherwise, the final value should be accurate.
+
+Aug 11, 2023
+'''
+
+def start_run(conn, source, dest, user_id):
+    curs = dbi.cursor(conn)
+    curs.execute(f'''UPDATE {dest}.migration_status
+                     SET last_run = now(), last_status = 'starting'
+                     WHERE user_id = %s''',
+                 [user_id])
+    conn.commit()
+
+def stop_run(conn, source, dest, user_id, status):
+    curs = dbi.cursor(conn)
+    curs.execute(f'''UPDATE {dest}.migration_status
+                     SET last_run = now(), last_status = %s
+                     WHERE user_id = %s''',
+                 [status, user_id])
+    conn.commit()
+
+# ================================================================
+
 # this is copied from dexcom_cgm_sample.py
 # we should consider storing this useful value
 
@@ -184,9 +214,10 @@ migration_status when we are done migrating. See set_migration_time.
         return None, None
     prev_autoapp = row[0]
     if prev_autoapp < last_autoapp_update:
-        # new data since last migration, so return the time to migrate since
+        logging.debug(f'new data in {source} since last migration, so migrate from {prev_autoapp} to {last_autoapp_update}')
         return prev_autoapp, last_autoapp_update # increasing order
     else:
+        logging.debug(f'no new data in {source} since last migration')
         return None, None
 
 def set_autoapp_migration_time(conn, dest, prev_update, last_update):
@@ -194,7 +225,7 @@ def set_autoapp_migration_time(conn, dest, prev_update, last_update):
 https://docs.google.com/document/d/1ZCtErlxRQmPUz_vbfLXdg7ap2hIz5g9Lubtog8ZqFys/edit#heading=h.umdjcuqs1gq4
 
 This function sets the value of prev_autoapp_update in the
-loop_logic.migration_status table to the time of the lastest real data
+loop_logic.migration_status table to the time of the latest real data
 in autoapp.dana_history_timestamp
 
 It uses the passed-in values, to avoid issues of simultaneous updates.
@@ -838,7 +869,7 @@ def remove_repeats(rows):
         prev = curr
     return results
 
-def migrate_commands(conn, source, dest, alt_start_time=None, commit=True,
+def migrate_commands(conn, source, dest, user_id, alt_start_time=None, commit=True,
                      loop_summary_table='loop_summary'):
     '''Migrate commands within the last 40". '''
     if conn is None:
@@ -861,8 +892,8 @@ def migrate_commands(conn, source, dest, alt_start_time=None, commit=True,
            FROM {source}.commands 
                 LEFT OUTER JOIN {source}.commands_single_bolus_data AS sb USING(command_id)
                 LEFT OUTER JOIN {source}.commands_temporary_basal_data AS tb USING(command_id)
-           WHERE created_timestamp >= %s''',
-        [start])
+           WHERE user_id = %s and created_timestamp >= %s''',
+        [user_id, start])
     logging.info(f'{num_com} commands to migrate')
     update = dbi.cursor(conn)
     rows = read.fetchall()
@@ -876,6 +907,8 @@ def migrate_commands(conn, source, dest, alt_start_time=None, commit=True,
         # shorthands for the column names above
         (cid, uid, ct, ty, comp, err, state, pend, lc, pd, sb_amt, tb_ratio) = row
         if cid is None:
+            stop_run(conn, source, dest, user_id, 'error')
+            logging.error(f'NULL command id. This should be impossible')
             raise Exception('NULL cid')
         ## compute parent_involved as a simple boolean
         parent_involved = 0 if lc == 1 and pd == 0 else 1
@@ -956,6 +989,7 @@ def migrate_commands(conn, source, dest, alt_start_time=None, commit=True,
             not(loop_summary_id_1 == loop_summary_id_2 == loop_summary_id_3)):
             err_msg = f'command already migrated as {loop_summary_id_1} but matches bolus in {loop_summary_id_2} and/or carbs in {loop_summary_id_3}'
             logging.error(err_msg)
+            stop_run(conn, source, dest, user_id, 'error')
             raise Exception(err_msg)
         loop_summary_id = loop_summary_id_1 or loop_summary_id_2 or loop_summary_id_3
         if loop_summary_id is not None:
@@ -1015,7 +1049,7 @@ def test_migrate_commands(conn, source, dest, alt_start_time, commit):
     curs.execute(f'drop table if exists {dest}.{TABLE}')
     curs.execute(f'create table {dest}.{TABLE} like {dest}.loop_summary')
     conn.commit()
-    migrate_commands(conn, source, dest, alt_start_time, commit,
+    migrate_commands(conn, source, dest, HUGH_USER_ID, alt_start_time, commit,
                      loop_summary_table=TABLE)
     # curs.execute(f'select * from {dest}.{TABLE}')
     curs.execute(f'select loop_summary_id, command_id, state, type, pending, loop_command, parent_decision from {dest}.{TABLE}')
@@ -1038,7 +1072,7 @@ there are significant upgrades to the algorithm.'''
     if commit:
         conn.commit()
     # remigrate
-    migrate_commands(conn, source, dest, alt_start_time, commit)
+    migrate_commands(conn, source, dest, HUGH_USER_ID, alt_start_time, commit)
 
 ## ================================================================
 
@@ -1418,6 +1452,7 @@ start_time_commands and start_time other.
         conn = dbi.connect()
     logging.info(f'starting migrate_all from {source} to {dest}')
     logging.info('1. realtime cgm')
+    start_run(conn, source, dest, HUGH_USER_ID)
     # Change on 5/12/2023. We are migrating latest data from realtime_cgm2 *including* the nulls.
     # cancel that; we are only migrating non-null values.
     migrate_cgm_updates(conn, dest)
@@ -1441,17 +1476,21 @@ start_time_commands and start_time other.
     logging.info('3. migrating temp basal')
     migrate_temp_basal(conn, source, dest, HUGH_USER_ID, start_time_other)
     logging.info(f'4. commands since {start_time_commands}')
-    migrate_commands(conn, source, dest, start_time_commands)
+    migrate_commands(conn, source, dest, HUGH_USER_ID, start_time_commands)
     logging.info('5. carbs')
     migrate_carbs(conn, source, dest, start_time_other)
     if test or alt_start_time:
         logging.info('done, but test mode/alt start time, so not storing update time')
     else:
+        # last_autoapp_update is None when there's no data (but there might be commands)
         if last_autoapp_update is not None:
             logging.info('done. storing update time')
             set_autoapp_migration_time(conn, dest, prev_update, last_autoapp_update)
         else:
             logging.info('done. skip storing update time, because it is None')
+        # always note successful completion
+        stop_run(conn, source, dest, HUGH_USER_ID, 'success')
+
 
 # ================================================================
 # testing this code
