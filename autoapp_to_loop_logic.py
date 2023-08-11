@@ -736,11 +736,11 @@ in_progress=1.
     curs = dbi.cursor(conn)
     basal = get_latest_temp_basal_since_time(conn, source, user_id, start_time)
     if basal is None:
-        logging.info(f'no temp basal to migrate since {start_time}')
+        logging.info(f'no temp basal in {source} to migrate since {start_time}')
         return
     (id, in_progress, percent, date) = basal
     in_progress = bytes_to_int(in_progress)
-    logging.info(f'migrating temp basal {id}: in_progress: {in_progress}, {percent}% at {date}')
+    logging.info(f'migrating temp basal {id}: in_progress: {in_progress}, {percent}% at {date} > {start_time}')
     # TODO: this needs the user_id
     # Check back to https://docs.google.com/document/d/1q4dZxhWAhJvpTycH-U17Es44d4eqjoIH/edit
     # which says to set command_id to NULL and type='temporary_basal'
@@ -1459,26 +1459,33 @@ start_time_commands and start_time other.
     # migrate_cgm_updates_with_nulls(conn, dest)
     ## obsolete to use last update? or maybe we should use it if it's later than
     prev_update, last_autoapp_update = get_autoapp_update_times(conn, source, dest)
+    logging.debug(f'for {source}, last autoapp data updates are {prev_update} and {last_autoapp_update}')
     cmd_timeout = read_command_migration_minutes(conn, dest)
-    start_time_commands = datetime.now() - timedelta(minutes=cmd_timeout)
-    start_time_other =  datetime.now() - timedelta(minutes=OTHER_DATA_TIMEOUT)
     if alt_start_time is not None:
-        start_time_commands = alt_start_time
-        start_time_other = alt_start_time
-    elif prev_update is not None:
-        # use whichever is later
-        # 6/23/2023, ignore prev_update for commands
-        # start_time_commands = max(prev_update, start_time_commands)
-        start_time_other = max(prev_update, start_time_other)
-    logging.info(f'migrating commands since {start_time_commands} and bolus/carbs since {start_time_other}')
-    logging.info('2. bolus')
-    migrate_boluses(conn, source, dest, start_time_other)
-    logging.info('3. migrating temp basal')
-    migrate_temp_basal(conn, source, dest, HUGH_USER_ID, start_time_other)
-    logging.info(f'4. commands since {start_time_commands}')
+        start_time_data = alt_start_time
+    else:
+        # normally, we check prev_update. If it's None, there's no new data, so do nothing.
+        # if it's not None, use the later of prev_update and start_time_data_default
+        if prev_update is None:
+            logging.info(f'no new data in {source}, so skipping to commands')
+            start_time_data = None
+        else:
+            start_time_data_default =  datetime.now() - timedelta(minutes=OTHER_DATA_TIMEOUT)
+            start_time_data = max(prev_update, start_time_data_default)
+
+    if start_time_data is not None:
+        logging.info(f'2. migrating data since {start_time_data}')
+        logging.info('2a. migrating bolus since {start_time_data}')
+        migrate_boluses(conn, source, dest, start_time_data)
+        logging.info(f'2b. migrating temp basal since {start_time_data}')
+        migrate_temp_basal(conn, source, dest, HUGH_USER_ID, start_time_data)
+        logging.info('2c. migrating carbs since {start_time_data}')
+        migrate_carbs(conn, source, dest, start_time_data)
+    # Now, to commands. These are done only with a timeout
+    start_time_commands = (alt_start_time if alt_start_time is not None
+                           else datetime.now() - timedelta(minutes=cmd_timeout))
+    logging.info(f'5. migrating commands since {start_time_commands}')
     migrate_commands(conn, source, dest, HUGH_USER_ID, start_time_commands)
-    logging.info('5. carbs')
-    migrate_carbs(conn, source, dest, start_time_other)
     if test or alt_start_time:
         logging.info('done, but test mode/alt start time, so not storing update time')
     else:
