@@ -231,7 +231,7 @@ in autoapp.dana_history_timestamp
 It uses the passed-in values, to avoid issues of simultaneous updates.
 
     '''
-    logging.debug(f'setting prev {prev_update} and last {last_update} autoapp update times')
+    logging.debug(f'setting prev {prev_update} and last to current_timestamp')
     curs = dbi.cursor(conn)
     curs.execute(f'''UPDATE {dest}.migration_status 
                     SET prev_autoapp_update = %s, prev_autoapp_migration = current_timestamp() 
@@ -1471,13 +1471,22 @@ start_time_commands and start_time other.
             start_time_data = None
         else:
             start_time_data_default =  datetime.now() - timedelta(minutes=OTHER_DATA_TIMEOUT)
-            start_time_data = max(prev_update, start_time_data_default)
+            if prev_update > start_time_data_default:
+                # normal case; autoapp is up-to-date
+                start_time_data = prev_update
+            else:
+                logging.debug(f'outage case. migrating from {start_time_data_default}')
+                # outage case. autoapp is old. See discussion in Google doc
+                # https://docs.google.com/document/d/1ZCtErlxRQmPUz_vbfLXdg7ap2hIz5g9Lubtog8ZqFys/edit#heading=h.ajk7a72eiyjk
+                # Use default time, and plan to store current time as prev_update
+                start_time_data = start_time_data_default
+                prev_update = datetime.now()
 
     if start_time_data is None:
-        logging.debug(f'2. no data to migrate since {start_time_data}')
+        logging.debug(f'2. no data to migrate')
     else:
         logging.info(f'2. migrating data since {start_time_data}')
-        logging.info('2a. migrating bolus since {start_time_data}')
+        logging.info(f'2a. migrating bolus since {start_time_data}')
         migrate_boluses(conn, source, dest, start_time_data)
         logging.info(f'2b. migrating temp basal since {start_time_data}')
         migrate_temp_basal(conn, source, dest, HUGH_USER_ID, start_time_data)
@@ -1493,7 +1502,7 @@ start_time_commands and start_time other.
     else:
         # last_autoapp_update is None when there's no data (but there might be commands)
         if last_autoapp_update is not None:
-            logging.info('done. storing update time')
+            logging.info(f'done. storing update times {prev_update}, {last_autoapp_update}')
             set_autoapp_migration_time(conn, dest, prev_update, last_autoapp_update)
         else:
             logging.info('done. skip storing data update time, because it is None')
