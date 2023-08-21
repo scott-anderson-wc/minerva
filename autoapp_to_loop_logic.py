@@ -618,6 +618,7 @@ def migrate_boluses(conn, source, dest, start_time, commit=True):
     for row in boluses:
         # note: bolus_id is called bolus_pump_id in loop_logic
         (user_id, bolus_pump_id, date, value) = row
+        logging.debug(f'migrate bolus_pump_id={bolus_pump_id} on date {date} of value {value}')
         # see if bolus_pump_id matches, to avoid re-inserting something already migrated
         curs.execute(f'''select loop_summary_id, user_id, bolus_pump_id, bolus_timestamp, bolus_value
                         from {dest}.loop_summary
@@ -626,13 +627,13 @@ def migrate_boluses(conn, source, dest, start_time, commit=True):
         match = curs.fetchone()
         if match is not None:
             # already exists, so update? Ignore? We'll complain if they differ
-            logging.info('bolus match: this bolus is already migrated: {}'.format(row))
+            logging.info('bolus match: this bolus is already migrated: see row {}'.format(row['loop_summary_id']))
             return
         # check to see if there's a command that matches this bolus; if so, update rather than insert
         logging.debug('check to see if there is a command that matches this bolus')
-        comm_id = update_bolus_command(conn, source, dest, row, commit)
-        if comm_id:
-            logging.debug(f'command {comm_id} matches this bolus')
+        loop_summary_id = update_bolus_command(conn, source, dest, row, commit)
+        if loop_summary_id:
+            logging.debug(f'command loop_summary_id = {loop_summary_id} matches this bolus')
             # updated that row, so return
             return
         else:
@@ -679,8 +680,6 @@ def migrate_boluses(conn, source, dest, start_time, commit=True):
                                  linked_cgm_id = %s, linked_cgm_value = %s
                              WHERE loop_summary_id = %s''',
                          [bolus_pump_id, date, bolus_type, value, anchor_value, cgm_id, mgdl, loop_summary_id])
-        # check for anchors and top-up
-        identify_anchor_bolus(conn, source, dest, date)
     if commit:
         conn.commit()
     
@@ -938,7 +937,7 @@ def migrate_commands(conn, source, dest, user_id, alt_start_time=None, commit=Tr
             # TODO: what are we doing with bolus_value versus sb_amt; they should be the same, right?
             # ANS: we don't do anything with bolus_value. 
             bolus_row = matching_bolus_row_within(conn, source, sb_amt, ct, MATCHING_BOLUS_INTERVAL)
-            logging.debug('matching bolus row for this command '+str(bolus_row))
+            logging.debug('matching bolus row for this command '+str(dict_str(bolus_row)))
             # might return None, so guard with (bolus_row AND expr)
             bolus_pump_id = bolus_row and bolus_row['bolus_id']
             bolus_time = bolus_row and bolus_row['date']
@@ -1252,10 +1251,14 @@ which case go ahead and insert.'''
                          [user_id, carb_id, value, cgm_id, cgm_value])
         else:
             # already exists, so update? Ignore? We'll complain if they differ
-            logging.info('carb match: this carb is already migrated: {}'.format(row))
+            logging.info('carb match: this carb is already migrated: {}'.format(list(map(str,row))))
     if commit:
         conn.commit()
         
+def dict_str(d):
+    '''Returns a new dictionary with each value converted to a str; nice for printing'''
+    return {k: str(v) for k, v in d.items()}
+
 
 def re_migrate_carbs(conn, source, dest, start_time, commit=True):
     # nonce when I added the carb_value field. Want to re-migrate all those
@@ -1448,6 +1451,7 @@ from the get_migration_time() table. Uses two start times:
 start_time_commands and start_time other.
 
     '''
+    logfile_start(source)
     if conn is None:
         conn = dbi.connect()
     logging.info(f'starting migrate_all from {source} to {dest}')
@@ -1490,8 +1494,10 @@ start_time_commands and start_time other.
         migrate_boluses(conn, source, dest, start_time_data)
         logging.info(f'2b. migrating temp basal since {start_time_data}')
         migrate_temp_basal(conn, source, dest, HUGH_USER_ID, start_time_data)
-        logging.info('2c. migrating carbs since {start_time_data}')
+        logging.info(f'2c. migrating carbs since {start_time_data}')
         migrate_carbs(conn, source, dest, start_time_data)
+        logging.info(f'2d. identifying anchors since {start_time_data}')
+        identify_anchor_bolus(conn, source, dest, start_time_data)
     # Now, to commands. These are done only with a timeout
     start_time_commands = (alt_start_time if alt_start_time is not None
                            else datetime.now() - timedelta(minutes=cmd_timeout))
@@ -1993,6 +1999,26 @@ def print_results(row_list):
         # print('\t'+'|'.join([str(x) for x in row]))
 
 
+def logfile_start(source):
+    '''logfile is in file {source}{date} like 'loop_logic_test15'. '''
+    # The default is to run as a cron job
+    # when run as a script, log to a logfile 
+    today = datetime.today()
+    logfile = os.path.join(LOG_DIR, source+str(today.day))
+    now = datetime.now()
+    if now.hour == 0 and now.minute==0:
+        try:
+            os.unlink(logfile)
+        except FileNotFound:
+            pass
+    logging.basicConfig(format='%(asctime)s %(levelname)s %(message)s',
+                        datefmt='%H:%M',
+                        filename=logfile,
+                        level=logging.DEBUG)
+    if now.hour == 0 and now.minute==0:
+        logging.info('================ first run of the day!!'+str(now))
+    logging.info('running at {}'.format(datetime.now()))
+
 if __name__ == '__main__': 
     conn = dbi.connect()
     # we use this when we've cleared out the database and started again
@@ -2009,22 +2035,5 @@ if __name__ == '__main__':
         debugging()
         migrate_all(conn, 'autoapp', 'loop_logic', alt_start_time, True)
         sys.exit()
-    # The default is to run as a cron job
-    # when run as a script, log to a logfile 
-    today = datetime.today()
-    logfile = os.path.join(LOG_DIR, 'day'+str(today.day))
-    now = datetime.now()
-    if now.hour == 0 and now.minute==0:
-        try:
-            os.unlink(logfile)
-        except FileNotFound:
-            pass
-    logging.basicConfig(format='%(asctime)s %(levelname)s %(message)s',
-                        datefmt='%H:%M',
-                        filename=logfile,
-                        level=logging.DEBUG)
-    if now.hour == 0 and now.minute==0:
-        logging.info('================ first run of the day!!'+str(now))
-    logging.info('running at {}'.format(datetime.now()))
     migrate_all(conn, 'autoapp', 'loop_logic')
     migrate_all(conn, 'autoapp_test', 'loop_logic_test')
