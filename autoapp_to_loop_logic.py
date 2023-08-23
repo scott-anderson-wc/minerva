@@ -410,6 +410,7 @@ being associated with a command, we'll update the entry later.
     curs = dbi.cursor(conn)
     # ignore type and duration?
     # note: bolus_id is called bolus_pump_id in loop_logic
+    # why are we fetching the user_id?
     curs.execute(f'''select user_id, bolus_id, date, value 
                     from {source}.bolus
                     where date >= %s''',
@@ -602,7 +603,7 @@ attempts to do that.
                         from {dest}.loop_summary where loop_summary_id = %s''',
                      [val])
         command_row = curs.fetchone()
-        print(command_row)
+        print('command row', command_row)
 
 def migrate_boluses(conn, source, dest, start_time, commit=True):
 
@@ -612,6 +613,7 @@ def migrate_boluses(conn, source, dest, start_time, commit=True):
     curs = dbi.cursor(conn)
     # Note that these will probably be *new* rows, but to make this
     # idempotent, we'll look for a match on the date.
+    # This function returns a list of tuples: user_id, bolus_id, date, value 
     boluses = get_boluses(conn, source, start_time)
     n = len(boluses)
     logging.info(f'{n} boluses to migrate since {start_time}')
@@ -627,7 +629,8 @@ def migrate_boluses(conn, source, dest, start_time, commit=True):
         match = curs.fetchone()
         if match is not None:
             # already exists, so update? Ignore? We'll complain if they differ
-            logging.info('bolus match: this bolus is already migrated: see row {}'.format(row['loop_summary_id']))
+            match_id = match[0]
+            logging.info(f'bolus match: this bolus is already migrated: see {dest}.loop_summary row {match_id}')
             return
         # check to see if there's a command that matches this bolus; if so, update rather than insert
         logging.debug('check to see if there is a command that matches this bolus')
