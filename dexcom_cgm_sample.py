@@ -134,11 +134,15 @@ def dexcom_login(creds):
         return trim_quotes(resp.text)
     # 6/22/2023 Sometimes the service isn't available. That's not a
     # bug, so let's try to detect it and just log the fact
-    if resp.status_code == 503 and resp.reason == 'Service Unavailable':
+    if resp.status_code == 503:
         logging.info('Service Unavailable')
         sys.exit()
+    # similarly 502
+    if resp.status_code == 502:
+        logging.info('Bad Gateway')
+        sys.exit()
     # similarly 504
-    if resp.status_code == 504 and resp.reason == 'Gateway Time-out':
+    if resp.status_code == 504:
         logging.info('Gateway Time-out')
         sys.exit()
     raise Exception('bad login request or response',
