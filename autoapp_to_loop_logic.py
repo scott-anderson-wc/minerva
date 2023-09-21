@@ -535,6 +535,8 @@ Returns the loop_summary_id of the updated row, otherwise None.
     # which case, do we take the closest? Probably.
 
     # 8/9/2023 bolus_timestamp is NULL for row 11545. don't know why.
+    # 9/21/2023 bolus_timestamp and bolus_type are NULL for loop_summary_id in (13546,13548)
+    # one is state=error and one is state=canceled
     curs.execute(f'''select loop_summary_id, bolus_timestamp, bolus_value, bolus_type
                      from {dest}.loop_summary
                      where user_id = %s 
@@ -550,9 +552,18 @@ Returns the loop_summary_id of the updated row, otherwise None.
     if len(matches) == 0:
         return False
     closest = None
+    # Remove problematic entries, but we also need to record this fact 9/21/2023
+    bad_timestamps = [ row for row in matches if type(row[1]) is None ]
+    if len(bad_timestamps) > 1:
+        str_row = str(row)
+        logging.debug(f'Null bolus_timestamp: {str_row}')
+    matches = [ row for row in matches if type(row[1]) is datetime ]
     if len(matches) > 1:
         logging.info(f'multiple bolus command matches for bolus {bolus_pump_id} in src {source}')
-        for r in matches: print(r)
+        print(f'multiple bolus command matches for bolus {bolus_pump_id} in src {source}')
+        for r in matches:
+            print('bolus command tuple'+str(r))
+            logging.info('bolus command tuple'+str(r))
         closest = argmax(matches, lambda r: r[1])
     else:
         closest = matches[0]
@@ -989,7 +1000,7 @@ def migrate_commands(conn, source, dest, user_id, alt_start_time=None, commit=Tr
             loop_summary_id_2 is not None and
             loop_summary_id_3 is not None and
             not(loop_summary_id_1 == loop_summary_id_2 == loop_summary_id_3)):
-            err_msg = f'command already migrated as {loop_summary_id_1} but matches bolus in {loop_summary_id_2} and/or carbs in {loop_summary_id_3}'
+            err_msg = f'in {dest}, migrating command {cid} from {src}.commands already migrated as {loop_summary_id_1} but matches bolus in {loop_summary_id_2} and/or carbs in {loop_summary_id_3}'
             logging.error(err_msg)
             stop_run(conn, source, dest, user_id, 'error')
             raise Exception(err_msg)
@@ -1260,7 +1271,12 @@ which case go ahead and insert.'''
         
 def dict_str(d):
     '''Returns a new dictionary with each value converted to a str; nice for printing'''
-    return {k: str(v) for k, v in d.items()}
+    try:
+        if d is None:
+            return None
+        return {k: str(v) for k, v in d.items()}
+    except Error:
+        return 'could not convert to dict with string values'
 
 
 def re_migrate_carbs(conn, source, dest, start_time, commit=True):
@@ -1350,8 +1366,12 @@ if seq is empty. In the event of a tie, returns the last such.'''
     best_val = func(best)
     for elt in seq:
         elt_val = func(elt)
-        if elt_val >= best_val:
-            best, best_val = elt, elt_val
+        try:
+            if elt_val >= best_val:
+                best, best_val = elt, elt_val
+        except:
+            logging.error(f'error in argmax comparing {elt_val} with {best_val}')
+            return None
     return best
 
 def identify_anchor_bolus(conn, source, dest, start_time, commit=True):
@@ -1392,7 +1412,8 @@ boluses in the interval, and then I'll filter them here.
         # no anchor because no boluses
         logging.info(f'no boluses in last {interval} minutes from {start_time}')
         return
-    correction_boluses = [ r for r in rows if r[1] == 'correction' ]
+    # filter bad/missing data (checking that r[2] is not None). Should we report it?
+    correction_boluses = [ r for r in rows if r[1] == 'correction' and r[2] is not None ]
     if len(correction_boluses) > 0:
         # find largest correction bolus
         anchor_row = argmax(correction_boluses, lambda r: r[2])
@@ -1408,7 +1429,8 @@ boluses in the interval, and then I'll filter them here.
             curs.execute(f'update {dest}.loop_summary set anchor=2 where loop_summary_id = %s',
                          [topup_row[0]])
     # finally, look at carb boluses
-    carb_boluses = [ r for r in rows if r[1] == 'carb' ]
+    # again, filter bad data (checking that r[2] is not None )
+    carb_boluses = [ r for r in rows if r[1] == 'carb' and r[2] is not None]
     if len(carb_boluses) == 0:
         logging.debug(f'no carb bolus in interval')
     else:
@@ -2012,7 +2034,7 @@ def logfile_start(source):
     if now.hour == 0 and now.minute==0:
         try:
             os.unlink(logfile)
-        except FileNotFound:
+        except FileNotFoundError:
             pass
     logging.basicConfig(format='%(asctime)s %(levelname)s %(message)s',
                         datefmt='%H:%M',
