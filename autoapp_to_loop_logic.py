@@ -558,6 +558,9 @@ Returns the loop_summary_id of the updated row, otherwise None.
         str_row = str(row)
         logging.debug(f'Null bolus_timestamp: {str_row}')
     matches = [ row for row in matches if type(row[1]) is datetime ]
+    # Had to add this on 9/23/2023, because removing bad matches meant there were none left
+    if len(matches) == 0:
+        return None
     if len(matches) > 1:
         logging.info(f'multiple bolus command matches for bolus {bolus_pump_id} in src {source}')
         print(f'multiple bolus command matches for bolus {bolus_pump_id} in src {source}')
