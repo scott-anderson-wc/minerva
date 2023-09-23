@@ -2008,6 +2008,168 @@ def test_5():
         print('after', data_in)
         print_results(curs.fetchall())
 
+def create_testing_infrastructure(start):
+    test = {} # dictionary of functions for our testing infrastructure
+    start_time = date_ui.to_datetime(start)
+    curr_time = start_time
+    def at(mins):
+        nonlocal curr_time, start_time
+        curr_time = start_time + timedelta(minutes=mins)
+        return date_ui.str(curr_time)
+
+    def later(mins):
+        nonlocal curr_time, start_time
+        curr_time += timedelta(minutes=mins)
+        return date_ui.str(curr_time)
+
+    def now():
+        nonlocal curr_time
+        return date_ui.str(curr_time)
+
+    def insert(conn, desc):
+        '''desc describes an insertion: tuple of time, table, cols, and
+values. Time is either (at n) or (dt n), where (at n) means n minutes
+after start time, and (dt n) means n minutes later. If desc is a list,
+then its a set of insertions, all of which are inserted before the
+next run. cols is a tuple of column names or * in which case it's
+omitted and values has to be the whole row. The values tuple can have
+a 'now' string, which then is replaced by the time for the insertion.
+
+bolus_command has an extra value, which is the amount which goes in
+single_bolus_data.
+
+        '''
+        if desc[0] == 'multi':
+            # insert multiple things at once. They don't all have to
+            # be at the same timestamp
+            desc.pop(0)
+            for d in desc:
+                print('multi d', d)
+                insert(conn,d)
+            return
+        print('desc', desc)
+        (time, table, cols, vals, *_) = desc
+        now = None
+        if time[0] == 'at':
+            now = at(time[1])
+        if time[1] == 'dt':
+            now = later(time[1])
+        print('now', now)
+        def cnvt(x):
+            if x == 'now':
+                return now
+            return x
+        def NN(s):
+            return s.replace("None", "NULL")
+        vals_now = tuple([ cnvt(v) for v in vals ])
+        print('vals_now', vals_now, 'len', len(vals_now))
+        curs = dbi.cursor(conn)
+        if table == 'bolus':
+            # 7 cols: bolus_id (auto), user_id, date, type, value, duration, server_date=current_timestamp
+            # the last can't be NULL
+            if cols == '*':
+                curs.execute(NN(f"insert into autoapp_scott.bolus values {vals_now}"))
+            else:
+                curs.execute(NN(f"insert into autoapp_scott.bolus{cols} values {vals_now}"))
+        elif table == 'bolus_command':
+            # 11 columns
+            if cols == '*':
+                curs.execute(NN(f"insert into autoapp_scott.commands values {vals_now}"))
+            else:
+                curs.execute(NN(f"insert into autoapp_scott.commands{cols} values {vals_now}"))
+                raise Error('not yet implemented')
+            curs.execute('select last_insert_id()')
+            comm_id = curs.fetchone()[0]
+            amt = desc[4]
+            curs.execute('insert into autoapp_scott.commands_single_bolus_data values({comm_id, {amt}, 0, {amt})')
+            curs.execute('update autoapp_scott.dana_history_timestamp set date = {now} WHERE user_id = {HUGH_USER_ID}')
+        elif table =='carbs':
+            # 5 columns. First is carb_id (auto), user_id, date, value, and last is current_timestamp
+            if cols == '*':
+                curs.execute(NN(f"insert into autoapp_scott.carbohydrate values {vals_now}"))
+            else:
+                curs.execute(NN(f"insert into autoapp_scott.carbohydrate{cols} values {vals_now}"))
+        elif table == 'commands':
+            # 11 columns
+            if cols == '*':
+                curs.execute(NN(f"insert into autoapp_scott.commands values {vals_now}"))
+            else:
+                curs.execute(NN(f"insert into autoapp_scott.commands{cols} values {vals_now}"))
+        else:
+            raise Error('no such table')
+        conn.commit()
+    return (insert, now, at, later)
+
+
+def test_sept_23():
+    '''Janice entered the following data on 9/22 but my code got an error. This re-tests that scenario.
+
+    Bolus of 4 Units created at 9:04 (and carried out at 9:06) should be associated with the carb entry at 9:04 and called a carb bolus/Anchor #3
+    Bolus of 2 units created at 9:12 (and carried out at 9:13) should be a correction bolus and tagged as Anchor #1 (the largest correction bolus in the last bolus interval)
+    Bolus of 5 units created at 9:32 (and carried out at 9:40) should be a correction bolus.  Since it is larger than the prior Anchor #1, it becomes Anchor #1.
+    The loop summary shows a temp basal entry (loop summary ID 499).  Not sure how this got here.  There is an entry in the temp basal state table that looks like it was entered when I started up the loop this morning.  However, It says the temp basal is not running (temp basal in progress field is 0) so I don’t think we need this in the loop summary table.  The only time we need to see if a temp basal is not running is if the previous entry for a temp basal had a “running” entry of “1”.  In that case, we want to know that the temp basal is no longer running.  However, the last temp basal entry in loop summary had a “running” of 0.
+    At 10:02, I did give a temp basal command which was carried out at 10:02.
+    At 10:15, I gave another bolus of 1unit.  This should be a correction bolus and given an Anchor #2 since it is smaller than Anchor #1 and within the last bolus interval.
+
+ '''
+    start = date_ui.to_datetime('2023-05-01 12:00:00')
+    (insert, now, at, later) = create_testing_infrastructure(start)
+    conn = dbi.connect()
+    test_clear_scott_db_and_start(conn)
+    dest = 'loop_logic_scott'
+    source = 'autoapp_scott'
+    set_data_migration(conn, source, dest, start)
+    USER = 7
+    init_cgm(conn, start)
+    # just one scenario
+    for desc in [ [ 'multi',
+                    ( ('at', 4), 'bolus', '*', (None, USER, 'now', 'S', 4, 0, 'now')), # 4 units
+                    ( ('at', 4), 'carbs', '*', (None, USER, 'now', 20, 'now')) # 20 carbs
+                   ],
+                  ( ('at', 12), 'bolus', '*', (None, USER, 'now', 'S', 2, 0, 'now')),
+                  ( ('at', 32), 'bolus', '*', (None, USER, 'now', 'S', 5, 0, 'now')),
+                 ]: 
+        print('main function, desc', desc)
+        insert(conn, desc)
+        lltcc.cron_copy(conn, 'loop_logic_scott', True)
+        migrate_all(conn, 'autoapp_scott', 'loop_logic_scott', now())
+        print('after', desc)
+        print(table_output(conn, 
+                           '''select loop_summary_id as ls_id,
+                               bolus_pump_id as bp_id, 
+                               time(bolus_timestamp) as bolus_time, bolus_type, bolus_value, anchor,
+                               carb_id, time(carb_timestamp) as carb_time, carb_value
+                           from loop_logic_scott.loop_summary'''))
+
+def to_dictionary(dic_list):
+    result = {}
+    for d in dic_list:
+        for key,val in d.items():
+            if key in result:
+                result[key].append(val)
+            else:
+                result[key] = [val]
+    return result
+
+def table_output(conn, sql):
+    '''Runs SQL code and returns a string that is a nice tabular output. '''
+    curs = dbi.dict_cursor(conn)
+    curs.execute(sql)
+    vals = curs.fetchall()
+    cols = to_dictionary(vals)
+    widths = {}
+    for key,val in cols.items():
+        widths[key] = max(len(key), max(map(lambda x: len(str(x)), val)))
+    table = ''
+    for key in cols.keys():
+        table += '\t'+key.rjust(widths[key])
+    table += '\n'
+    for row in vals:
+        for key,val in row.items():
+            table += '\t'+str(val).rjust(widths[key])
+        table += '\n'
+    return table
+
 def col_widths(row_list):
     if len(row_list) == 0:
         raise ValueError('empty list')
