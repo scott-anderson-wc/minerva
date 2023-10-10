@@ -71,6 +71,11 @@ import loop_logic_testing_cgm_cron as lltcc
 # probably should have different logs for production vs development
 LOG_DIR = '/home/hugh9/autoapp_to_loop_logic_logs/'
 
+# Global variables used in logging
+
+logstream = None
+loghandler = None
+
 HUGH_USER = 'Hugh'
 HUGH_USER_ID = 7
 MATCHING_BOLUS_INTERVAL = 30    # minutes between command and bolus to match them.
@@ -105,12 +110,14 @@ def start_run(conn, source, dest, user_id):
     conn.commit()
 
 def stop_run(conn, source, dest, user_id, status):
+    global logstream
     curs = dbi.cursor(conn)
     curs.execute(f'''UPDATE {dest}.migration_status
                      SET last_run = now(), last_status = %s
                      WHERE user_id = %s''',
                  [status, user_id])
     conn.commit()
+    logstream.close()
 
 # ================================================================
 
@@ -2189,25 +2196,57 @@ def print_results(row_list):
         # print('\t'+'|'.join([str(x) for x in row]))
 
 
-def logfile_start(source):
-    '''logfile is in file {source}{date} like 'loop_logic_test15'. '''
+def logfile_start_old(source):
+    '''logfile is in file {source}{date} like 'autoapp_test15'. '''
     # The default is to run as a cron job
     # when run as a script, log to a logfile 
     today = datetime.today()
     logfile = os.path.join(LOG_DIR, source+str(today.day))
+    print('logfile',logfile)
     now = datetime.now()
     if now.hour == 0 and now.minute==0:
         try:
             os.unlink(logfile)
         except FileNotFoundError:
             pass
+    # The logging software doesn't allow more than one basicConfig, so
+    # logging to different files is difficult. 
     logging.basicConfig(format='%(asctime)s %(levelname)s %(message)s',
                         datefmt='%H:%M',
                         filename=logfile,
                         level=logging.DEBUG)
     if now.hour == 0 and now.minute==0:
         logging.info('================ first run of the day!!'+str(now))
-    logging.info('running at {}'.format(datetime.now()))
+    logging.info('SCOTT running at {} logging {}'.format(datetime.now(), logfile))
+
+def logfile_start(source):
+    # The default is to run as a cron job
+    # when run as a script, log to a logfile 
+    global logstream, loghandler
+    today = datetime.today()
+    logfile = os.path.join(LOG_DIR, source+str(today.day))
+    print('logfile',logfile)
+    now = datetime.now()
+    if now.hour == 0 and now.minute==0:
+        try:
+            os.unlink(logfile)
+        except FileNotFoundError:
+            pass
+    # The logging software doesn't allow more than one basicConfig, so
+    # logging to different files is difficult. 
+    logstream = open(logfile, 'a')
+    h = logging.StreamHandler(logstream)
+    logging.basicConfig(format='%(asctime)s %(levelname)s %(message)s',
+                        datefmt='%H:%M',
+                        level=logging.DEBUG)
+    logger = logging.getLogger()
+    if loghandler is not None:
+        logger.removeHandler(loghandler)
+    loghandler = h
+    logger.addHandler(loghandler)
+    if now.hour == 0 and now.minute==0:
+        logging.info('================ first run of the day!!'+str(now))
+    logging.info('running at {}'.format(datetime.now(), logfile))
 
 if __name__ == '__main__': 
     conn = dbi.connect()
