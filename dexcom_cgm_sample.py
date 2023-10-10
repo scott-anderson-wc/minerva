@@ -199,6 +199,10 @@ look like JSON, list of dictionaries of length max_count.'''
     if resp.status_code == 500:
         logging.info('Internal Server Error')
         sys.exit()
+    # 10/10/2023 Or a Bad Gateway.
+    if resp.status_code == 502:
+        logging.info('Bad Gateway')
+        sys.exit()
     # something else went wrong. Give it an id
     error_id = random.randint(1, 1000)
     logging.error(f'{error_id} bad CGM request or response. status_code: {resp.status_code} ')
