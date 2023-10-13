@@ -585,11 +585,25 @@ Returns the loop_summary_id of the updated row, otherwise None.
     # Update closest match
     (loop_summary_id, bolus_timestamp, bolus_value, bolus_type) = closest
     
+    logging.debug(f'will update migrated bolus ({bolus_timestamp} {bolus_type} {bolus_value}) for loop_summary_id {loop_summary_id}')
+    # check if there's any new information.
+    # new bolus is bolus_row with these columns
+    # (user_id, bolus_pump_id, date, value) = bolus_row
+    # existing command is closest with columns listed above:
+    if bolus_timestamp is None and date is not None:
+        logging.debug('need to update timestamp of bolus to {date}')
+    elif bolus_value is None and value is not None:
+        logging.debug('need to update value of bolus to {value}')
+    elif bolus_type is None:
+        logging.debug('need to update type of bolus}')
+    else:
+        logging.debug('nothing to update')
+        return None
     # also before we do the update, we need to determine if there are
     # matching carbs. If so, it's bolus_type='carb' otherwise it's
     # bolus_type = 'correction'. We look for carbs that aren't already
     # matched.
-    if bolus_type != 'carb':
+    if bolus_type is None:
         carb_row = carbs_within_interval(conn, source, dest, date, MATCHING_BOLUS_WITH_CARB_INTERVAL)
         bolus_type = 'correction' if carb_row is None else 'carb'
         if carb_row is not None:
@@ -626,8 +640,8 @@ attempts to do that.
         command_row = curs.fetchone()
         print('command row', command_row)
 
-def migrate_boluses(conn, source, dest, start_time, commit=True):
 
+def migrate_boluses(conn, source, dest, start_time, commit=True):
     '''start_time is a string or a python datetime. '''
     if conn is None:
         conn = dbi.connect()
@@ -1485,6 +1499,9 @@ job every 5 minutes.  If alt_start_time is supplied, ignore the value
 from the get_migration_time() table. Uses two start times:
 start_time_commands and start_time other.
 
+Oct 13, 2023, rearranged the order to migrate commands first. Well,
+    second, after the CGM.
+
     '''
     logfile_start(source)
     if conn is None:
@@ -1520,24 +1537,25 @@ start_time_commands and start_time other.
                 # Use default time, and plan to store current time as prev_update
                 start_time_data = start_time_data_default
                 prev_update = datetime.now()
-
-    if start_time_data is None:
-        logging.debug(f'2. no data to migrate')
-    else:
-        logging.info(f'2. migrating data since {start_time_data}')
-        logging.info(f'2a. migrating bolus since {start_time_data}')
-        migrate_boluses(conn, source, dest, start_time_data)
-        logging.info(f'2b. migrating temp basal since {start_time_data}')
-        migrate_temp_basal(conn, source, dest, HUGH_USER_ID, start_time_data)
-        logging.info(f'2c. migrating carbs since {start_time_data}')
-        migrate_carbs(conn, source, dest, start_time_data)
-        logging.info(f'2d. identifying anchors since {start_time_data}')
-        identify_anchor_bolus(conn, source, dest, start_time_data)
-    # Now, to commands. These are done only with a timeout
+    # Commands next. These are done only with a timeout
     start_time_commands = (alt_start_time if alt_start_time is not None
                            else datetime.now() - timedelta(minutes=cmd_timeout))
-    logging.info(f'3. migrating commands since {start_time_commands}')
+    logging.info(f'2. migrating commands since {start_time_commands}')
     migrate_commands(conn, source, dest, HUGH_USER_ID, start_time_commands)
+    # Data next
+    if start_time_data is None:
+        logging.debug(f'3. no data to migrate')
+    else:
+        logging.info(f'3. migrating data since {start_time_data}')
+        logging.info(f'3a. migrating bolus since {start_time_data}')
+        migrate_boluses(conn, source, dest, start_time_data)
+        logging.info(f'3b. migrating temp basal since {start_time_data}')
+        migrate_temp_basal(conn, source, dest, HUGH_USER_ID, start_time_data)
+        logging.info(f'3c. migrating carbs since {start_time_data}')
+        migrate_carbs(conn, source, dest, start_time_data)
+        logging.info(f'3d. identifying anchors since {start_time_data}')
+        identify_anchor_bolus(conn, source, dest, start_time_data)
+    # last, store times for the next run
     if test or alt_start_time:
         logging.info('done, but test mode/alt start time, so not storing update time')
     else:
@@ -2083,13 +2101,13 @@ single_bolus_data.
             if cols == '*':
                 curs.execute(NN(f"insert into autoapp_scott.commands values {vals_now}"))
             else:
-                curs.execute(NN(f"insert into autoapp_scott.commands{cols} values {vals_now}"))
                 raise Error('not yet implemented')
+                curs.execute(NN(f"insert into autoapp_scott.commands{cols} values {vals_now}"))
             curs.execute('select last_insert_id()')
             comm_id = curs.fetchone()[0]
             amt = desc[4]
-            curs.execute('insert into autoapp_scott.commands_single_bolus_data values({comm_id, {amt}, 0, {amt})')
-            curs.execute('update autoapp_scott.dana_history_timestamp set date = {now} WHERE user_id = {HUGH_USER_ID}')
+            curs.execute(f'insert into autoapp_scott.commands_single_bolus_data values({comm_id}, {amt}, 0, {amt})')
+            curs.execute(f'''update autoapp_scott.dana_history_timestamp set date = '{now}' WHERE user_id = {HUGH_USER_ID}''')
         elif table =='carbs':
             # 5 columns. First is carb_id (auto), user_id, date, value, and last is current_timestamp
             if cols == '*':
@@ -2147,6 +2165,39 @@ def test_sept_23():
                                time(bolus_timestamp) as bolus_time, bolus_type, bolus_value, anchor,
                                carb_id, time(carb_timestamp) as carb_time, carb_value
                            from loop_logic_scott.loop_summary'''))
+
+def test_oct13():
+    '''We're getting duplicates of boluses, once not as a command and once as a command. 
+
+ '''
+    start = date_ui.to_datetime('2023-05-01 12:00:00')
+    (insert, now, at, later) = create_testing_infrastructure(start)
+    conn = dbi.connect()
+    test_clear_scott_db_and_start(conn)
+    dest = 'loop_logic_scott'
+    source = 'autoapp_scott'
+    set_data_migration(conn, source, dest, start)
+    USER = 7
+    init_cgm(conn, start)
+    # just one scenario
+    for desc in [ [ 'multi',
+                    ( ('at', 4), 'bolus_command', '*', (None, USER, 'now', 'now', 'bolus', 1, 0, 'done', 0, 0, 0), 5), # 5 units
+                    ( ('at', 4), 'bolus', '*', (None, USER, 'now', 'S', 5, 0, 'now')) # 5 units
+                   ],
+                 ]: 
+        print('main function, desc', desc)
+        insert(conn, desc)
+        lltcc.cron_copy(conn, 'loop_logic_scott', True)
+        migrate_all(conn, 'autoapp_scott', 'loop_logic_scott', now())
+        print('after', desc)
+        print(table_output(conn, 
+                           '''select loop_summary_id as ls_id,
+                               bolus_pump_id as bp_id, 
+                               time(bolus_timestamp) as bolus_time, bolus_type, bolus_value, anchor,
+                               carb_id, time(carb_timestamp) as carb_time, carb_value
+                           from loop_logic_scott.loop_summary'''))
+
+
 
 def to_dictionary(dic_list):
     result = {}
@@ -2266,3 +2317,7 @@ if __name__ == '__main__':
         sys.exit()
     migrate_all(conn, 'autoapp', 'loop_logic')
     migrate_all(conn, 'autoapp_test', 'loop_logic_test')
+
+'''
+SELECT loop_summary_id, bolus_timestamp, bolus_type, bolus_value, command_Id, created_timestamp, state, type, completed, linked_cgm_value, anchor FROM `loop_summary` ORDER BY `loop_summary_id` DESC ;
+'''
