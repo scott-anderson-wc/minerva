@@ -117,7 +117,8 @@ def stop_run(conn, source, dest, user_id, status):
                      WHERE user_id = %s''',
                  [status, user_id])
     conn.commit()
-    logstream.close()
+    if logstream is not None:
+        logstream.close()
 
 # ================================================================
 
@@ -2247,13 +2248,12 @@ def print_results(row_list):
         # print('\t'+'|'.join([str(x) for x in row]))
 
 
-def logfile_start_old(source):
+def logfile_start(source):
     '''logfile is in file {source}{date} like 'autoapp_test15'. '''
     # The default is to run as a cron job
     # when run as a script, log to a logfile 
     today = datetime.today()
     logfile = os.path.join(LOG_DIR, source+str(today.day))
-    print('logfile',logfile)
     now = datetime.now()
     if now.hour == 0 and now.minute==0:
         try:
@@ -2270,13 +2270,12 @@ def logfile_start_old(source):
         logging.info('================ first run of the day!!'+str(now))
     logging.info('SCOTT running at {} logging {}'.format(datetime.now(), logfile))
 
-def logfile_start(source):
+def logfile_start_new(source):
     # The default is to run as a cron job
     # when run as a script, log to a logfile 
     global logstream, loghandler
     today = datetime.today()
     logfile = os.path.join(LOG_DIR, source+str(today.day))
-    print('logfile',logfile)
     now = datetime.now()
     if now.hour == 0 and now.minute==0:
         try:
