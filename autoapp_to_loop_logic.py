@@ -78,9 +78,18 @@ loghandler = None
 
 HUGH_USER = 'Hugh'
 HUGH_USER_ID = 7
-MATCHING_BOLUS_INTERVAL = 30    # minutes between command and bolus to match them.
+MATCHING_BOLUS_INTERVAL = 5    # minutes between command and bolus to match them.
 OTHER_DATA_TIMEOUT = 6*60       # minutes to look back for non-command (bolus, carbs)
-MATCHING_BOLUS_WITH_CARB_INTERVAL = 20 # minutes between bolus and carbs to match them and put them in a single loop_summary entry. Changed to 20 on 7/11/2023
+MATCHING_BOLUS_WITH_CARB_INTERVAL = 20 # minutes between bolus and carbs to match them and put them in a single loop_summary entry. 
+
+'''Changed to 20 from 30 on 7/11/2023. on 10/14/2023, no longer used
+to look for carbs; replaced by the following. Still used for matching
+bolus with carbs.'''
+
+# if there are carbs in this interval around a bolus, it's a carbs bolus
+CARBS_MINUTES_BEFORE_BOLUS = 5
+CARBS_MINUTES_AFTER_BOLUS = 20
+
 
 # the time in minutes for two timestamps to "match"
 TIMEDELTA_MINS = 5
@@ -471,10 +480,14 @@ of 1/27/2023, it didn't match anything since 1/20/2023.'''
     print('done')
 
 
-def carbs_within_interval(conn, source, dest, timestamp, interval_width):
+def carbs_within_interval_old(conn, source, dest, timestamp, interval_width):
     '''returns loop_summary_id, carb_id, carb_timestamp, carb_value
 searching for carb value in loop_summary within plus or minus
 interval_width of timestamp. The carbs are *not* already matched with a bolus. Returns None if no match.
+
+The old version is plus or minus around some time, but on 10/13/2023,
+Janice said look for carbs 5 minutes before to 20 minutes after a
+bolus, so we need an asymmetric version.
 
     '''
     if conn is None:
@@ -500,21 +513,53 @@ interval_width of timestamp. The carbs are *not* already matched with a bolus. R
         biggest = argmax(rows, lambda r: r[3])
         return biggest
 
-def carbs_within_interval_test(conn, source, dest, start_time, width=5):
+def carbs_within_interval(conn, source, dest, timestamp,
+                          mins_before=CARBS_MINUTES_BEFORE_BOLUS,
+                          mins_after=CARBS_MINUTES_AFTER_BOLUS):
+    '''returns loop_summary_id, carb_id, carb_timestamp, carb_value
+searching for carb value in loop_summary given minutes before or after
+timestamp. The carbs are *not* already matched with a bolus. Returns
+None if no match.
+
+    '''
+    if conn is None:
+        conn = dbi.connect()
+    curs = dbi.cursor(conn)
+    nr = curs.execute(f'''SELECT loop_summary_id, carb_id, carb_timestamp, carb_value 
+                          FROM {dest}.loop_summary 
+                          WHERE user_id = %s  
+                          AND bolus_pump_id is NULL
+                          AND carb_timestamp 
+                          BETWEEN (%s - interval %s minute) 
+                              AND (%s + interval %s minute)''',
+                 [HUGH_USER_ID, timestamp, mins_before, timestamp, mins_after])
+    rows = curs.fetchall()
+    # hopefully the normal case
+    if nr == 1:
+        return rows[0]
+    if nr == 0:
+        logging.debug(f'no carbs w/o bolus in interval around {timestamp}')
+        return None
+    if nr > 1:
+        logging.debug(f'multiple carbs in interval around {timestamp}; using largest')
+        biggest = argmax(rows, lambda r: r[3])
+        return biggest
+
+def carbs_within_interval_test(conn, source, dest, start_time):
     '''This is for basic robustness and correctness. Modifies no data, so safe to use in any database.'''
     if conn is None:
         conn = dbi.connect()
     curs = dbi.cursor(conn)
     for bolus_row in get_boluses(conn, source, start_time):
         (user_id, bolus_pump_id, bolus_time, value) = bolus_row
-        match = carbs_within_interval(conn, source, dest, bolus_time, width)
+        match = carbs_within_interval(conn, source, dest, bolus_time)
         if match is None:
             print(f'correction bolus at {bolus_time}')
         else:
             (id, carb_id, carb_time, carb_value) = match
-            diff = abs(date_ui.to_datetime(bolus_time) - date_ui.to_datetime(carb_time))
-            if diff.total_seconds() >= width*60:
-                print(f'ERROR at {start_time}')
+            if (carb_time < bolus_time - timedelta(minutes=CARBS_MINUTES_BEFORE_BOLUS) or
+                carb_time > bolus_time + timedelta(minutes=CARBS_MINUTES_AFTER_BOLUS)):
+                print(f'ERROR at {bolus_time}')
                 print(f'{id}, {carb_id}, {carb_time}, {carb_value}')
                 raise Exception
             print(f'loop summary id {id} for carb_id {carb_id} matches')
@@ -605,7 +650,7 @@ Returns the loop_summary_id of the updated row, otherwise None.
     # bolus_type = 'correction'. We look for carbs that aren't already
     # matched.
     if bolus_type is None:
-        carb_row = carbs_within_interval(conn, source, dest, date, MATCHING_BOLUS_WITH_CARB_INTERVAL)
+        carb_row = carbs_within_interval(conn, source, dest, date)
         bolus_type = 'correction' if carb_row is None else 'carb'
         if carb_row is not None:
             (ls_id, carb_id, carb_timestamp, carb_value) = carb_row
@@ -668,7 +713,9 @@ def migrate_boluses(conn, source, dest, start_time, commit=True):
             match_id = match[0]
             logging.info(f'bolus match: this bolus is already migrated: see {dest}.loop_summary row {match_id}')
             return
-        # check to see if there's a command that matches this bolus; if so, update rather than insert
+        # check to see if there's a command that matches this bolus
+        # (but with different bolus_pump_id); if so, update rather
+        # than insert
         logging.debug('check to see if there is a command that matches this bolus')
         loop_summary_id = update_bolus_command(conn, source, dest, row, commit)
         if loop_summary_id:
@@ -681,7 +728,7 @@ def migrate_boluses(conn, source, dest, start_time, commit=True):
         (cgm_id, mgdl) = matching_cgm(conn, dest, date)
         # next, see if there are carbs w/in an interval. if so, update that row
         # 5/19. Get info about the carbs, to fill into loop_summary fields
-        carb_row = carbs_within_interval(conn, source, dest, date, MATCHING_BOLUS_WITH_CARB_INTERVAL)
+        carb_row = carbs_within_interval(conn, source, dest, date)
         if carb_row is not None:
             # 8/7/23 check to see if this loop summary entry already has a bolus info in it. If not, we can update it.
             # it should not have bolus info in it, because the function above now checks.
@@ -909,7 +956,23 @@ def remove_repeats(rows):
 
 def migrate_commands(conn, source, dest, user_id, alt_start_time=None, commit=True,
                      loop_summary_table='loop_summary'):
-    '''Migrate commands within the last 40". '''
+    '''Migrate commands within the last 40". Note that a command can be
+revisited several times, waiting for, say, the transition from
+completed=0 to completed=1 or error=0 to error=1.
+
+When a command goes to completed=1 and error=0, that's the signal to
+match it with, say, a bolus in the bolus table. The matching is done
+using the 'update_timestamp' not the 'created_timestamp'. The matching
+is a tight match: within 2 minutes or so (constant above).
+
+That is also when we check for carbs at that time (5 minutes before to
+20 minutes after). If there are carbs, it's a carbs bolus, otherwise,
+a correction.
+
+We then also compute anchors: 1 and 2 for anchor and top-up, and 3 for
+carb anchor.
+
+    '''
     if conn is None:
         conn = dbi.connect()
     read = dbi.cursor(conn)
@@ -918,7 +981,7 @@ def migrate_commands(conn, source, dest, user_id, alt_start_time=None, commit=Tr
              else datetime.now() - timedelta(minutes=40))
     start = date_ui.to_rtime(start)
     num_com = read.execute(
-        f'''SELECT command_id, user_id, created_timestamp, type, 
+        f'''SELECT command_id, user_id, created_timestamp, update_timestamp, type, 
                   if(completed,1,0) as comp,
                   if(error,1,0) as err,
                   state, 
@@ -943,7 +1006,7 @@ def migrate_commands(conn, source, dest, user_id, alt_start_time=None, commit=Tr
         row_str = ','.join([str(e) for e in row])
         logging.debug(f'migrating row {row_str}')
         # shorthands for the column names above
-        (cid, uid, ct, ty, comp, err, state, pend, lc, pd, sb_amt, tb_ratio) = row
+        (cid, uid, ct, ut, ty, comp, err, state, pend, lc, pd, sb_amt, tb_ratio) = row
         if cid is None:
             stop_run(conn, source, dest, user_id, 'error')
             logging.error(f'NULL command id. This should be impossible')
@@ -958,14 +1021,15 @@ def migrate_commands(conn, source, dest, user_id, alt_start_time=None, commit=Tr
         with a ‘bolus_pump_id’.  Match can be done by closest
         timestamp.  In addition, the ‘bolus_value’ of the
         ‘bolus_pump_id’ row should be the same as the
-        ‘amount_delivered’ in the “commands_single_bolus” table with
+        ‘amount_delivered’ in the 'commands_single_bolus' table with
         the associated ‘command_id’.  The ‘settled’ field should be
         set to 1 (matching and completed).  If not completed, and
         ‘error’=1, bring it over but it will have no match and the
         ‘settled’ field should be set to 3.  If ‘completed’ =0 and
         ‘error’=0, bring it over and set ‘settled’ field to 0.
         '''
-        if comp == 1 and ty == 'bolus':
+        # added the err==0 on 10/14/2023
+        if ty == 'bolus' and comp == 1 and err == 0:
             # find closest matching timestamp in `bolus`
             # table. Originally, Janice said within 30 minutes
             # (checking realtime_cgm). Then on 12/1 she said "I spoke
@@ -975,14 +1039,27 @@ def migrate_commands(conn, source, dest, user_id, alt_start_time=None, commit=Tr
             # 7/17/2023, added sb_amt to matching criteria
             # TODO: what are we doing with bolus_value versus sb_amt; they should be the same, right?
             # ANS: we don't do anything with bolus_value. 
-            bolus_row = matching_bolus_row_within(conn, source, sb_amt, ct, MATCHING_BOLUS_INTERVAL)
-            logging.debug('matching bolus row for this command '+str(dict_str(bolus_row)))
-            # might return None, so guard with (bolus_row AND expr)
-            bolus_pump_id = bolus_row and bolus_row['bolus_id']
-            bolus_time = bolus_row and bolus_row['date']
+            # 10/14/2023, changed to search within interval around update_time
+            # instead of created_time. Also reduced the interval to 5 minutes instead of 30
+            bolus_row = matching_bolus_row_within(conn, source, sb_amt, ut, MATCHING_BOLUS_INTERVAL)
+            if bolus_row is None:
+                logging.debug(f'no matching bolus row for completed command {cid}')
+                bolus_pump_id, bolus_time = None, None
+                bolus_type = None
+            else:
+                logging.debug(f'matching bolus row for completed command {cid}'+str(dict_str(bolus_row)))
+                bolus_pump_id, bolus_time = bolus_row['bolus_id'], bolus_row['date']
+                carb_row = carbs_within_interval(conn, source, dest, ut)
+                if carb_row is None:
+                    logging.debug('did not find carbs for bolus {bolus_pump_id}, so correction')
+                    bolus_type = 'correction'
+                else:
+                    logging.debug('found carbs for bolus {bolus_pump_id}, so carbs')
+                    bolus_type = 'carbs'
         else:
             bolus_pump_id = None
             bolus_time = None
+            bolus_type = None
         # update on 6/22/2023. Need to check if there's already a
         # loop_summary entry because of a bolus migration or previous
         # migration of this command. So, three scenarios for updating:
@@ -1015,7 +1092,8 @@ def migrate_commands(conn, source, dest, user_id, alt_start_time=None, commit=Tr
                 loop_summary_id_2 = update.fetchone()[0]
                 logging.info(f'bolus {bolus_pump_id} already migrated. Updating {loop_summary_id_2}')
         loop_summary_id_3 = None
-        carb_row = carbs_within_interval(conn, source, dest, ct, MATCHING_BOLUS_WITH_CARB_INTERVAL)
+        # this might not be the right interval, but we can revisit this
+        carb_row = carbs_within_interval(conn, source, dest, ct)
         if carb_row is not None:
             loop_summary_id_3 = carb_row[0]
             logging.debug(f'found carbs matching command at time {str(ct)} in loop_summary row {loop_summary_id_3}')
@@ -1030,16 +1108,21 @@ def migrate_commands(conn, source, dest, user_id, alt_start_time=None, commit=Tr
             stop_run(conn, source, dest, user_id, 'error')
             raise Exception(err_msg)
         loop_summary_id = loop_summary_id_1 or loop_summary_id_2 or loop_summary_id_3
+        # We have an ongoing problem with bolus type being NULL, so we'll check here
+        # START HERE. Need to figure out what the bolus_type *is*
         if loop_summary_id is not None:
             logging.debug(f'updating existing row {loop_summary_id}')
             update.execute(f'''UPDATE {dest}.{loop_summary_table}
-                              SET user_id = %s, bolus_pump_id = %s, bolus_timestamp = %s, bolus_value = %s, command_id = %s, 
+                              SET user_id = %s, 
+                                  bolus_pump_id = %s, bolus_timestamp = %s, bolus_value = %s, bolus_type = %s, 
+                                  command_id = %s, 
                                   created_timestamp = %s, state = %s, type = %s, pending = %s, completed = %s,
                                   error = %s, loop_command = %s, parent_decision = %s, 
                                   linked_cgm_id = %s, linked_cgm_value = %s, 
                                   parent_involved = %s
                               WHERE loop_summary_id = %s;''',
-                           [uid, bolus_pump_id, bolus_time, sb_amt, cid, ct, state, ty, pend, comp, err, lc, pd,
+                           [uid, bolus_pump_id, bolus_time, sb_amt, bolus_type,
+                            cid, ct, state, ty, pend, comp, err, lc, pd,
                             cgm_id, cgm_value,
                             parent_involved,
                             loop_summary_id])
@@ -1052,6 +1135,7 @@ def migrate_commands(conn, source, dest, user_id, alt_start_time=None, commit=Tr
                                  bolus_pump_id,
                                  bolus_timestamp,
                                  bolus_value,
+                                 bolus_type,
                                  command_id,
                                  created_timestamp,
                                  state,
@@ -1064,8 +1148,9 @@ def migrate_commands(conn, source, dest, user_id, alt_start_time=None, commit=Tr
                                  linked_cgm_id,
                                  linked_cgm_value,
                                  parent_involved) VALUES 
-                               (NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)''',
-                           [uid, bolus_pump_id, bolus_time, sb_amt, cid, ct, state, ty, pend, comp, err, lc, pd,
+                               (NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)''',
+                           [uid, bolus_pump_id, bolus_time, sb_amt, bolus_type,
+                            cid, ct, state, ty, pend, comp, err, lc, pd,
                             cgm_id, cgm_value, parent_involved])
         # update the migration_status table
         curs2 = dbi.cursor(conn)
@@ -2318,5 +2403,5 @@ if __name__ == '__main__':
     migrate_all(conn, 'autoapp_test', 'loop_logic_test')
 
 '''
-SELECT loop_summary_id, bolus_timestamp, bolus_type, bolus_value, command_Id, created_timestamp, state, type, completed, linked_cgm_value, anchor FROM `loop_summary` ORDER BY `loop_summary_id` DESC ;
+SELECT loop_summary_id, bolus_timestamp, bolus_pump_id, bolus_type, bolus_value, command_Id, created_timestamp, state, type, completed, linked_cgm_value, anchor FROM `loop_summary` ORDER BY `loop_summary_id` DESC ;
 '''
