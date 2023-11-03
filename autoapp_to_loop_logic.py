@@ -1055,7 +1055,7 @@ carb anchor.
                     bolus_type = 'correction'
                 else:
                     logging.debug('found carbs for bolus {bolus_pump_id}, so carbs')
-                    bolus_type = 'carbs'
+                    bolus_type = 'carb'
         else:
             bolus_pump_id = None
             bolus_time = None
