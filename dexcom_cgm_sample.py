@@ -145,7 +145,16 @@ def dexcom_login(creds):
     if resp.status_code == 504:
         logging.info('Gateway Time-out')
         sys.exit()
-    raise Exception('bad login request or response',
+    if resp.status_code == 500:
+        logging.info('Internal Server error at Dexcom')
+        sys.exit()
+    if resp.status_code == 530:
+        logging.info('??; please enable cookies')
+        sys.exit()
+    if resp.status_code == 409:
+        logging.info('Conflict; please enable cookies')
+        sys.exit()
+    raise Exception('Server Error',
                     [resp.status_code, resp.reason, html2text.html2text(resp.text)] )
 
 def extract_unix_epoch(dexcom_date_string):
