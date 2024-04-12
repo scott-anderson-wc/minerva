@@ -213,7 +213,9 @@ if __name__ == '__main__':
         # normal operation, but every 5 minutes, so test the time
         now = datetime.now()
         if (now.minute % 5) == 0:
-            run_as_cron(dest='loop_logic')
+            # as of 4/1/2024, we dropped the testing_command table from loop_logic because Janice was nervous
+            # that it would mess up real stuff. 
+            # run_as_cron(dest='loop_logic') 
             run_as_cron(dest='loop_logic_test')
         else:
             pass
