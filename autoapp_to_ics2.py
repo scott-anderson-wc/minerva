@@ -808,12 +808,14 @@ None,None.
 It returns both values so that Y can be stored into migration_status
 when we are done migrating. See set_migration_time.
 
+    5/29/2024 This stopped working at some point in the past. 
+
     '''
     curs = dbi.cursor(conn)
     curs.execute('''select date from autoapp.dana_history_timestamp where user_id = %s''',
                  [USER_ID])
     last_update = curs.fetchone()[0]
-    curs.execute('''select prev_update from migration_status where user_id = %s''',
+    curs.execute('''select prev_autoapp_update from migration_status where user_id = %s''',
                  [USER_ID])
     prev_update_row = curs.fetchone()
     if prev_update_row is None:
@@ -857,7 +859,7 @@ passed-in values, to avoid issues of simultaneous.
     '''
     curs = dbi.cursor(conn)
     curs.execute('''UPDATE migration_status 
-                    SET prev_update = %s, migration_time = current_timestamp() 
+                    SET prev_autoapp_update = %s, prev_autoapp_migration = current_timestamp() 
                     WHERE user_id = %s''',
                  # notice this says last_ not prev_; we ignore prev here
                  [last_update_time, USER_ID])
