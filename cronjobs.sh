@@ -39,8 +39,8 @@ fi
 
 $python $repo/dexcom_cgm_sample.py 
 
-# temporary removal until migration time is fixed
-# $python $repo/autoapp_to_ics2.py cron 
+# 'cron' is actually the default, so it's not necessary
+$python $repo/autoapp_to_ics2.py cron 
 
 # $python $repo/autoapp_to_loop_logic.py
 $python $repo/autoapp_to_loop_logic_inputs.py 
