@@ -1,8 +1,4 @@
-''' Iterates over the database to identify 5 hr clean regions to use for generating the reverse engineered IAC curve.
-This is a newer version of clean_regions_5hr_24Jul21.py that can be imported as a module within the 
-reverse_engineered_iac.py file.  
-
-Last updated 12/20/22 by Mileva'''
+'''Iterate over clean regions to identfy 5 hr clean regions and store them within clean_regions_5hr_new table'''
 
 import sys
 import MySQLdb
@@ -123,8 +119,7 @@ def get_bg_time_window(curs, time):
     return rows
 
 def get_clean_regions_5hr():
-    ''' Populates the clean_regions_5hr table with rtime, isf, bg0, bg1, and bolus data for 5hr clean regions'''
-    print("--------------Retrieving 5hr Clean Regions--------------")
+    ''' Populates the clean_regions_5hr_new table with rtime, isf, bg0, bg1, and bolus data for 5hr clean regions'''
     conn = get_conn()
     curs = conn.cursor(MySQLdb.cursors.DictCursor)
     # curs.execute("USE janice")
@@ -186,7 +181,7 @@ def get_clean_regions_5hr():
         bg_at_t5 = bg_at_time_extended(bg_rows,t5)
         if bg_at_t3 and bg_at_t5:
             count += 1
-            curs.execute('''INSERT IGNORE INTO clean_regions_5hr (rtime,bg0,bg1,bolus) values (%s,%s,%s,%s)''',[t3,bg_at_t3,bg_at_t5, bolus_sum])
+            curs.execute('''insert into clean_regions_5hr_new (rtime,bg0,bg1,bolus) values (%s,%s,%s,%s)''',[t3,bg_at_t3,bg_at_t5, bolus_sum])
 
     print('''There were {} corrective insulin events from 2014 -  2018. 
 {} events were skipped because of insulin before the START period
