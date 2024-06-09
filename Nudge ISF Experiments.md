@@ -6,6 +6,7 @@ Results of running the minerva/nudge_isf.py script
 
 ### Results
 Clean 5hr ISFs
+```
 Computing ISF for Clean Regions Table clean_regions_5hr_new
 Time Range: [(datetime.datetime(2014, 3, 23, 4, 5), datetime.datetime(2021, 9, 19, 1, 5))]
 Analyzing bucketed nudge ISFs
@@ -36,8 +37,10 @@ Hour: 23         count: 83       mean: -53.4             median: -52.57         
 skipped_incomplete: 0
 skipped_failed: 0
 completed: 897
+```
 
 Clean 2hr ISFs
+```
 Computing ISF for Clean Regions Table clean_regions_2hr_new
 Time Range: [(datetime.datetime(2014, 3, 17, 1, 25), datetime.datetime(2021, 9, 19, 17, 25))]
 Analyzing bucketed nudge ISFs
@@ -68,9 +71,10 @@ Hour: 23         count: 240      mean: -12.59            median: -12.08         
 skipped_incomplete: 0
 skipped_failed: 0
 completed: 2788
-
+```
 
 15-minute nudge ISFs
+```
 Querying ics2
 Completed ics2 query
 Iterating through rows
@@ -103,3 +107,4 @@ skipped_rescue: 19509
 skipped_meals: 165529
 skipped_cgm: 352323
 completed: 178104
+```
