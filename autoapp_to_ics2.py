@@ -158,6 +158,39 @@ start_time.
         save_curr_programmed_rate(curr_prog, rtime)
     return list(output_rows)
 
+def recent_commands(conn, start_time):
+    '''Combines the programmed basal with the command table to determine
+the actual basal rate. This duplicates the work that is in basal_hour,
+but basal_hour is summarized at the end of the hour, and if we want to
+base our predictions on up-to-the-minute data, we need to do this ourselves. 
+
+See additional info in this document: 
+https://docs.google.com/document/d/1UBp8VDckHNzqjorcJNgkYaJXF6iR5CeluGQ3VB_GKkE/edit#
+'''
+    curs = dbi.dict_cursor(conn)
+    # we need to go back far enough that there's at least one
+    # cancel_temporary_basal preceding the start_time, so we do that with a subquery
+
+    # If we go back *too* far, to the beginning of the data, there
+    # will be no prior 'cancel_temp_basal' command, in which case we
+    # want *all* the data. So we use ifnull() to get zero for the minimum command.
+    curs.execute('''SELECT ifnull(max(command_id),0) FROM autoapp.commands 
+                    WHERE type = 'cancel_temporary_basal' and update_timestamp < %s''',
+                 [start_time])
+    print('max command id', curs.fetchone())
+
+    curs.execute('''SELECT update_timestamp as 'date', type, ratio, duration FROM autoapp.commands 
+                    LEFT OUTER JOIN autoapp.commands_temporary_basal_data USING (command_id)
+                    WHERE user_id = %s and command_id >= 
+                         (SELECT ifnull(max(command_id),0) FROM autoapp.commands 
+                          WHERE type = 'cancel_temporary_basal' and update_timestamp < %s)
+                    AND type in ('suspend','temporary_basal','cancel_temporary_basal')
+                    AND state = 'done'; ''',
+                 [USER_ID, start_time])
+    commands = curs.fetchall()
+
+
+
 '''1/13/2023 This needs to be re-written. We should use the basal_hour
 data for anything older than an hour. The basal_hour will be accurate
 for the hour it's listed. So if it says 1.2 on 1/13/2023 at 4:00, that
@@ -178,20 +211,29 @@ and syncs with the phone, and autoapp suddenly has a bunch of incoming
 stuff. Then we have a lot to migrate, so we should use the basal_hour
 for that data.
 
+'''
 
+'''Update on June 6, 2024. We were getting Exceptions in the code
+below because there were no temp basal commands we could count
+on. That could just be because the subquery should look for a
+cancel_temporary_basal that is of state 'done'.  And maybe with
+error=0. However, what if it's not able to find one in the last N
+hours. What if N is 2, 10, 24? This worries me.
+
+I added the clause "AND state = 'done'" to the subquery, but we need
+to test this more thoroughly.
 
 '''
 
-# 5/19/2022
-def actual_basal(conn, start_time):
-    '''Combines the programmed basal with the command table to determine
-the actual basal rate. This duplicates the work that is in basal_hour,
-but basal_hour is summarized at the end of the hour, and if we want to
-base our predictions on up-to-the-minute data, we need to do this ourselves. 
-
-See additional info in this document: 
-https://docs.google.com/document/d/1UBp8VDckHNzqjorcJNgkYaJXF6iR5CeluGQ3VB_GKkE/edit#
-'''
+# function new for June 2024; factored out from actual_basal, below, so
+# we can test this 
+def recent_temp_basal_commands(conn, start_time):
+    '''Return a non-empty list of temp basal commands since the most
+    recent cancel_temporary_basal prior to start_time. In practice,
+    start_time will be roughly now, so there won't be any after that,
+    but for the sake of testing this, we limit the result to commands
+    whose update_timestamp precedes start_time.
+    '''
     curs = dbi.dict_cursor(conn)
     # we need to go back far enough that there's at least one
     # cancel_temporary_basal preceding the start_time, so we do that with a subquery
@@ -203,10 +245,13 @@ https://docs.google.com/document/d/1UBp8VDckHNzqjorcJNgkYaJXF6iR5CeluGQ3VB_GKkE/
                     LEFT OUTER JOIN autoapp.commands_temporary_basal_data USING (command_id)
                     WHERE user_id = %s and command_id >= 
                          (SELECT ifnull(max(command_id),0) FROM autoapp.commands 
-                          WHERE type = 'cancel_temporary_basal' and update_timestamp < %s)
+                          WHERE type = 'cancel_temporary_basal'
+                            AND state = 'done'
+                            AND update_timestamp < %s)
                     AND type in ('suspend','temporary_basal','cancel_temporary_basal')
-                    AND state = 'done'; ''',
-                 [USER_ID, start_time])
+                    AND state = 'done'
+                    AND update_timestamp <= %s; ''',
+                 [USER_ID, start_time, start_time])
     commands = curs.fetchall()
     if len(commands) == 0:
         # having no commands is a problem because we need commands to
@@ -215,7 +260,43 @@ https://docs.google.com/document/d/1UBp8VDckHNzqjorcJNgkYaJXF6iR5CeluGQ3VB_GKkE/
         raise Exception('no recent temp_basal commands at time {}'.format(start_time))
     logging.debug('there are {} commands to process since {}'.format(len(commands), start_time))
     for c in commands:
-        logging.debug(str(c))
+        logging.debug(dic2str(c))
+    return commands
+    
+def dic2str(dic):
+    '''by reaching in and doing str() of keys and values, values that
+    are datetimes get converted to something more readable.'''
+    val = '{'
+    for k,v in dic.items():
+        val += str(k)+': '+str(v)+', '
+    val += '}'
+    return val
+
+def recent_temp_basal_commands_test(conn,
+                                    test_start_date='2023-01-02',
+                                    test_end_date='2024-06-11'):
+    '''Try every minute in the given interval.'''
+    st = date_ui.to_datetime(test_start_date)
+    et = date_ui.to_datetime(test_end_date)
+    dt = timedelta(minutes=1)
+    while st < et:
+        # the function raises an exception if it's ever empty, so it's
+        # sufficient just to invoke the function
+        recent_temp_basal_commands(conn, st)
+        st += dt
+        
+# 5/19/2022
+# Revised 6/11/2024 to use function above
+def actual_basal(conn, start_time):
+    '''Combines the programmed basal with the command table to determine
+the actual basal rate. This duplicates the work that is in basal_hour,
+but basal_hour is summarized at the end of the hour, and if we want to
+base our predictions on up-to-the-minute data, we need to do this ourselves. 
+
+See additional info in this document: 
+https://docs.google.com/document/d/1UBp8VDckHNzqjorcJNgkYaJXF6iR5CeluGQ3VB_GKkE/edit#
+'''
+    commands = recent_commands(conn, start_time)
     ## Now the real code
     rtime = date_ui.to_rtime(start_time)
     now = datetime.now()
@@ -225,6 +306,20 @@ https://docs.google.com/document/d/1UBp8VDckHNzqjorcJNgkYaJXF6iR5CeluGQ3VB_GKkE/
     for p in programmed:
         logging.debug(str(p))
     return merge_time_queues(start_time, now, programmed, commands)
+
+def actual_basal_test(conn,
+                      test_start_date='2023-01-02',
+                      test_end_date='2024-06-11'):
+    '''Try every minute in the given interval.'''
+    st = date_ui.to_datetime(test_start_date)
+    et = date_ui.to_datetime(test_end_date)
+    dt = timedelta(minutes=1)
+    while st < et:
+        # the function raises an exception if it's ever empty, so it's
+        # sufficient just to invoke the function
+        actual_basal(conn, st)
+        st += dt
+        
 
 def migrate_basal_12(conn, start_time):
     '''Computes actual (hourly) basal rate for each 5-minutes time step
@@ -351,13 +446,16 @@ def __test_merge_time_queues():
                for t in times3 ]
 
     print('prog2')
-    for p in prog2:
-        print(p)
+    print_rows(prog2)
     print('comms1')
+    print_rows(comms1)
     for c in comms1:
         print(c)
-
-    return merge_time_queues('2022-01-02', '2022-01-02 6:00:00', prog2, comms1)
+    # this is looking at a 6-hour window, so 6*12 or 72 results
+    merged = merge_time_queues('2022-01-02', '2022-01-02 6:00:00', prog2, comms1)
+    print('merged',len(merged))
+    print_rows(merged)
+    return merged
 
 # ================================================================
 
