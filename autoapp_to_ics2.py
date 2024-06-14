@@ -158,37 +158,6 @@ start_time.
         save_curr_programmed_rate(curr_prog, rtime)
     return list(output_rows)
 
-def recent_commands(conn, start_time):
-    '''Combines the programmed basal with the command table to determine
-the actual basal rate. This duplicates the work that is in basal_hour,
-but basal_hour is summarized at the end of the hour, and if we want to
-base our predictions on up-to-the-minute data, we need to do this ourselves. 
-
-See additional info in this document: 
-https://docs.google.com/document/d/1UBp8VDckHNzqjorcJNgkYaJXF6iR5CeluGQ3VB_GKkE/edit#
-'''
-    curs = dbi.dict_cursor(conn)
-    # we need to go back far enough that there's at least one
-    # cancel_temporary_basal preceding the start_time, so we do that with a subquery
-
-    # If we go back *too* far, to the beginning of the data, there
-    # will be no prior 'cancel_temp_basal' command, in which case we
-    # want *all* the data. So we use ifnull() to get zero for the minimum command.
-    curs.execute('''SELECT ifnull(max(command_id),0) FROM autoapp.commands 
-                    WHERE type = 'cancel_temporary_basal' and update_timestamp < %s''',
-                 [start_time])
-    print('max command id', curs.fetchone())
-
-    curs.execute('''SELECT update_timestamp as 'date', type, ratio, duration FROM autoapp.commands 
-                    LEFT OUTER JOIN autoapp.commands_temporary_basal_data USING (command_id)
-                    WHERE user_id = %s and command_id >= 
-                         (SELECT ifnull(max(command_id),0) FROM autoapp.commands 
-                          WHERE type = 'cancel_temporary_basal' and update_timestamp < %s)
-                    AND type in ('suspend','temporary_basal','cancel_temporary_basal')
-                    AND state = 'done'; ''',
-                 [USER_ID, start_time])
-    commands = curs.fetchall()
-
 
 
 '''1/13/2023 This needs to be re-written. We should use the basal_hour
@@ -296,7 +265,7 @@ base our predictions on up-to-the-minute data, we need to do this ourselves.
 See additional info in this document: 
 https://docs.google.com/document/d/1UBp8VDckHNzqjorcJNgkYaJXF6iR5CeluGQ3VB_GKkE/edit#
 '''
-    commands = recent_commands(conn, start_time)
+    commands = recent_temp_basal_commands(conn, start_time)
     ## Now the real code
     rtime = date_ui.to_rtime(start_time)
     now = datetime.now()
