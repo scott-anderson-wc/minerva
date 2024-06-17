@@ -199,10 +199,10 @@ def get_clean_regions_2hr():
         bg_at_t5 = bg_at_time_extended(bg_rows,t5)
         if bg_at_t3 and bg_at_t5:
             count += 1
-            curs.execute('''insert into clean_regions_5hr_new (rtime,bg0,bg1,bolus) values (%s,%s,%s,%s)''',[t3,bg_at_t3,bg_at_t5, bolus_sum]) 
+            curs.execute('''insert into clean_regions_2hr_new (rtime,bg0,bg1,bolus) values (%s,%s,%s,%s)''',[t3,bg_at_t3,bg_at_t5, bolus_sum]) 
 
     print(count)
-    print('''There were {} corrective insulin events from 2014 -  2018. 
+    print('''There were {} corrective insulin events from 2014 -  present. 
 {} events were skipped because of insulin before the START period
 {} events were skipped because the bolus was too small
 {} events were skipped because there was a bolus in the MIDDLE period
