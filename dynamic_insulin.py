@@ -1045,12 +1045,13 @@ def create_virtual_rows(test=False,start=None,end=None):
                    IC_KEYS)
 
 def pipe_write_ics2(test=False,start=None,end=None):
-    '''Update the ICS table'''
+    '''Update the ICS2 table'''
     if test:
         raise Exception('NYI')
         rows = test_data2
     else:
-        rows = lambda : gen_rows_ic(start=start,end=end)
+        # changed table name on 11/11/2022 to update ICS2 but that was a bust
+        rows = lambda : gen_rows_ic(start=start,end=end, tablename='insulin_carb_smoothed_2')
 
     def cat(p):
         for v in p:
