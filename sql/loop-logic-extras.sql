@@ -1,5 +1,7 @@
 -- Scott's additions to the loop_logic database
 
+This file is obsolete. Use definition in migration_status.sql
+
 -- use autoapp_test;                 -- in case we use this on its own
 
 -- The following table added by Scott, to keep track of migration of data from autoapp.
@@ -13,6 +15,8 @@ CREATE TABLE `migration_status` (
   `prev_autoapp_migration` datetime NOT NULL,
   `prev_cgm_update` datetime NOT NULL,
   `prev_cgm_migration` datetime NOT NULL,
+  `last_run` datetime NOT NULL comment 'most recent run of migration cron job',
+  `last_status` enum('error', 'no_data', 'starting', 'success') comment 'outcome associate with last_run'
   PRIMARY KEY (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 

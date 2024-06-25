@@ -12,7 +12,7 @@
 -- cron job to communicate whether testing is in progress and when it
 -- started.
 
-use loop_logic;
+-- use loop_logic;
 
 -- this table will only ever have one row in it
 
@@ -56,13 +56,13 @@ insert into source_cgm
 select user_id, rtime, dexcom_time, mgdl, trend, trend_code, 'NO'
 from janice.realtime_cgm2
 where date(rtime)='2022-09-01'
-limit 10;
+limit 100;
 
 drop table if exists latest_cgm;
 create table latest_cgm (
-    cgmid int primary key auto_increment,
+    cgm_id int primary key auto_increment,
     user_id int not null default 7,
-    time datetime,
+    dexcom_time datetime,
     mgdl smallint,
     trend tinyint,
     trend_code enum('None',     -- 0
@@ -77,5 +77,5 @@ create table latest_cgm (
                'RateOutOfRange' -- 9
                ),
     status enum('fake','real') comment 'the cron job that copies from source_cgm will specify that it is fake',
-    index(time)
+    index(dexcom_time)
 );

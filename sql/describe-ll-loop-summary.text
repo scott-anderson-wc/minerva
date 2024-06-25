@@ -1,0 +1,27 @@
+Field	Type	Null	Key	Default	Extra
+loop_summary_id	int(11)	NO	PRI	NULL	auto_increment
+user_id	int(11)	NO	MUL	NULL	
+bolus_pump_id	int(11)	YES		NULL	
+bolus_timestamp	datetime	YES		NULL	
+bolus_value	int(11)	YES		NULL	
+carb_id	int(11)	YES		NULL	
+running_carb_interval	int(11)	YES		NULL	
+command_id	int(11)	YES		NULL	
+created_timestamp	datetime	YES		NULL	
+state	enum('pending','abort','created','read','sent','done','error','timeout','canceled')	NO		NULL	
+type	enum('profile','suspend','temporary_basal','bolus','dual_bolus','extended_bolus','cancel_temporary_basal')	NO		NULL	
+pending	int(11)	YES		NULL	
+completed	int(11)	YES		NULL	
+error	int(11)	YES		NULL	
+loop_command	int(11)	YES		NULL	
+parent_decision	int(11)	YES		NULL	
+linked_cgm_id	int(11)	YES	MUL	NULL	
+temp_basal_timestamp	datetime	YES		NULL	
+temp_basal_percent	int(11)	YES		NULL	
+running	int(11)	YES		NULL	
+settled	int(11)	YES		NULL	
+anchor	int(11)	YES		NULL	
+parent_involved	int(11)	YES		NULL	
+running_bolus_interval	int(11)	YES		NULL	
+running_topup_bolus_interval	int(11)	YES		NULL	
+running_interval_max	int(11)	YES		NULL	

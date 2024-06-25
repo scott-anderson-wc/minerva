@@ -6,6 +6,7 @@ create table carbohydrate like autoapp.carbohydrate;
 create table commands like autoapp.commands;
 create table commands_single_bolus_data like autoapp.commands_single_bolus_data;
 create table commands_temporary_basal_data like autoapp.commands_temporary_basal_data;
+create table temp_basal_state like autoapp.temp_basal_state;
 
 insert into dana_history_timestamp select * from autoapp.dana_history_timestamp;
 

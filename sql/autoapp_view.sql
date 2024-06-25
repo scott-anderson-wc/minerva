@@ -5,6 +5,7 @@ use autoapp;
 -- all the bolus data seems to be in bolus, but is there a connection with the commands table?
 -- temp_basal table is empty
 
+-- last updated Nov 11, 2022
 
 drop view if exists janice.command_view;
 create view janice.command_view as
