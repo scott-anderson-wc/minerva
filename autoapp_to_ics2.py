@@ -8,6 +8,7 @@ import cs304dbi as dbi
 from datetime import datetime, timedelta
 import date_ui
 import logging
+from migrate_basal_rate import migrate_basal_12
 
 # Configuration Constants
 
@@ -61,7 +62,7 @@ def import_functions(conn):
 ## ================================================================
 ## Fill Forward
 
-def fill_forward(conn):
+def fill_forward_between(conn, start_time, end_time):
     '''The migration functions will assume that the ICS2 table has all the
 necessary rows, so we can do the updates using the SQL UPDATE
 statement rather than mess with REPLACE or INSERT ON DUPLICATE
@@ -72,318 +73,30 @@ CRON.  The function returns the rtime where it started. However, other
 migration functions should start from autoapp.last_update.date. See
 get_migration_time().
 
+    I considered doing minutes_since_last_meal and
+    minutes_since_last_bolus here, but if there's an outage and we end
+    up filling a bunch of rows where there might be meals or boluses,
+    then this becomes complicated, and I would rather keep this
+    function simple and robust.
+
     '''
-    # first, read the last row, to determine the max rtime
+    start_time = date_ui.to_rtime(start_time)
+    end_time = date_ui.to_rtime(end_time)
     curs = conn.cursor()
-    # since we control the value of TABLE, using an f-string here is safe
-    # Now that we're using Python 3.6 on this server, we can use f-strings. :-)
-    curs.execute(f'''SELECT max(rtime) FROM {TABLE}''')
-    max_rtime = curs.fetchone()[0]
-    logging.debug(f'max rtime in {TABLE}: {max_rtime}')
-    now = date_ui.to_rtime(datetime.now())
-    rtime = max_rtime + timedelta(minutes=5)
+    logging.debug(f'fill_forward_between: inserting rows into {TABLE} from {start_time} to {end_time}')
     # this part needs to be idempotent, particularly when we are testing, so
     # I added the ON DUPLICATE KEY no-op
-    logging.debug(f'fill_forward: inserting rows into {TABLE} starting at {rtime} ending at {now}')
-    insert = ("""INSERT INTO {TABLE}(rtime, user) values(%s, '{USER}')
-                 ON DUPLICATE KEY UPDATE user=user; """
-              .format(TABLE=TABLE, USER=USER))
-    while rtime < now:
+    insert = f'''INSERT INTO {TABLE}(rtime, user)
+                 VALUES(%s, '{USER}')
+                 ON DUPLICATE KEY UPDATE user=user; '''
+    rtime = start_time
+    while rtime < end_time:
         curs.execute(insert, [rtime])
         rtime += timedelta(minutes=5)
     conn.commit()
-    # all done, return the time to start migration
-    return max_rtime
-    
 
 ## ----------------------------- Migration ----------------------------------------
 
-## This would be a nice example in a more advanced database course....
-
-def programmed_basal(conn, start_time):
-    '''Goes through all records in base_basal_profile, pulling out the
-program as it changes, and creating rows consisting of
-rtime,basal_rate.  We need to know the basal program from before the
-start_time, so we grab all records after the last one before
-start_time.
-
-    '''
-    output_rows = collections.deque([])
-
-    def get_curr_programmed_rate(program, rtime):
-        hour = rtime.hour
-        field='basal_profile_'+str(hour)
-        return program[field]
-
-    def save_curr_programmed_rate(program, rtime):
-        curr_rate = get_curr_programmed_rate(program, rtime)
-        # debug('rtime is {}, rate is {}'.format(rtime, curr_rate))
-        output_rows.append({'rtime': rtime, 'programmed_basal_rate': curr_rate})
-
-    now = datetime.now()
-    
-    prog_curs = dbi.dict_cursor(conn)
-    # fields are base_basal_profile_id, user_id, date, basal_profile_[0-23], server_date
-    # used * because the 24 long column names are annoying.
-    # Note that we have to reach back to get at least one before start_time.
-    rows = prog_curs.execute('''SELECT * FROM autoapp.base_basal_profile 
-                                WHERE base_basal_profile_id >= 
-                                    (SELECT max(base_basal_profile_id) FROM autoapp.base_basal_profile
-                                     WHERE date <= %s)''',
-                             [start_time])
-    if rows == 0:
-        # oh dear. Special case for start_time > most recent
-        # We need to look back to find the most recent programmed basal 
-        loggin.debug('special case for start_time > most recent')
-        prog_curs.execute('''SELECT * from autoapp.base_basal_profile 
-                             WHERE base_basal_profile_id = (SELECT max(base_basal_profile_id) 
-                                                            FROM autoapp.base_basal_profile)''')
-
-    curr_prog = prog_curs.fetchone()
-    # next_prog might be None if curr_prog is the last one.
-    next_prog = prog_curs.fetchone()
-    rtime = date_ui.to_rtime(start_time)
-    save_curr_programmed_rate(curr_prog, rtime)
-    while True:
-        # rtime += timedelta(minutes=5)
-        # temporarily switch to hourly
-        rtime += timedelta(hours=1)
-        # loop until rtime up to now. 
-        if rtime > now:
-            break
-        if next_prog is not None and rtime >= next_prog['date']:
-            # get the next program
-            curr_prog = next_prog
-            next_prog = prog_curs.fetchone()
-        save_curr_programmed_rate(curr_prog, rtime)
-    return list(output_rows)
-
-
-
-'''1/13/2023 This needs to be re-written. We should use the basal_hour
-data for anything older than an hour. The basal_hour will be accurate
-for the hour it's listed. So if it says 1.2 on 1/13/2023 at 4:00, that
-means that the basal rate is 1.2 starting at 4:00. 
-
-We should use the real-time calculation for times past the basal hour:
-determine the current programmed rate, check the command table for any
-non-canceled temporary_basals, join with the
-commands_temporary_basal_data table to determine the ratio and use
-that.
-
-For any past data, if our data is missing, we should use the
-basal_hour data. Otherwise, trust our real-time calculation.
-
-Very often, there will be a long gap of commands during the day when
-Hugh is away from the phone that does the upload. Then he comes home
-and syncs with the phone, and autoapp suddenly has a bunch of incoming
-stuff. Then we have a lot to migrate, so we should use the basal_hour
-for that data.
-
-'''
-
-'''Update on June 6, 2024. We were getting Exceptions in the code
-below because there were no temp basal commands we could count
-on. That could just be because the subquery should look for a
-cancel_temporary_basal that is of state 'done'.  And maybe with
-error=0. However, what if it's not able to find one in the last N
-hours. What if N is 2, 10, 24? This worries me.
-
-I added the clause "AND state = 'done'" to the subquery, but we need
-to test this more thoroughly.
-
-'''
-
-# function new for June 2024; factored out from actual_basal, below, so
-# we can test this 
-def recent_temp_basal_commands(conn, start_time):
-    '''Return a non-empty list of temp basal commands since the most
-    recent cancel_temporary_basal prior to start_time. In practice,
-    start_time will be roughly now, so there won't be any after that,
-    but for the sake of testing this, we limit the result to commands
-    whose update_timestamp precedes start_time.
-    '''
-    curs = dbi.dict_cursor(conn)
-    # we need to go back far enough that there's at least one
-    # cancel_temporary_basal preceding the start_time, so we do that with a subquery
-
-    # If we go back *too* far, to the beginning of the data, there
-    # will be no prior 'cancel_temp_basal' command, in which case we
-    # want *all* the data. So we use ifnull() to get zero for the minimum command.
-    curs.execute('''SELECT update_timestamp as 'date', type, ratio, duration FROM autoapp.commands 
-                    LEFT OUTER JOIN autoapp.commands_temporary_basal_data USING (command_id)
-                    WHERE user_id = %s and command_id >= 
-                         (SELECT ifnull(max(command_id),0) FROM autoapp.commands 
-                          WHERE type = 'cancel_temporary_basal'
-                            AND state = 'done'
-                            AND update_timestamp < %s)
-                    AND type in ('suspend','temporary_basal','cancel_temporary_basal')
-                    AND state = 'done'
-                    AND update_timestamp <= %s; ''',
-                 [USER_ID, start_time, start_time])
-    commands = curs.fetchall()
-    if len(commands) == 0:
-        # having no commands is a problem because we need commands to
-        # be sure whether temp basal is off (we need it to be off) so
-        # we can determine the actual basal.
-        raise Exception('no recent temp_basal commands at time {}'.format(start_time))
-    logging.debug('there are {} commands to process since {}'.format(len(commands), start_time))
-    for c in commands:
-        logging.debug(dic2str(c))
-    return commands
-    
-def dic2str(dic):
-    '''by reaching in and doing str() of keys and values, values that
-    are datetimes get converted to something more readable.'''
-    val = '{'
-    for k,v in dic.items():
-        val += str(k)+': '+str(v)+', '
-    val += '}'
-    return val
-
-def recent_temp_basal_commands_test(conn,
-                                    test_start_date='2023-01-02',
-                                    test_end_date='2024-06-11'):
-    '''Try every minute in the given interval.'''
-    st = date_ui.to_datetime(test_start_date)
-    et = date_ui.to_datetime(test_end_date)
-    dt = timedelta(minutes=1)
-    while st < et:
-        # the function raises an exception if it's ever empty, so it's
-        # sufficient just to invoke the function
-        recent_temp_basal_commands(conn, st)
-        st += dt
-        
-# 5/19/2022
-# Revised 6/11/2024 to use function above
-def actual_basal(conn, start_time):
-    '''Combines the programmed basal with the command table to determine
-the actual basal rate. This duplicates the work that is in basal_hour,
-but basal_hour is summarized at the end of the hour, and if we want to
-base our predictions on up-to-the-minute data, we need to do this ourselves. 
-
-See additional info in this document: 
-https://docs.google.com/document/d/1UBp8VDckHNzqjorcJNgkYaJXF6iR5CeluGQ3VB_GKkE/edit#
-'''
-    commands = recent_temp_basal_commands(conn, start_time)
-    ## Now the real code
-    rtime = date_ui.to_rtime(start_time)
-    now = datetime.now()
-    # programmed values
-    programmed = programmed_basal(conn, start_time)
-    logging.debug('there are {} programmed basal'.format(len(programmed)))
-    for p in programmed:
-        logging.debug(str(p))
-    return merge_time_queues(start_time, now, programmed, commands)
-
-def actual_basal_test(conn,
-                      test_start_date='2023-01-02',
-                      test_end_date='2024-06-11'):
-    '''Try every minute in the given interval.'''
-    st = date_ui.to_datetime(test_start_date)
-    et = date_ui.to_datetime(test_end_date)
-    dt = timedelta(minutes=1)
-    while st < et:
-        # the function raises an exception if it's ever empty, so it's
-        # sufficient just to invoke the function
-        actual_basal(conn, st)
-        st += dt
-        
-
-def migrate_basal_12(conn, start_time):
-    '''Computes actual (hourly) basal rate for each 5-minutes time step
-and stores basal_amt_12 in each row.'''
-    curs = conn.cursor()
-    basal_rates = actual_basal(conn, start_time)
-    twelfth = 1.0/12.0
-    update = '''UPDATE {} SET basal_amt_12 = %s 
-                WHERE rtime = %s and user = \'{}\'; '''.format(TABLE, USER)
-    logging.debug('update sql {}'.format(update))
-    for row in basal_rates:
-        curs.execute(update, [ row['actual basal']*twelfth, row['rtime'] ])
-    conn.commit()
-    # the return is nice for debugging. use print_rows() and
-    # copy/paste to a spreadsheet to share with Janice
-    return basal_rates
-
-# 5/29/22
-def merge_time_queues(start_time, stop_time, programmed_basal_rates, commands):
-    '''returns a list of rtimes from start_time to stop_time and 'actual
-basal' rates (in hourly units) taking into account two "queues" of
-information: basal_rates are programmed hourly rates and commands are
-temp basals (percentages or cancelations).'''
-    start_rtime = date_ui.to_rtime(start_time)
-    stop_rtime = date_ui.to_rtime(stop_time)
-    rtime = start_rtime
-    result = []
-    ## queues always have *future* times or are empty, but they need
-    ## to start with some *past* values so that we can set up the
-    ## state variables.  We dequeue data when rtime passes the time
-    ## for the first thing in the queue. If the queue becomes empty,
-    ## state variable just continues forever.
-    if len(programmed_basal_rates) == 0:
-        raise ValueError('no programmed basal rates at time {}'.format(start_time))
-    if len(commands) == 0:
-        raise ValueError('no commands at time {}'.format(start_time))
-
-    event = None                # one-time state variable
-
-    programmed_rate = None      # invisible state variable
-    def curr_programmed_rate():
-        nonlocal programmed_rate
-        nonlocal event
-        while len(programmed_basal_rates) > 0 and rtime >= programmed_basal_rates[0]['rtime']:
-            top = programmed_basal_rates.pop(0)
-            if top['programmed_basal_rate'] != programmed_rate:
-                event = 'change in programmed rate'
-                programmed_rate = top['programmed_basal_rate']
-        return programmed_rate
-
-    # if start_time is well in the past (we're migrating a ton of old data), we might not
-    # know what the state variable was at that time. So, we can 
-    if curr_programmed_rate() is None:
-        logging.debug('first 4 programmed rates: {}'.format(programmed_basal_rates[0:4]))
-        raise ValueError('programmed basal had no past values')
-
-    temp_basal = None           # invisible state variable. Value is 1.0 when no temp_basal.
-    temp_basal_end_time = None  # invisible state variable
-    def curr_temp_basal():
-        nonlocal temp_basal
-        nonlocal temp_basal_end_time
-        nonlocal event
-        if temp_basal_end_time and rtime >= temp_basal_end_time:
-            # turn off temp basal after given duration
-            temp_basal, temp_basal_end_time, event = 1.0, None, 'temp basal off'
-        while len(commands) > 0 and rtime >= commands[0]['date']:
-            top = commands.pop(0)
-            # this will ignore any other commands
-            if top['type'] == 'temporary_basal':
-                event = 'command: temp basal on'
-                temp_basal = top['ratio']/100.0
-                temp_basal_end_time = top['date'] + timedelta(hours=top['duration'])
-            elif top['type'] == 'cancel_temporary_basal':
-                event = 'command: cancel temp basal'
-                temp_basal = 1.0
-        return temp_basal
-
-    # if start_time is well in the past, we might not have any commands prior to the start time.
-    # but I think that's okay.
-    if curr_temp_basal() is None:
-        logging.debug('commands had no past values; first is: {}'.format(commands[0]))
-        logging.debug('assuming no temp basal')
-        temp_basal = 1.0
-        # raise ValueError('commands had no past values')
-
-    # okay, state variables are set, and we're ready to go
-    result = collections.deque([])
-    while rtime <= stop_rtime:
-        pr = curr_programmed_rate()
-        tb = curr_temp_basal()
-        ab = pr * tb 
-        result.append({'rtime':rtime, 'actual basal': ab, 'event': event})
-        event = ''
-        rtime += timedelta(minutes=5)
-    return list(result)
     
 def print_rows(rows):
     keys = rows[0].keys()
@@ -393,51 +106,9 @@ def print_rows(rows):
         row_list = [ str(row[k]) for k in keys ]
         print('\t'.join(row_list))
 
-def __test_merge_time_queues():
-    prog1 = [ ['2022-01-01 23:00:00', 0.7],
-               ['2022-01-02 1:00:00', 1.2],
-               ['2022-01-02 2:00:00', 0.3]
-               ]
-    prog2 = [ {'rtime':date_ui.to_datetime(t[0]), 'programmed_basal_rate':t[1]}
-              for t in prog1 ]
-
-    # temp basals percentages are in 0-100
-    # cols are date, command, ratio, duration 
-    times3 = [ ['2022-01-01 23:30:00', 'cancel_temporary_basal', None, None ],
-               ['2022-01-02 0:10:00', 'temporary_basal', 40, 1 ],
-               ['2022-01-02 2:20:00','temporary_basal', 60, 1 ],
-               ['2022-01-02 4:30:00','temporary_basal', 80, 1 ]
-               ]
-    comms1 = [ {'date': date_ui.to_datetime(t[0]),
-                'type': t[1],
-                'ratio': t[2],
-                'duration': t[3] }
-               for t in times3 ]
-
-    print('prog2')
-    print_rows(prog2)
-    print('comms1')
-    print_rows(comms1)
-    for c in comms1:
-        print(c)
-    # this is looking at a 6-hour window, so 6*12 or 72 results
-    merged = merge_time_queues('2022-01-02', '2022-01-02 6:00:00', prog2, comms1)
-    print('merged',len(merged))
-    print_rows(merged)
-    return merged
-
 # ================================================================
 
-
-def test_programmed_basal(conn, printp=True):
-    vals = programmed_basal(conn, '2022-04-19')
-    for d in vals:
-        print(str(d['rtime'])+"\t"+str(d['programmed_basal_rate']))
-    return vals
-
-# ================================================================
-
-def bolus_import_s(conn, start_rtime, debugp=False):
+def bolus_import_s(conn, start_time, end_time, debugp=False):
     '''An S entry means just a simple bolus. But what does a non-zero
 duration mean? See #57 among others.'''
     curs = conn.cursor()
@@ -449,86 +120,87 @@ duration mean? See #57 among others.'''
     # Note that because the rows should now exist, we have to use the
     # on duplicate key trick, because replace will *delete* any
     # existing row and replace it. We don't want that. We want to
-    # update it if it's already there, and it will be. There may be a more
-    # efficient way to do this, but it works.
+    # update it if it's already there, and it will be. There may be a
+    # more efficient way to do this, but it works. So, in practice,
+    # this should not insert any rows, but update existing rows, and
+    # it should be idempotent.
 
     # Now that we have relevance_lag, this should capture S boluses in
     # the recent past. The ON DUPLICATE KEY code should make it
     # idempotent.
-    nr = curs.execute('''insert into {}( rtime, bolus_type, total_bolus_volume)
+    nr = curs.execute(f'''insert into {TABLE}( rtime, bolus_type, total_bolus_volume)
                          select
                             janice.date5f(date),
                             type,
                             if(value='', NULL, value)
                         from autoapp.bolus
-                        where user_id = 7 and type = 'S' and date >= %s
-                        on duplicate key update 
+                        where user_id = 7 and type = 'S' and date >= %s and date <= %s
+                        ON DUPLICATE KEY UPDATE 
                             bolus_type = values(bolus_type),
-                            total_bolus_volume = values(total_bolus_volume)'''.format(TABLE),
-                 [start_rtime])
-    conn.commit()
+                            total_bolus_volume = values(total_bolus_volume)''',
+                      [start_time, end_time])
+    if not debugp:
+        conn.commit()
     return nr
 
-def bolus_import_s_test(conn, start_rtime):
-    start_rtime = date_ui.to_rtime(start_rtime)
+def bolus_import_s_test(conn, start_time, end_time):
+    start_time = date_ui.to_rtime(start_time)
+    end_time = date_ui.to_rtime(end_time)
     curs = conn.cursor()
     nr = curs.execute('''select janice.date5f(date),type,if(value='', NULL, value)
                          from autoapp.bolus
-                         where user_id = 7 and type = 'S' and date >= %s''',
-                 [start_rtime])
-    print('{} S boluses since {}'.format(nr, start_rtime))
-    for row in curs.fetchall():
-        print("\t".join(map(str,row)))
+                         where user_id = 7 and type = 'S' and date >= %s and date <= %s''',
+                 [start_time, end_time])
+    print(f'{nr} S boluses between {start_time} and {end_time}')
+    print_rows(curs.fetchall())
     nr = bolus_import_s(conn, start_rtime, debugp=True)
     print('result: {} rows modified'.format(nr))
-    nr = curs.execute('''select rtime, bolus_type, total_bolus_volume
-                         from {}
-                         where bolus_type = 'S' and rtime >= %s'''.format(TABLE),
-                      [start_rtime])
-    print('{} S boluses since {}'.format(nr, start_rtime))
-    for row in curs.fetchall():
-        print("\t".join(map(str,row)))
+    nr = curs.execute(f'''select rtime, bolus_type, total_bolus_volume
+                         from {TABLE}
+                         where bolus_type = 'S' and rtime >= %s and rtime < %s''',
+                      [start_time, end_time])
+    print(f'imported {nr} S boluses between {start_time} and {end_time}')
+    print_rows(curs.fetchall())
     
-def bolus_import_ds(conn, start_rtime, debugp=False):
+def bolus_import_ds(conn, start_time, end_time, debugp=False):
     '''A DS entry is, I think, the same as an S entry, but maybe is paired
     with a DE entry?  '''
     # DS events. Treating them just like S, for now.
     curs = conn.cursor()
     # Again, the ON DUPLICATE KEY trick should make this idempotent
-    # and do the right thing now that we have relevance_lag
-    n = curs.execute('''insert into {}( rtime, bolus_type, total_bolus_volume)
+    n = curs.execute(f'''insert into {TABLE}( rtime, bolus_type, total_bolus_volume)
                     select 
                         janice.date5f(date),
                         'DS',
                         if(value='', NULL, value)
                     from autoapp.bolus
-                    where user_id = 7 and type = 'DS' and date >= %s
-                    on duplicate key update 
+                    where user_id = 7 and type = 'DS' and date >= %s and date <= %s
+                    ON DUPLICATE KEY UPDATE 
                         bolus_type = values(bolus_type),
-                        total_bolus_volume = values(total_bolus_volume)'''.format(TABLE),
-                     [start_rtime])
+                        total_bolus_volume = values(total_bolus_volume)''',
+                     [start_time, end_time])
     logging.debug('updated with {} DS events from bolus table'.format(n))
-    conn.commit()
+    if not debugp:
+        conn.commit()
 
-def bolus_import_ds_test(conn, start_rtime):
-    start_rtime = date_ui.to_rtime(start_rtime)
+def bolus_import_ds_test(conn, start_time, end_time):
+    start_time = date_ui.to_rtime(start_time)
+    end_time = date_ui.to_rtime(start_time)
     curs = conn.cursor()
     nr = curs.execute('''select janice.date5f(date),type,if(value='', NULL, value)
                          from autoapp.bolus
-                         where user_id = 7 and type = 'DS' and date >= %s''',
-                 [start_rtime])
-    print('{} DS boluses since {}'.format(nr, start_rtime))
-    for row in curs.fetchall():
-        print("\t".join(map(str,row)))
-    nr = bolus_import_ds(conn, start_rtime, debugp=True)
+                         where user_id = 7 and type = 'DS' and date >= %s and date <= %s''',
+                 [start_time, end_time])
+    print(f'{nr} DS boluses between {start_time} and {end_time}')
+    print_rows(curs.fetchall())
+    nr = bolus_import_ds(conn, start_time, end_time, debugp=True)
     print('result: {} rows modified'.format(nr))
-    nr = curs.execute('''select rtime, bolus_type, total_bolus_volume
-                         from {}
-                         where bolus_type = 'DS' and rtime >= %s'''.format(TABLE),
+    nr = curs.execute(f'''select rtime, bolus_type, total_bolus_volume
+                         from {TABLE}
+                         where bolus_type = 'DS' and rtime >= %s and rtime <= %s'''
                       [start_rtime])
-    print('{} DS boluses since {}'.format(nr, start_rtime))
-    for row in curs.fetchall():
-        print("\t".join(map(str,row)))
+    print(f'{nr} DS boluses between {start_time} and {end_time}')
+    print_rows(curs.fetchall())
 
 def approx_equal(x, y, maxRelDiff = 0.0001):
     '''see https://randomascii.wordpress.com/2012/02/25/comparing-floating-point-numbers-2012-edition/
@@ -542,21 +214,21 @@ true if the numbers are within maxRelDiff of each other, default 0.01%'''
     
 # ================================================================
 
-def extended_bolus_import(conn, start_rtime, debugp=False):
+def extended_bolus_import(conn, start_time, end_time, debugp=False):
     '''because extended boluses aren't recorded in the bolus table until
 they complete, we have to use a different approach. We'll look at the
 extended_bolus_state table, and compute the start time of the extended
 bolus from the date - progress_minutes and the duration from minutes.'''
     curs = dbi.cursor(conn)
-    n = curs.execute('''SELECT * 
+    n = curs.execute(f'''SELECT * 
                         FROM (SELECT date  
                                      - interval progress_minutes minute as e_start,
                                     date, absolute_rate, minutes, progress_minutes
                               FROM autoapp.extended_bolus_state
-                              WHERE user_id = 7) as tmp
-                        WHERE e_start > %s'''.format(USER_ID),
-                     [start_rtime])
-    logging.debug('updating with {} extended bolus reports since {}'.format(n, start_rtime))
+                              WHERE user_id = {USER_ID}) as tmp
+                        WHERE e_start > %s and e_start < %s''',
+                     [start_time, end_time])
+    logging.debug(f'updating with {n} extended bolus reports between {start_time} and {end_time}')
     last_start_time = None
     dst = conn.cursor()
     for row in curs.fetchall():
@@ -579,44 +251,43 @@ bolus from the date - progress_minutes and the duration from minutes.'''
                       [extended_bolus_amt_12, e_start, end_rtime])
     conn.commit()
 
-# still working on this 
-
-def extended_bolus_import_test(conn, start_rtime):
-    start_rtime = date_ui.to_rtime(start_rtime)
+def extended_bolus_import_test(conn, start_time, end_time):
+    start_time = date_ui.to_rtime(start_time)
+    end_time = date_ui.to_rtime(end_time)
     curs = conn.cursor()
     nr = curs.execute('''select janice.date5f(date),type,if(value='', NULL, value), duration
                          from autoapp.bolus
-                         where user_id = 7 and type in ('DE','E') and date >= %s''',
-                 [start_rtime])
-    print('{} extended boluses since {}'.format(nr, start_rtime))
-    for row in curs.fetchall():
-        print("\t".join(map(str,row)))
+                         where user_id = 7 and type in ('DE','E')
+                           AND date >= %s and date <= %s ''',
+                 [start_time, end_time])
+    print(f'{nr} extended boluses between {start_time} and {end_time}')
+    print_rows(curs.fetchall())
     # before updating the destination TABLE, let's null out the extended_bolus_amt_12
-    curs.execute('update {} set extended_bolus_amt_12 = null where rtime >= %s'.format(TABLE),
-                 [start_rtime])
+    curs.execute(f'update {TABLE} set extended_bolus_amt_12 = null where rtime >= %s and rtime <= %s',
+                 [start_time, end_time])
     conn.commit()
-    nr = extended_bolus_import(conn, start_rtime, debugp=True)
+    nr = extended_bolus_import(conn, start_time, end_time, debugp=True)
     print('result: {} rows modified'.format(nr))
     # find sum of these DE drips
     curs.execute('''select sum(value) from autoapp.bolus 
-                    where user_id = 7 and type in ('DE','E') and date >= %s''',
-                 [start_rtime])
+                    where user_id = 7 and type in ('DE','E') and date >= %s and date <= %s''',
+                 [start_time, end_time])
     row = curs.fetchone()
     before_sum = row[0]
     print('those all sum to {}'.format(before_sum))
     # because the boluses extend over time, I'm going to get every row, so
     # we can see when they start/stop
-    nr = curs.execute('''select rtime, bolus_type, extended_bolus_amt_12
-                         from {}
-                         where rtime >= %s and extended_bolus_amt_12 is not null'''.format(TABLE),
-                      [start_rtime])
-    print('{} extended boluses since {}'.format(nr, start_rtime))
-    for row in curs.fetchall():
-        print("\t".join(map(str,row)))
+    nr = curs.execute(f'''select rtime, bolus_type, extended_bolus_amt_12
+                         from {TABLE}
+                         where rtime >= %s and rtime <= %s
+                         AND extended_bolus_amt_12 is not null''',
+                      [start_time, end_time])
+    print(f'{nr} extended boluses between {start_time} and {end_time}')
+    print_rows(curs.fetchall())
     # let's also print the sum. Unfortunately, this sum will also include E boluses. What to do....
     # for debugging, we'll go back and set all the extended_bolus_amt_12 to null at the top of this
-    curs.execute('select sum(extended_bolus_amt_12) from {} where rtime >= %s'.format(TABLE),
-                 [start_rtime])
+    curs.execute(f'select sum(extended_bolus_amt_12) from {TABLE} where rtime >= %s and rtime <= %s',
+                 [start_time, end_time])
     row = curs.fetchone()
     after_sum = row[0]
     print('those all sum to {}'.format(after_sum))
@@ -627,7 +298,7 @@ def extended_bolus_import_test(conn, start_rtime):
 # ================================================================
 
 
-def bolus_import(conn, start_rtime, debugp=False):
+def bolus_import(conn, start_time, end_time, debugp=False):
 
     '''Migrates the bolus table from autoapp. 
 
@@ -640,72 +311,58 @@ Why are bolus ids going up when date goes down?
 Why are some bolus ids missing?
 
     '''
-    bolus_import_s(conn, start_rtime, debugp=debugp)
-    bolus_import_ds(conn, start_rtime, debugp=debugp)
-    # these are obsolete, replaced by extended_bolus_import
-    # bolus_import_e(conn, start_rtime, debugp=debugp)
-    # bolus_import_de(conn, start_rtime, debugp=debugp)
-    extended_bolus_import(conn, start_rtime, debugp=debugp)
+    bolus_import_s(conn, start_time, end_time, debugp=debugp)
+    bolus_import_ds(conn, start_time, end_time, debugp=debugp)
+    extended_bolus_import(conn, start_time, end_time, debugp=debugp)
     # Added this to fix any carb_codes that were incorrect because the
     # bolus hadn't yet been recorded.
-    update_carb_codes(conn, start_rtime, datetime.now(), debugp=debugp)
+    update_carb_codes(conn, start_time, end_time, debugp=debugp)
 
 ## ================================================================
 ## Carb import needs to also compute the carb code.
 
-# This one is now obsolete
-def old_carbohydrate_import(conn, start_rtime, debugp=False):
-    curs = conn.cursor()
-    # the ON DUPLICATE KEY makes this idempotent
-    num_rows = curs.execute(
-        '''INSERT INTO {}(rtime, carbs) 
-           SELECT janice.date5f(date) as rtime, value as carbs
-           FROM autoapp.carbohydrate
-           WHERE date >= %s
-           ON DUPLICATE KEY UPDATE carbs = values(carbs)'''.format(TABLE),
-        [start_rtime])
-    if debugp:
-        logging.debug('inserted {} carb entries'.format(num_rows))
-
-'''The rule is that carbs with insulin are a meal, where "with
-insulin" means insulin within a 65 minute window before or after the
-meal. If the insulin comes before the meal, this function will notice
-it. However, if the insulin comes into the database *after* the carbs
-are imported, the carbs will initially be categorized as
-'rescue'. We'll have to fix that after the fact, when we import the
-bolus info.
-
-Nov 10, 2022
-'''
-
-# mean_name is also defined in iob2.py
+# meal_name is also defined in iob2.py
 from dynamic_insulin import meal_name
 
 MEAL_INSULIN_TIME_INTERVAL = 30
 
-def carbohydrate_import(conn, start_rtime, debugp=False):
-    '''Gets all the recent carbs in autoapp, and for each, searches if
-there has been recent boluses. If so, these are a meal and we compute
-the meal_name and store that. Otherwise, these are rescue carbs and we
-store that.'''
+def carbohydrate_import(conn, start_rtime, end_rtime=date_ui.to_rtime(datetime.now()), debugp=False):
+    '''Gets all the recent carbs in autoapp (all carbs after
+start_time), and for each, searches if there has been recent
+boluses. If so, these are a meal and we compute the meal_name
+(carb_code) and store that. Otherwise, these are rescue carbs and we
+store that.  Also resets the counter for minutes_since_last_meal to
+zero unless the carbs are rescue carbs.
+
+Update June 2024: this imports from start_time to end_rtime,
+with the end defaulting to NOW.
+
+Note that this only affects rows with carbs. All other rows are
+ignored, so carbs, carb_code and minutes_since_last_meal will all be
+null. The latter is a problem that is fixed by a different function
+(update_minutes_since_last meal).
+
+    '''
     curs = conn.cursor()
     nrows = curs.execute('''select janice.date5f(date) as rtime, value as carbs
                             from autoapp.carbohydrate
-                            where date >= %s''',
-                         [start_rtime])
-    logging.debug(f'found {nrows} carbs to migrate')
+                            where date >= %s and date <= %s''',
+                         [start_rtime, end_rtime])
+    logging.debug(f'found {nrows} carbs to migrate between {start_rtime} and {end_rtime}')
+    update = conn.cursor()
     for row in curs.fetchall():
         (rtime, carbs) = row
         if matching_insulin_bolus(conn, rtime):
             carb_code = meal_name(rtime)
         else:
             carb_code = 'rescue'
-        update = conn.cursor()
         logging.debug(f'{carbs} carbs at {str(rtime)} is {carb_code}')
+        # set minutes since last meal to zero iff carb_code is not rescue otherwise keep it the same
         update.execute(f'''update {TABLE} 
-                           set carbs = %s, carb_code = %s
+                           set carbs = %s, carb_code = %s,
+                           minutes_since_last_meal = if(%s='rescue',minutes_since_last_meal,0)
                            where rtime = %s''',
-                       [carbs, carb_code, rtime])
+                       [carbs, carb_code, carb_code, rtime])
         if not debugp:
             conn.commit()
 
@@ -724,33 +381,6 @@ any boluses. Returns true if any.
     logging.debug(f'number of matching boluses in {TABLE} around {carb_rtime}: {recent}')
     return recent > 0
 
-def carbohydrate_import_test(conn, start_rtime):
-    start_rtime = date_ui.to_rtime(start_rtime)
-    curs = conn.cursor()
-    nr = curs.execute('select date, value from autoapp.carbohydrate where date >= %s',
-                 [start_rtime])
-    print('{} carbs since {}'.format(nr, start_rtime))
-    for row in curs.fetchall():
-        print("\t".join(map(str,row)))
-    curs.execute('select sum(value) from autoapp.carbohydrate where date >= %s',
-                 [start_rtime])
-    row = curs.fetchone()
-    before_sum = row[0]
-    print('summing to {}'.format(before_sum))
-    carbohydrate_import(conn, start_rtime, debugp=True)
-    nr = curs.execute('''SELECT rtime, carbs from {} 
-                          WHERE rtime >= %s and carbs is not null'''.format(TABLE),
-                      [start_rtime])
-    print('{} carbs since {}'.format(nr, start_rtime))
-    for row in curs.fetchall():
-        print("\t".join(map(str,row)))
-    curs.execute('select sum(carbs) from {} where rtime >= %s'.format(TABLE),
-                 [start_rtime])
-    row = curs.fetchone()
-    after_sum = row[0]
-    print('summing to {}'.format(after_sum))
-    print('are sums equal? {}'.format(before_sum == after_sum))
-    
 
 def update_carb_codes(conn, rtime0, rtime1, debugp=True):
     '''updates the carb codes for the given time range. Could be a long
@@ -785,18 +415,151 @@ migrated a bolus.'''
         if not debugp:
             conn.commit()
 
-# TBD
-def glucose_import(conn, start_rtime):
-    logging.debug('glucose_import is not yet implemented')
-    return
-    curs = conn.cursor()
-    curs.execute('''INSERT INTO {}(rtime, carbs) 
-                    SELECT janice.date5f(date) as rtime, value as carbs
-                    FROM autoapp.carbohydrate
-                    WHERE date >= %s
-                    ON DUPLICATE KEY UPDATE carbs = values(carbs)'''.format(TABLE),
-                 [start_rtime])
+# ================================================================
+
+def migrate_rescue_carbs(conn, start_time, 
+                         end_time=date_ui.to_rtime(datetime.now()),
+                         debug=False):
+    '''import rescue_carbs from the janice.rescue_carbs table'''
+    pass
+
+def migrate_rescue_carbs_from_diamond(conn, start_time, 
+                                      end_time=date_ui.to_rtime(datetime.now()),
+                                      debug=False):
+    '''import rescue_carbs from the janice.rescue_carbs_from_diamond table'''
+    pass
+
+
+# ================================================================
+
+def valid_minutes_since_last_meal_before_time(conn, time):
+    '''Returns the most recent valid tuple of rtime and minutes_since_last_meal
+    that precedes the given time or None if none, but that shouldn't
+    happen.
+    '''
+    curs = dbi.cursor(conn)
+    curs.execute(f'''SELECT rtime, minutes_since_last_meal FROM {TABLE}
+                     WHERE rtime = (SELECT max(rtime) FROM {TABLE} 
+                                    WHERE rtime < %s
+                                      AND minutes_since_last_meal is not null)''',
+                 [time])
+    return curs.fetchone()
     
+
+def update_minutes_since_last_meal(conn, start_time,
+                                   end_time=date_ui.to_rtime(datetime.now()),
+                                   debug=False):
+    '''This finds the most recent value that is before start_time and
+    is valid and works forward from there, up to but preceding
+    end_time. Hopefully, that value is very recent, but this might
+    update many rows in some cases.
+
+    '''
+    # First, find the most recent non-null value for minutes_since_last_meal
+    # we could ignore start_time, but let's look backwards from there
+    try:
+        start_time = date_ui.to_datetime(start_time)
+        end_time = date_ui.to_datetime(end_time)
+        valid_recent = valid_minutes_since_last_meal_before_time(conn, start_time)
+        if valid_recent is None:
+            logging.error(f'ERROR: no valid value of minutes_since_last_meal preceding {start_time}')
+            return
+        rtime, mm = valid_recent
+        logging.debug(f'updating minutes_since_last_meal since {rtime} when it was {mm}')
+        # Now, work forward, incrementing the counter and resetting it to
+        # zero when there are non-rescue carbs
+        curs = dbi.cursor(conn)
+        while rtime < end_time:
+            rtime += timedelta(minutes=5)
+            curs.execute(f'''SELECT carb_code FROM {TABLE}
+                             WHERE rtime = %s''',
+                         [rtime])
+            # notice the comma here; we're pulling the carb_code out of a tuple
+            (carb_code,) = curs.fetchone()
+            # print(rtime,carb_code)
+            if carb_code is not None and carb_code != 'rescue':
+                logging.debug(f'carb code {carb_code} at {rtime}')
+                mm = 0
+            else:
+                mm += 5
+            curs.execute(f'''UPDATE {TABLE} SET minutes_since_last_meal = %s
+                             WHERE rtime = %s''',
+                         [mm, rtime])
+        if not debug:
+            conn.commit()
+    except Exception as err:
+        msg = repr(err)
+        logging.error(f'ERROR! {msg} in update_minutes_since_last_meal for input {start_time} and {end_time}')
+        # raise err
+
+# ================================================================
+
+def valid_minutes_since_last_bolus_before_time(conn, time):
+    '''Returns the most recent valid tuple of rtime and minutes_since_bolus
+    that precedes the given time or None if none, but that shouldn't
+    happen.
+    '''
+    curs = dbi.cursor(conn)
+    curs.execute(f'''SELECT rtime, minutes_since_last_bolus FROM {TABLE}
+                     WHERE rtime = (SELECT max(rtime) FROM {TABLE} 
+                                    WHERE rtime < %s
+                                      AND minutes_since_last_bolus is not null)''',
+                 [time])
+    return curs.fetchone()
+
+def update_minutes_since_last_bolus(conn,
+                                    start_time,
+                                    end_time=date_ui.to_rtime(datetime.now()),
+                                    debug=False):
+    '''This finds the most recent value that is before start_time and
+    is valid and works forward from there, up to but preceding
+    end_time. Hopefully, that value is very recent, but this might
+    update many rows in some cases.
+
+    It would be more efficient to combine this function with other
+    functions like update_minutes_since_last_meal, but (1) it's useful
+    to test and run them separately, and (2) in practice, they will
+    typically only run on a few rows.
+
+    '''
+    # First, find the most recent non-null value for minutes_since_last_meal
+    # we could ignore start_time, but let's look backwards from there
+    try:
+        start_time = date_ui.to_datetime(start_time)
+        end_time = date_ui.to_datetime(end_time)
+        valid_recent = valid_minutes_since_last_bolus_before_time(conn, start_time)
+        if valid_recent is None:
+            logging.error(f'ERROR: no valid value of minutes_since_last_bolus preceding {start_time}')
+            return
+        rtime, mb = valid_recent
+        logging.debug(f'updating minutes_since_last_bolus since {rtime} when it was {mb}')
+        # Now, work forward, incrementing the counter and resetting it to
+        # zero when there is a bolus, which we define as total_bolus_volume > 0
+        curs = dbi.cursor(conn)
+        while rtime < end_time:
+            rtime += timedelta(minutes=5)
+            curs.execute(f'''SELECT total_bolus_volume FROM {TABLE}
+                             WHERE rtime = %s''',
+                         [rtime])
+            # notice the comma here; we're pulling the carb_code out of a tuple
+            (tbv,) = curs.fetchone()
+            if tbv is not None and tbv > 0:
+                logging.debug(f'bolus of {tbv} at {rtime}')
+                mb = 0
+            else:
+                mb += 5
+            curs.execute(f'''UPDATE {TABLE} SET minutes_since_last_bolus = %s
+                             WHERE rtime = %s''',
+                         [mb, rtime])
+        if not debug:
+            conn.commit()
+    except Exception as err:
+        msg = repr(err)
+        logging.error(f'ERROR! {msg} in update_minutes_since_last_bolus for input {start_time} and {end_time}')
+        # raise err
+
+# ================================================================
+
 # print('copy code for prime and refill from Milevas code')    
 
 ## ----------------------------- Tests ----------------------------------------
@@ -938,46 +701,46 @@ passed-in values, to avoid issues of simultaneous.
     return 'done'
 
 # ================================================================
-# this is the main function
+# this is the main function. It's divided into a function that
+# migrates data for a given time range (so we can go back and
+# re-calculate things if we need to, and June 2024, we do) and a
+# function that updates the migration_time tables.
 
-def migrate_all(conn=None, verbose=False, alt_start_time=None):
+def migrate_between(conn, start_time, end_time):
+    '''Migrates data that is in autoapp and other tables between those
+    start/end times. This *does* do the fill-forward, so that any
+    missing rows will be filled in. This should be idempotent.
+    '''
+    logging.info(f'migrate between {start_time} and {end_time}')
+    fill_forward_between(conn, start_time, end_time)
+    logging.info('migrate_basal_12')
+    migrate_basal_12(conn, start_time, end_time)
+    logging.info('bolus')
+    bolus_import(conn, start_time, end_time)
+    logging.info('carbohydrate')
+    carbohydrate_import(conn, start_time, end_time)
+    update_minutes_since_last_meal(conn, start_time, end_time)
+    update_minutes_since_last_bolus(conn, start_time, end_time)
+    logging.info('done with migration')
+
+
+def migrate_all(conn=None, alt_start_time=None):
     '''This is the function that should, eventually, be called from a cron job every 5 minutes.'''
     if conn is None:
         conn = dbi.connect()
-    logging.info('starting')
-    if verbose: print('starting')
-    fill_forward(conn)
     prev_update, last_update = get_migration_time(conn)
     if prev_update is None:
-        if verbose:
-            print('bailing because no updates')
+        logging.info('bailing because no updates')
         return
-    start_rtime = alt_start_time or prev_update
-    logging.info(f'start rtime is {start_rtime}')
-    if verbose: print('start_rtime is {}'.format(start_rtime))
-    # basal hour is obsolete because it might be behind by up to an hour
-    # if verbose: print('basal_hour_import_2')
-    # basal_hour_import_2(conn, start_rtime)
-    logging.info('migrate_basal_12')
-    if verbose: print('migrate_basal_12')
-    migrate_basal_12(conn, start_rtime)
-    # this is obsolete
-    # if verbose: print('temp basal state')
-    # temp_basal_state_import_incremental(conn, start_rtime)
-    logging.info('bolus')
-    if verbose: print('bolus')
-    bolus_import(conn, start_rtime)
-    logging.info('carbohydrate')
-    if verbose: print('carbohydrate')
-    carbohydrate_import(conn, start_rtime)
-    logging.info('glucose')
-    if verbose: print('glucose')
-    glucose_import(conn, start_rtime)
+    start_time = alt_start_time or prev_update
+    logging.info(f'start time is {start_time}')
+    end_time = datetime.now()
+    migrate_between(conn, start_time, end_time)
     logging.info('storing update time')
-    if verbose: print('logging update time')
     set_migration_time(conn, prev_update, last_update)
     logging.info('done')
-    if verbose: print('done')
+
+# ================================================================
 
 def pm_data(conn, since):
     '''print all the migrated data we need for the predictive model,
@@ -1007,36 +770,6 @@ if __name__ == '__main__':
     if len(sys.argv) > 1 and sys.argv[1] == 'since':
         migrate_all(conn, verbose=True, alt_start_time=sys.argv[2])
         sys.exit()
-    if len(sys.argv) > 1 and sys.argv[1] == 'obsolete':
-        start_rtime = fill_forward(conn)
-        # backup by a day, so we can see whether the algorithm is terrible
-        # when it's incremental. Because it *is* terrible when it's
-        # running from 9/22/2021. If it's just 24 hours, the time is
-        # negligible. When it's 100 days, it takes a long time.
-        start_rtime -= timedelta(days=100)
-        print('start rtime', start_rtime)
-        print('basal_hour_import_2')
-        basal_hour_import_2(conn, start_rtime)
-        print('temp basal state')
-        temp_basal_state_import_incremental(conn, start_rtime)
-        '''
-    I'm going to print entries where I think something weird is going on:
-
-    * S with non-zero duration (300+)
-    * E with zero duration (only 1)
-    * DE with zero duration (none)
-    '''
-        # non_zero_duration_S_boluses(conn)
-        # zero_duration_E_boluses(conn)
-        # simultaneous_bolus_and_basal(conn)
-        # basal_import(conn, start_rtime)
-        print('bolus_import')
-        bolus_import(conn, start_rtime)
-        # temp_basal_state_import_incremental(conn, start_rtime)
-        print('carbs')
-        carbohydrate_import(conn, start_rtime)
-        print('glucose')
-        glucose_import(conn, start_rtime)
     # The default is to run as a cron job
     # when run as a script, log to a logfile 
     today = datetime.today()
