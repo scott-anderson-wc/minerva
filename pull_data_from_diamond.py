@@ -80,7 +80,6 @@ def store_data(conn, data):
                       carbCountGrams, totalCarbGrams, quantity, carbName ])
         # also put in ICS2
         notes = f'{quantity} of {carbName}'
-        print(notes)
         curs.execute('''insert into insulin_carb_smoothed_2
                         (user, rtime, carb_code, carbs, rescue_carbs, notes)
                         values (%s, %s, 'rescue', %s, %s, %s)
