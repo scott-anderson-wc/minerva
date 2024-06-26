@@ -4,6 +4,7 @@ import os                       # for path.join
 import sys
 import math                     # for floor
 import collections              # for deque
+import csv
 import cs304dbi as dbi
 from datetime import datetime, timedelta
 import date_ui
@@ -567,9 +568,9 @@ def update_corrective_insulin(conn,
     '''In the interval, finds boluses (total_bolus_volume > 0) and
     checks if there are carbs within 30 minutes. If so, it's not
     corrective, otherwise it is.'''
-    curs = conn.cursor()
     start_time = date_ui.to_rtime(start_time)
     end_time = date_ui.to_rtime(end_time)
+    curs = conn.cursor()
     nr = curs.execute(f'''SELECT rtime FROM {TABLE}
                           WHERE rtime between %s and %s
                           AND total_bolus_volume is not null''',
@@ -659,6 +660,109 @@ def migrate_cgm(conn=None):
     conn.commit()
                     
 # ================================================================
+# Dynamic Insulin (D)I and Dynamic Carbs (DC)
+# Note that an older batch-mode computation using generators was
+# done in dynamic_insulin.py
+
+# Since the computation of DI and DC require Action Curves, which we
+# will read from a file, we'll read them and cache them here.
+
+IAC_filename = 'reverse_engineered_iac_2022-12-20.csv'
+
+IAC = None
+CAC = None
+
+def normalize_curve(float_list):
+    total = sum(float_list)
+    if not approx_equal(total, 1.0):
+        return [ val/total for val in float_list ]
+    return float_list
+
+def read_insulin_action_curve(col=1,test=False):
+    '''Return the insulin action curve as an array, projecting just
+    one column of the Excel spreadsheet (as a CSV file). The CSVcolumn
+    is an index into the row. This function is memoized, so calling it
+    multiple times just uses the cached value.
+    '''
+    if test:
+        logging.info('USING TEST IAC')
+        return [ 0, 0.5, 1.0, 0.75, 0.5, 0.25, 0 ]
+    else:
+        global IAC
+        if IAC is not None:
+            return IAC
+        logging.info(f'USING REAL IAC from {IAC_filename}')
+        with open(IAC_filename, 'rU') as csvfile:
+            reader = csv.reader(csvfile) # default format is Excel
+            # skip first row, which is the headers
+            headers = next(reader)
+            vals = [ row[col] for row in reader ]
+            IAC = normalize_curve([ float(x) for x in vals])
+        return IAC
+    
+# The algorithm here was pioneered in iterate_over_db_windows the idea
+# is that the worker computes a particular value of DI, using a
+# sliding window (viewed as a circular array) of past insulin values
+# and the wrapper updates the window and calls the worker.
+
+def di_worker(window, index, iac):
+    '''Computes a returns a value of DI with a sliding window where
+    the first index into the window is 'index' and the iac curve is as
+    given, indexed from zero.
+
+    '''
+    if len(window) != len(iac):
+        raise ValueError('window and iac must be lists of the same length')
+    win_width = len(iac)
+    sum = 0 
+    for i in range(win_width):
+        # remember, iterate through IAC in reverse order
+        j = (index - i) % win_width
+        weight = iac[i]
+        insulin = window[j]
+        sum += weight * insulin
+    return sum
+
+def update_dynamic_insulin(conn,
+                           start_time,
+                           end_time=date_ui.to_rtime(datetime.now()),
+                           commit=True):
+    start_time = date_ui.to_rtime(start_time)
+    end_time = date_ui.to_rtime(end_time)
+
+    logging.info('update_dynamic_insulin')
+    iac = read_insulin_action_curve()
+    curs = dbi.cursor(conn)
+    # to init state variables, read basal_amt_12 and tbv from N prior
+    # rows, where N is the length of iac
+    past_time = start_time - timedelta(minutes=5*len(iac))
+    # query is inclusive at the start and exclusive at the end
+    recent_insulin = (f'''SELECT rtime, (ifnull(basal_amt_12,0) + ifnull(total_bolus_volume,0)) as ins
+                          FROM {TABLE}
+                          WHERE rtime >= %s and rtime < %s''')
+    curs.execute(recent_insulin, [past_time, start_time])
+    window = [ row[1] for row in curs.fetchall() ]
+    if len(window) != len(iac):
+        raise ValueError('window and iac must be lists of the same length')
+    win_width = len(iac)
+    index = -1
+    curs.execute(recent_insulin, [start_time, end_time])
+    update = dbi.cursor(conn)
+    for rtime, insulin in curs.fetchall():
+        try:
+            insulin = float(insulin)
+        except:
+            insulin = 0.0
+        # put data in next slot
+        index = ( index + 1 ) % win_width
+        window[index] = insulin
+        di = di_worker(window, index, iac)
+        update.execute(f'''UPDATE {TABLE} SET dynamic_insulin = %s WHERE rtime = %s''',
+                       [di, rtime])
+        if commit:
+            conn.commit()
+
+# ================================================================
 # migrate data since previous update
 
 def get_migration_time(conn):
@@ -666,8 +770,7 @@ def get_migration_time(conn):
 https://docs.google.com/document/d/1ZCtErlxRQmPUz_vbfLXdg7ap2hIz5g9Lubtog8ZqFys/edit#heading=h.umdjcuqs1gq4
 
 This function looks up the values of autoapp.last_update.date (X) and
-migration_status.prev_update (Y) and returns X,Y iff X < Y otherwise
-None,None.
+migration_status.prev_update (Y) and returns X,Y 
 
 It returns both values so that Y can be stored into migration_status
 when we are done migrating. See set_migration_time.
@@ -685,10 +788,7 @@ when we are done migrating. See set_migration_time.
     if prev_update_row is None:
         raise Exception('no previous update stored')
     prev_update = prev_update_row[0]
-    if prev_update < last_update:
-        return prev_update, last_update
-    else:
-        return None, None
+    return prev_update, last_update
 
 def init_migration_time(conn, force=False):
     '''Our normal code compares the prev_update (X) with last_update (Y)
@@ -722,6 +822,7 @@ database from the value of last_update from autoapp. It uses the
 passed-in values, to avoid issues of simultaneous.
     '''
     curs = dbi.cursor(conn)
+    logging.debug(f'storing last_update_time as {last_update_time}')
     curs.execute('''UPDATE migration_status 
                     SET prev_autoapp_update = %s, prev_autoapp_migration = current_timestamp() 
                     WHERE user_id = %s''',
@@ -756,6 +857,7 @@ def migrate_between(conn, start_time, end_time):
     update_minutes_since_last_meal(conn, start_time, end_time)
     update_minutes_since_last_bolus(conn, start_time, end_time)
     update_corrective_insulin(conn, start_time, end_time)
+    update_dynamic_insulin(conn, start_time, end_time)
     logging.info('done with migration')
 
 
@@ -764,7 +866,7 @@ def migrate_all(conn=None, alt_start_time=None):
     if conn is None:
         conn = dbi.connect()
     prev_update, last_update = get_migration_time(conn)
-    if prev_update is None:
+    if alt_start_time is None and prev_update < last_update:
         logging.info('bailing because no updates')
         return
     start_time = alt_start_time or prev_update
@@ -799,11 +901,19 @@ spreadsheet to share with Janice and Mileva
 
 if __name__ == '__main__': 
     conn = dbi.connect()
-    if len(sys.argv) > 1 and sys.argv[1] == 'reinit':
-        create_test_tables(conn)    
-        import_functions(conn)
+    if len(sys.argv) > 1 and sys.argv[1] == 'between':
+        print('between', sys.argv[2], sys.argv[3])
+        logging.basicConfig(format='%(asctime)s %(levelname)s %(message)s',
+                            datefmt='%H:%M',
+                            level=logging.DEBUG)
+        migrate_between(conn, sys.argv[2], sys.argv[3])
+        sys.exit()
     if len(sys.argv) > 1 and sys.argv[1] == 'since':
-        migrate_all(conn, verbose=True, alt_start_time=sys.argv[2])
+        # 'since' updates the migration times and goes up to "now"
+        logging.basicConfig(format='%(asctime)s %(levelname)s %(message)s',
+                            datefmt='%H:%M',
+                            level=logging.DEBUG)
+        migrate_all(conn, alt_start_time=sys.argv[2])
         sys.exit()
     # The default is to run as a cron job
     # when run as a script, log to a logfile 
