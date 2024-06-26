@@ -560,6 +560,40 @@ def update_minutes_since_last_bolus(conn,
 
 # ================================================================
 
+def update_corrective_insulin(conn, 
+                              start_time,
+                              end_time=date_ui.to_rtime(datetime.now()),
+                              commit=True):
+    '''In the interval, finds boluses (total_bolus_volume > 0) and
+    checks if there are carbs within 30 minutes. If so, it's not
+    corrective, otherwise it is.'''
+    curs = conn.cursor()
+    start_time = date_ui.to_rtime(start_time)
+    end_time = date_ui.to_rtime(end_time)
+    nr = curs.execute(f'''SELECT rtime FROM {TABLE}
+                          WHERE rtime between %s and %s
+                          AND total_bolus_volume is not null''',
+                      [start_time, end_time])
+    logging.info(f'{nr} boluses between {start_time} and {end_time}')
+    for (rtime,) in curs.fetchall():
+        near = conn.cursor()
+        near.execute(f'''SELECT count(*) as meal FROM {TABLE}
+                         WHERE rtime between %s and %s
+                         AND carbs is not null''',
+                     [rtime - timedelta(minutes=30),
+                      rtime + timedelta(minutes=30)])
+        (meal,) = near.fetchone()
+        matched = ('matched' if meal == 1 else 'did not match')
+        logging.debug(f'bolus at time {rtime} {matched} {meal} meal')
+        update = conn.cursor()
+        update.execute(f'''UPDATE {TABLE} SET corrective_insulin = %s
+                           WHERE rtime = %s''',
+                       [1-meal, rtime])
+        if commit:
+            conn.commit()
+
+# ================================================================
+
 # print('copy code for prime and refill from Milevas code')    
 
 ## ----------------------------- Tests ----------------------------------------
@@ -721,6 +755,7 @@ def migrate_between(conn, start_time, end_time):
     carbohydrate_import(conn, start_time, end_time)
     update_minutes_since_last_meal(conn, start_time, end_time)
     update_minutes_since_last_bolus(conn, start_time, end_time)
+    update_corrective_insulin(conn, start_time, end_time)
     logging.info('done with migration')
 
 
