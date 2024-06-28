@@ -1,7 +1,7 @@
 '''Iterate over ICS2 and compute ISF values
 
 Author: Mileva
-Last Updated: 6/7/24
+Last Updated: 6/28/24
 '''
 
 import sys
@@ -21,19 +21,24 @@ from typing import Optional
 
 ## Utils
 
-def insert_15_min_isf(curs, rtime: str, isf: float) -> None: 
-    """ Insert the specified rtime and clean 15min Nudge ISF into nudge_isf_results 
-    
-    todo: ideally, generalize this function to accept a column name. 
-    
+# Mapping of window length (in units of 5") to column name in nudge_isf_results
+WINDOW_COLUMN_MAPPING = {
+    1: "clean_5_min", 
+    3: "clean_15_min", 
+    6: "clean_30_min", 
+    24: "clean_2_hr"
+}
+
+def insert_isfs(curs, rtime: str, isf: float, column) -> None: 
+    """ Insert the specified rtime and ISF into the nudge_isf_results table
+        
     args: 
         rtime (str) - rtime for the nudge ISF value being inserted into the table
         isf (float) - nudge isf value being inserted into the table
     
     """
-    curs.execute('''INSERT INTO nudge_isf_results (rtime, clean_15_min) VALUES (%s, %s) ON DUPLICATE KEY UPDATE clean_15_min=VALUES(clean_15_min)''', 
-                    [rtime, isf]
-    )   
+    sql_string = f"INSERT INTO nudge_isf_results (rtime, {column}) VALUES (%s, %s) ON DUPLICATE KEY UPDATE {column}=VALUES({column})"
+    curs.execute(sql_string, [rtime, isf])   
     
 def get_clean_window(curs, start_time: str, duration: int = 2) -> list: 
     """ Get records from within clean regions
@@ -52,7 +57,7 @@ def get_clean_window(curs, start_time: str, duration: int = 2) -> list:
 def compute_nudge_isfs(rows: list, window_length: int=3) -> list: 
     
     '''Computes the nudge_isf values for the given window length (in units of 5min) using the following equation:
-        ISF = (cgm_end - cgm_start) /  ( DI over the window - basal over the window)
+        ISF = (cgm_start - cgm_end) /  ( DI over the window - basal over the window)
         
     Assumptions: 
         steady state basal amt = 0.6 units/ hr
@@ -65,7 +70,6 @@ def compute_nudge_isfs(rows: list, window_length: int=3) -> list:
     Output: 
         result (list) - list of (rtime, nudge_isf) tuples 
     '''
-    
     results = []
     active_dis = []
     
@@ -85,9 +89,10 @@ def compute_nudge_isfs(rows: list, window_length: int=3) -> list:
         start_time, start_cgm, _ = start_row
         
         ## Get the records that comprise the X-minute window for the X-minute Nudge ISFs
-        window = rows[i:i+window_length]
+        window = rows[i:i+window_length + 1]
 
-        _, end_cgm, _ = window[-1]
+        end_time, end_cgm, _ = window[-1]
+        print(f"start_time: {start_time} \t end_time: {end_time} \t start_cgm: {start_cgm} \t end_cgm: {end_cgm}")
         
         # Compute the active DI: sum DI over window - basal over window >= MIN_DI
         di_sum = sum(filter(None,[di for _, _, di in window]))
@@ -100,7 +105,7 @@ def compute_nudge_isfs(rows: list, window_length: int=3) -> list:
         # Compute Nudge ISFs
         if start_cgm and end_cgm and active_di: 
             try: 
-                nudge_isf = (end_cgm - start_cgm) / active_di
+                nudge_isf = (start_cgm-end_cgm) / active_di
                 completed += 1
             except Exception as e: 
                 print("Failed to compute Nudge ISF", e)
@@ -114,7 +119,7 @@ def compute_nudge_isfs(rows: list, window_length: int=3) -> list:
             
     return results
 
-def compute_clean_nudge_isfs(curs): 
+def compute_clean_nudge_isfs(curs, window_length: int, column: str): 
     """ Compute clean nudge ISFs and save them into the nudge_isf_results table """
     
     # Get rtimes of al the 2hr clean regions
@@ -125,16 +130,25 @@ def compute_clean_nudge_isfs(curs):
     for clean_start, in clean_regions: 
         print()
         clean_rows = get_clean_window(curs, clean_start, duration=2)
-        nudge_isfs = compute_nudge_isfs(clean_rows, window_length=3)
+        nudge_isfs = compute_nudge_isfs(clean_rows, window_length=window_length)
         for i, (start_time, nudge_isf) in enumerate(nudge_isfs): 
             print(f"i = {i} \t start_time = {start_time} \t nudge_isf = {nudge_isf}")
-            insert_15_min_isf(curs, rtime = start_time, isf = nudge_isf)
+            insert_isfs(curs, rtime = start_time, isf = nudge_isf, column = column )
+            
+def clean_isfs_to_file(curs, column: str) -> None: 
+    """ Writes the clean ISF values to a file titled: column_isfs.json"""
+    # Queries nudge_isf_results for all nudge ISFs
+    curs.execute(f'''select rtime, {column} from nudge_isf_results''')
+    rows = curs.fetchall()
+    
+    with open (f"./nudge_isf/{column}_isfs.json", "w") as f:
+        f.write(json.dumps(rows, default=str))
 
-def compute_isf_statistics(curs) -> None: 
+def compute_isf_statistics(curs, column: str) -> None: 
     """ Queries the Nudge ISF table and computes statistics on the bucketed ISFs"""
     
-    # Queries nudge_isf_results for all clean_15_min nudge ISFs
-    curs.execute('''select rtime, clean_15_min from nudge_isf_results''')
+    # Queries nudge_isf_results for all nudge ISFs
+    curs.execute(f'''select rtime, {column} from nudge_isf_results''')
     rows = curs.fetchall()
     
     # bucket the nudge ISF values
@@ -161,27 +175,33 @@ def analyze_buckets(buckets: dict) -> None:
     for hour in buckets: 
         try: 
             isf_vals = buckets[hour] 
-
-            count = len(isf_vals)
-            zero_count = sum(1 for isf_val in isf_vals if isf_val == 0) # Number of times isf = 0
-            mean = round(np.mean(isf_vals), 2)
-            std_dev = round(np.std(isf_vals), 2)
-            min_isfs = round(min(isf_vals), 2)
-            max_isfs = round(max(isf_vals), 2)
-            first_quartile = round(np.quantile(isf_vals, 0.25), 2)
-            median = round(np.median(isf_vals), 2)
-            third_quartile = round(np.quantile(isf_vals, 0.75), 2)
+            isf_vals_without_none = [val for val in isf_vals if val is not None]
+            
+            count = len(isf_vals_without_none)
+            zero_count = sum(1 for val in isf_vals_without_none if val == 0) # Number of times isf = 0
+            mean = round(np.mean(isf_vals_without_none), 2)
+            std_dev = round(np.std(isf_vals_without_none), 2)
+            min_isfs = round(np.min(isf_vals_without_none), 2)
+            max_isfs = round(np.max(isf_vals_without_none), 2)
+            first_quartile = round(np.quantile(isf_vals_without_none, 0.25), 2)
+            median = round(np.median(isf_vals_without_none), 2)
+            third_quartile = round(np.quantile(isf_vals_without_none, 0.75), 2)
     
             print('Hour: {} \t count: {} \t mean: {:<8} \t median: {:<7} \t FirstQ: {:<7} \t ThirdQ: {:<7} \t min: {:<7} \t max: {:<5} \t stddev: {:<5}'.format(
                 hour, count, mean, median, first_quartile, third_quartile, min_isfs, max_isfs, std_dev)) 
                 
         except Exception as e:
             print('Hour: {} could not be computed: {}', hour, e)   
+    print("complete")
             
 
 if __name__ == '__main__':
     conn = get_conn()
     curs = conn.cursor()
-    compute_clean_nudge_isfs(curs)
-    compute_isf_statistics(curs)
+    window_length = 3 
+    column = WINDOW_COLUMN_MAPPING[window_length] 
+    print(f"window_length: {window_length}, column: {column}")
+    compute_clean_nudge_isfs(curs, window_length=window_length, column=column)
+    # clean_isfs_to_file(curs, column)
+    compute_isf_statistics(curs, column = column)
     
