@@ -4,6 +4,7 @@ Author: Mileva
 Last Updated: 6/28/24
 '''
 
+import logging
 import sys
 import MySQLdb
 import dbconn2
@@ -23,11 +24,38 @@ from typing import Optional
 
 # Mapping of window length (in units of 5") to column name in nudge_isf_results
 WINDOW_COLUMN_MAPPING = {
-    1: "clean_5_min", 
-    3: "clean_15_min", 
-    6: "clean_30_min", 
-    24: "clean_2_hr"
+    1: "clean_5_min_yrly_basal", 
+    3: "clean_15_min_yrly_basal", 
+    6: "clean_30_min_yrly_basal", 
+    24: "clean_2_hr_yrly_basal"
 }
+
+# Basal amts per hour (based on afternoon basal rates from each year)
+BASAL_AMTS = {
+    2014: 0.04137931108988564,
+    2015: 0.04679069910631623, 
+    2016: 0.16182432434446103, 
+    2017: 0.10416666728754838, 
+    2018: 0.2206089804187799, 
+    2019: 0.25592592855294544, 
+    2020: 0.522174058446027, 
+    2021: 0.7741597285226145,
+    2022: 0.699999988079071, 
+    2023: 0.699999988079071, 
+    2024:  0.9520596590909091
+}
+
+def configure_logging(log_level = logging.INFO): 
+    """ Configure Logging """
+    logger = logging.getLogger("")
+    logger.setLevel(log_level)
+    handler = logging.FileHandler(f"./nudge_isf/experiments/{str(datetime.now())}.txt")
+    logger.addHandler(handler)
+
+def get_basal_amt_per_window(year, window_length): 
+    """ Compute basal amt per window based on the yearly afternoon averages"""
+    windows_per_hour = 60 / (5 * window_length)
+    return BASAL_AMTS[year] / windows_per_hour
 
 def insert_isfs(curs, rtime: str, isf: float, column) -> None: 
     """ Insert the specified rtime and ISF into the nudge_isf_results table
@@ -73,10 +101,7 @@ def compute_nudge_isfs(rows: list, window_length: int=3) -> list:
     results = []
     active_dis = []
     
-    ## Constants - todo: verify assumptions here
-    BASAL_AMT_HR = 0.6 # Assumes baseline basal of 0.6 units/ hr. Revise this to get the latest basal amt from the db
-    windows_per_hour = 60 / (5 * window_length)
-    basal_amt_per_window = BASAL_AMT_HR / windows_per_hour
+    ## Constants - todo: verify assumptions here    
     MIN_DI = 0.01 * window_length  
 
     ## stats
@@ -96,6 +121,7 @@ def compute_nudge_isfs(rows: list, window_length: int=3) -> list:
         
         # Compute the active DI: sum DI over window - basal over window >= MIN_DI
         di_sum = sum(filter(None,[di for _, _, di in window]))
+        basal_amt_per_window = get_basal_amt_per_window(start_time.year, window_length=window_length)
         active_di = di_sum - basal_amt_per_window
         active_dis.append(active_di)
         if active_di < MIN_DI: 
@@ -196,12 +222,12 @@ def analyze_buckets(buckets: dict) -> None:
             
 
 if __name__ == '__main__':
+    configure_logging()
     conn = get_conn()
     curs = conn.cursor()
-    window_length = 3 
-    column = WINDOW_COLUMN_MAPPING[window_length] 
-    print(f"window_length: {window_length}, column: {column}")
-    compute_clean_nudge_isfs(curs, window_length=window_length, column=column)
-    # clean_isfs_to_file(curs, column)
-    compute_isf_statistics(curs, column = column)
+    for window_length, column in WINDOW_COLUMN_MAPPING.items(): 
+        print(f"window_length: {window_length}, column: {column}")
+        compute_clean_nudge_isfs(curs, window_length=window_length, column=column)
+        # clean_isfs_to_file(curs, column)
+        compute_isf_statistics(curs, column = column)
     
