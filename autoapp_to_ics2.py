@@ -953,19 +953,19 @@ migration_status.prev_update (Y) and returns X,Y
 It returns both values so that Y can be stored into migration_status
 when we are done migrating. See set_migration_time.
 
-    5/29/2024 This stopped working at some point in the past. 
-
     '''
     curs = dbi.cursor(conn)
     curs.execute('''select date from autoapp.dana_history_timestamp where user_id = %s''',
                  [USER_ID])
     last_update = curs.fetchone()[0]
+    logging.debug(f'dana app last updated {last_update}')
     curs.execute('''select prev_autoapp_update from migration_status where user_id = %s''',
                  [USER_ID])
     prev_update_row = curs.fetchone()
     if prev_update_row is None:
         raise Exception('no previous update stored')
     prev_update = prev_update_row[0]
+    logging.debug(f'previous migration update was {prev_update}')
     return prev_update, last_update
 
 def init_migration_time(conn, force=False):
@@ -1045,8 +1045,9 @@ def migrate_all(conn=None, alt_start_time=None):
     if conn is None:
         conn = dbi.connect()
     prev_update, last_update = get_migration_time(conn)
-    if alt_start_time is None and prev_update < last_update:
-        logging.info('bailing because no updates')
+    if alt_start_time is None and prev_update >= last_update:
+        logging.info(f'bailing because no updates')
+        logging.debug(f'ICS2 prev_update: {prev_update} and Dana app last_update: {last_update}')
         return
     start_time = alt_start_time or prev_update
     logging.info(f'start time is {start_time}')
@@ -1102,6 +1103,6 @@ if __name__ == '__main__':
                         datefmt='%H:%M',
                         filename=logfile,
                         level=logging.DEBUG)
-    logging.info('running at {}'.format(datetime.now()))
+    logging.info('==== script begins at  {}'.format(datetime.now()))
     migrate_all(conn)
     migrate_cgm(conn)
