@@ -934,7 +934,10 @@ def migrate_cgm(conn=None):
     curs = dbi.cursor(conn)
     curs.execute('select max(rtime) from insulin_carb_smoothed_2 where cgm is not null');
     start_cgm = curs.fetchone()[0]
-    logging.debug('migrating cgm data starting at {}'.format(start_cgm))
+    curs.execute('select max(rtime) from realtime_cgm2 where mgdl is not null');
+    latest_cgm = curs.fetchone()[0]
+    logging.debug(f'migrating cgm data from {start_cgm} to {latest_cgm}')
+    fill_forward_between(conn, start_cgm, latest_cgm)
     curs.execute('''UPDATE insulin_carb_smoothed_2 AS ics 
                         INNER JOIN realtime_cgm2 AS rt USING (rtime)
                     SET ics.cgm = rt.mgdl
