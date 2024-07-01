@@ -805,11 +805,14 @@ def update_dynamic_carbs(conn,
                      WHERE rtime >= %s and rtime < %s
                      AND carb_code is not NULL''',
                  [start_time - meal_lookback, start_time])
-    recent_meals = curs.fetchall()
+    # the fetchall method actually returns a tuple, not a list, so we
+    # need to convert it, so that later we can append new meals, not
+    # to mention removing, via pop, the ones that are too old.
+    recent_meals = list(curs.fetchall())
     curr_rtime = start_time
 
     # Okay, here's the main loop over all rtimes from start to end
-    while curr_rtime <= end_time:
+    while curr_rtime < end_time:
         curs.execute(f'''SELECT rtime, carbs, carb_code FROM {TABLE}
                          WHERE rtime = %s''',
                      [curr_rtime])
@@ -819,18 +822,24 @@ def update_dynamic_carbs(conn,
             logging.debug(f'new meal {curr_row[2]} at time {curr_rtime}')
             recent_meals.append(curr_row)
         # Now, compute DC. We use an index loop so we can pop(i) to
-        # remove a meal that is too old
+        # remove a meal that is too old. Actually, we can't pop
+        # because that messes up the indexing. So, we replace it with None, and
+        # after the loop, we remove the Nones, if any
         curr_dc = 0
         for i in range(len(recent_meals)):
             meal_rtime, meal_carbs, meal_carb_code = recent_meals[i]
             meal_cac = cac_curves[meal_carb_code]
             # meal_age is in 5-minute time steps, so a meal 30 minutes
             # ago has an age of 6
-            meal_age = int((start_time - meal_rtime)/60*5)
-            if meal_age > len(meal_cac):
-                recent_meals.pop(i) # remove this meal
+            meal_delta = curr_rtime - meal_rtime
+            meal_age = int((meal_delta.seconds/(60*5)))
+            if meal_age > len(meal_cac)-1:
+                recent_meals[i] = None # remove this meal
             else:
                 curr_dc += meal_carbs * meal_cac[meal_age]
+        if None in recent_meals:
+            # remove the Nones
+            recent_meals = [ meal for meal in recent_meals if meal is not None ]
         # Done computing DC
         logging.debug(f'At {curr_rtime} DC is {curr_dc}')
         curs.execute(f'UPDATE {TABLE} SET dynamic_carbs = %s WHERE rtime = %s',
@@ -844,7 +853,7 @@ def update_dynamic_carbs(conn,
 def update_dynamic_carbs_test(conn=None):
     '''Use a test table to test this, since it necessarily needs to
     read and write database tables; trying to do it with arrays is, I
-    think, too weird.'''
+    think, too weird. The code passed this test June 2024.'''
     curs = dbi.cursor(conn)
     global TABLE
     TABLE = 'janice.mileva_test'
@@ -1027,6 +1036,7 @@ def migrate_between(conn, start_time, end_time):
     update_minutes_since_last_bolus(conn, start_time, end_time)
     update_corrective_insulin(conn, start_time, end_time)
     update_dynamic_insulin(conn, start_time, end_time)
+    update_dynamic_carbs(conn, start_time, end_time)
     logging.info('done with migration')
 
 
