@@ -744,7 +744,7 @@ for before6 and after9, since those happen every so often.
         rescue_vals = []
         bls_vals = []
         dinner_vals = []
-        logging.debug(f'reading CAC file {CAC_FILE} from CWD: {os.getcwd()}')
+        logging.debug(f'reading CAC file {CAC_file} from CWD: {os.getcwd()}')
         with open(CAC_filename, 'rU') as csvfile:
             reader = csv.reader(csvfile) # default format is Excel
             # skip headers
