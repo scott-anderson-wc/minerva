@@ -638,7 +638,7 @@ def read_insulin_action_curve(col=1,test=False):
         if IAC is not None:
             return IAC
         logging.info(f'USING REAL IAC from {IAC_filename}')
-        logging.debug(f'reading IAC file {IAC_FILENAME} from CWD: {os.getcwd()}')
+        logging.debug(f'reading IAC file {IAC_filename} from CWD: {os.getcwd()}')
         with open(IAC_filename, 'rU') as csvfile:
             reader = csv.reader(csvfile) # default format is Excel
             # skip first row, which is the headers
