@@ -19,15 +19,20 @@ import date_ui
 import numpy as np
 import json
 from typing import Optional
+import pandas as pd
+import argparse
 
 ## Utils
 
-# Mapping of window length (in units of 5") to column name in nudge_isf_results
 WINDOW_COLUMN_MAPPING = {
-    1: "clean_5_min_yrly_basal", 
-    3: "clean_15_min_yrly_basal", 
-    6: "clean_30_min_yrly_basal", 
-    24: "clean_2_hr_yrly_basal"
+    "clean_5_min_yrly_basal": 1, 
+    "clean_5_min": 1, 
+    "clean_15_min_yrly_basal": 3, 
+    "clean_15_min": 3, 
+    "clean_30_min_yrly_basal": 6, 
+    "clean_30_min": 6, 
+    "clean_2_hr_yrly_basal": 24, 
+    "clean_2_hr": 24
 }
 
 # Basal amts per hour (based on afternoon basal rates from each year)
@@ -47,10 +52,8 @@ BASAL_AMTS = {
 
 def configure_logging(log_level = logging.INFO): 
     """ Configure Logging """
-    logger = logging.getLogger("")
-    logger.setLevel(log_level)
-    handler = logging.FileHandler(f"./nudge_isf/experiments/{str(datetime.now())}.txt")
-    logger.addHandler(handler)
+    logfile = f"./nudge_isf/experiments/{str(datetime.now())}.txt"
+    sys.stdout = open(logfile, 'w')
 
 def get_basal_amt_per_window(year, window_length): 
     """ Compute basal amt per window based on the yearly afternoon averages"""
@@ -217,17 +220,65 @@ def analyze_buckets(buckets: dict) -> None:
                 hour, count, mean, median, first_quartile, third_quartile, min_isfs, max_isfs, std_dev)) 
                 
         except Exception as e:
-            print('Hour: {} could not be computed: {}', hour, e)   
-    print("complete")
-            
+            print('Hour: {} could not be computed: {}', hour, e)                
+             
+def get_isf_statistics_df(curs, column: str) -> None: 
+    """ Queries the Nudge ISF table and computes statistics using dataframe computations"""
+    
+    def q1(values):
+        """ Compute the first quartile"""
+        return np.quantile(values, 0.25)
 
+    def q3(values):
+        """ Compute the third quartile"""
+        return np.quantile(values, 0.75)
+        
+    
+    # Queries nudge_isf_results for all nudge ISFs
+    curs.execute(f'''select rtime, {column} from nudge_isf_results''')
+    rows = curs.fetchall()    
+    
+    df = pd.DataFrame(rows, columns=["rtime", column])
+    df["rtime"] = pd.to_datetime(df["rtime"])
+    df["year"] = df["rtime"].dt.year
+    df["hour"] = df["rtime"].dt.hour
+    
+    statistics = df.groupby(["hour", "year"])[column].agg(["count", "mean", "median", q1, q3, "min", "max", "std"])
+    
+    return statistics 
+
+
+def main_compute_nudge_isfs(): 
+    """ 
+    Main function for computing the clean nudge ISFs
+    This should be run if the nudge ISFs need to be updated. 
+    """
+    for column, window_length in WINDOW_COLUMN_MAPPING.items(): 
+        print(f"\nwindow_length: {window_length}, column: {column}")
+        compute_clean_nudge_isfs(curs, window_length=window_length, column=column)
+        clean_isfs_to_file(curs, column)
+    
+    
+def main_analyze_nudge_isfs(): 
+    """ Main function for analyzing the already computed nudge ISFs. """
+    for column, _ in WINDOW_COLUMN_MAPPING.items(): 
+        print(f"\n{column}")
+        compute_isf_statistics(curs, column)
+        print(get_isf_statistics_df(curs, column).to_string())
+    
 if __name__ == '__main__':
+    
+    parser = argparse.ArgumentParser(prog='Nudge ISFs', description='Compute and analyze nudge ISFs')
+    parser.add_argument('-c', '--compute', action='store_true')
+    parser.add_argument('-a', '--analyze', action='store_true')
+    args = parser.parse_args()
+    print(args)
+    
     configure_logging()
     conn = get_conn()
     curs = conn.cursor()
-    for window_length, column in WINDOW_COLUMN_MAPPING.items(): 
-        print(f"window_length: {window_length}, column: {column}")
-        compute_clean_nudge_isfs(curs, window_length=window_length, column=column)
-        # clean_isfs_to_file(curs, column)
-        compute_isf_statistics(curs, column = column)
     
+    if args.compute: 
+        main_compute_nudge_isfs()
+    if args.analyze: 
+        main_analyze_nudge_isfs()
