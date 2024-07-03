@@ -37,14 +37,18 @@ if [ ! -d "$repo" ]; then
    echo "cannot find repo directory $repo "
 fi
 
-$python $repo/dexcom_cgm_sample.py 
+# Need to be *in* the $repo directory. When this runs
+# as a cron job, it runs in the home directory
+cd $repo
+
+$python dexcom_cgm_sample.py 
 
 # 'cron' is actually the default, so it's not necessary
-$python $repo/autoapp_to_ics2.py cron 
+$python autoapp_to_ics2.py cron 
 
 # $python $repo/autoapp_to_loop_logic.py
-$python $repo/autoapp_to_loop_logic_inputs.py 
-$python $repo/loop_logic_testing_cgm_cron.py
+$python autoapp_to_loop_logic_inputs.py 
+$python loop_logic_testing_cgm_cron.py
 
 # temporary removal until we know this is working
 # $python $repo/pull_data_from_diamond.py
