@@ -1063,6 +1063,7 @@ def migrate_between(conn, start_time, end_time):
     update_minutes_since_last_bolus(conn, start_time, end_time)
     update_corrective_insulin(conn, start_time, end_time)
     update_dynamic_insulin(conn, start_time, end_time)
+    update_predicted_dynamic_insulin(conn, start_time, end_time)
     update_dynamic_carbs(conn, start_time, end_time)
     logging.info('done with migration')
 
