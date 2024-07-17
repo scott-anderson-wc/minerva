@@ -71,9 +71,15 @@ def migrate_basal_12(conn, start_time, end_time=date_ui.to_rtime(datetime.now())
     '''update the database table insulin_carb_smoothed_2 with the
     actual basal rates for the given time interval.
     '''
+    start_time = date_ui.to_rtime(start_time)
+    end_time = date_ui.to_rtime(end_time)
+    logging.info(f'migrate_basal_12 from {start_time} to {end_time}')
     curs = dbi.cursor(conn)
     try:
         for update in actual_basal(conn, start_time, end_time):
+            # this shouldn't happen
+            if update['basal_amt_12'] is None:
+                logging.error(f'''ERROR: got a NULL basal_amt_12 for {update['rtime']}''')
             curs.execute('''UPDATE insulin_carb_smoothed_2
                             SET basal_amt = %s,
                                 basal_amt_12 = %s,

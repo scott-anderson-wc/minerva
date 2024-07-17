@@ -318,6 +318,7 @@ Why are bolus ids going up when date goes down?
 Why are some bolus ids missing?
 
     '''
+    logging.info('starting bolus_import')
     bolus_import_s(conn, start_time, end_time, debugp=debugp)
     bolus_import_ds(conn, start_time, end_time, debugp=debugp)
     extended_bolus_import(conn, start_time, end_time, debugp=debugp)
@@ -684,13 +685,14 @@ def update_dynamic_insulin(conn,
     # rows, where N is the length of iac
     past_time = start_time - timedelta(minutes=5*len(iac))
     # query is inclusive at the start and exclusive at the end
+    logging.debug(f'getting insulin >= {past_time} and < {start_time}')
     recent_insulin = (f'''SELECT rtime, (ifnull(basal_amt_12,0) + ifnull(total_bolus_volume,0)) as ins
                           FROM {TABLE}
                           WHERE rtime >= %s and rtime < %s''')
     curs.execute(recent_insulin, [past_time, start_time])
     window = [ row[1] for row in curs.fetchall() ]
     if len(window) != len(iac):
-        raise ValueError('window and iac must be lists of the same length')
+        raise ValueError(f'window {len(window)} and iac {len(iac)} must be lists of the same length')
     win_width = len(iac)
     index = -1
     curs.execute(recent_insulin, [start_time, end_time])
@@ -704,10 +706,32 @@ def update_dynamic_insulin(conn,
         index = ( index + 1 ) % win_width
         window[index] = insulin
         di = di_worker(window, index, iac)
+        # print([str(rtime),di])
         update.execute(f'''UPDATE {TABLE} SET dynamic_insulin = %s WHERE rtime = %s''',
                        [di, rtime])
         if commit:
             conn.commit()
+
+# ================================================================
+# Predicted Dynamic Insulin
+
+def update_predicted_dynamic_insulin(conn, start_time,
+                                     end_time=date_ui.to_rtime(datetime.now()),
+                                     commit=True):
+    '''July 2024, we considered computing future (predicted) values DI
+    so that we could use it as part of a predictive model. We will put
+    it in the same column, but new rows. This should be okay, since
+    inserting rows is idempotent. For now, just 30 minutes into the
+    future. So we'll add 30 minutes to the end_time.
+
+    '''
+    start_time = date_ui.to_rtime(start_time)
+    end_time = date_ui.to_rtime(end_time)
+    prediction_time = end_time + timedelta(minutes=30) # Should be a global constant
+    logging.info(f'predicting future insulin from {end_time} to {prediction_time}')
+    fill_forward_between(conn, end_time, prediction_time)
+    update_dynamic_insulin(conn, end_time, prediction_time, commit)
+
 
 # ================================================================
 # Dynamic Carbs
@@ -850,7 +874,7 @@ def update_dynamic_carbs(conn,
             conn.commit()
         curr_rtime += timedelta(minutes=5)
     # After the loop
-    logging.info('done update_dynamic_carbs from {start_time} to {end_time}')
+    logging.info(f'done update_dynamic_carbs from {start_time} to {end_time}')
 
 def update_dynamic_carbs_test(conn=None):
     '''Use a test table to test this, since it necessarily needs to
@@ -962,16 +986,16 @@ when we are done migrating. See set_migration_time.
     curs = dbi.cursor(conn)
     curs.execute('''select date from autoapp.dana_history_timestamp where user_id = %s''',
                  [USER_ID])
-    last_update = curs.fetchone()[0]
-    logging.debug(f'dana app last updated {last_update}')
+    last_autoapp_update = curs.fetchone()[0]
+    logging.debug(f'dana app last updated {last_autoapp_update}')
     curs.execute('''select prev_autoapp_update from migration_status where user_id = %s''',
                  [USER_ID])
     prev_update_row = curs.fetchone()
     if prev_update_row is None:
         raise Exception('no previous update stored')
-    prev_update = prev_update_row[0]
-    logging.debug(f'previous migration update was {prev_update}')
-    return prev_update, last_update
+    prev_migration = prev_update_row[0]
+    logging.debug(f'previous migration update was {prev_migration}')
+    return prev_migration, last_autoapp_update
 
 def init_migration_time(conn, force=False):
     '''Our normal code compares the prev_update (X) with last_update (Y)
@@ -1031,9 +1055,7 @@ def migrate_between(conn, start_time, end_time):
     '''
     logging.info(f'migrate between {start_time} and {end_time}')
     fill_forward_between(conn, start_time, end_time)
-    logging.info('migrate_basal_12')
     migrate_basal_12(conn, start_time, end_time)
-    logging.info('bolus')
     bolus_import(conn, start_time, end_time)
     logging.info('carbohydrate')
     carbohydrate_import(conn, start_time, end_time)
@@ -1049,17 +1071,19 @@ def migrate_all(conn=None, alt_start_time=None):
     '''This is the function that should, eventually, be called from a cron job every 5 minutes.'''
     if conn is None:
         conn = dbi.connect()
-    prev_update, last_update = get_migration_time(conn)
-    if alt_start_time is None and prev_update >= last_update:
-        logging.info(f'bailing because no updates')
-        logging.debug(f'ICS2 prev_update: {prev_update} and Dana app last_update: {last_update}')
-        return
-    start_time = alt_start_time or prev_update
+    prev_migration, last_autoapp_update = get_migration_time(conn)
+    if (alt_start_time is None
+        and prev_migration >= last_autoapp_update):
+        # No longer bail, because we still want to calculate basal rate and DI
+        logging.info(f'NOT bailing despite no updates')
+        logging.debug(f'ICS2 prev_update: {prev_migration} and Dana app last_update: {last_autoapp_update}')
+        # return
+    start_time = alt_start_time or prev_migration
     logging.info(f'start time is {start_time}')
     end_time = datetime.now()
     migrate_between(conn, start_time, end_time)
     logging.info('storing update time')
-    set_migration_time(conn, prev_update, last_update)
+    set_migration_time(conn, prev_migration, last_autoapp_update)
     logging.info('done')
 
 # ================================================================
