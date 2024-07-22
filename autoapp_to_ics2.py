@@ -351,6 +351,8 @@ null. The latter is a problem that is fixed by a different function
 (update_minutes_since_last meal).
 
     '''
+    start_rtime = date_ui.to_rtime(start_rtime)
+    end_rtime = date_ui.to_rtime(end_rtime)
     curs = conn.cursor()
     nrows = curs.execute('''select janice.date5f(date) as rtime, value as carbs
                             from autoapp.carbohydrate
@@ -427,14 +429,49 @@ migrated a bolus.'''
 
 def migrate_rescue_carbs(conn, start_time, 
                          end_time=date_ui.to_rtime(datetime.now()),
-                         debug=False):
-    '''import rescue_carbs from the janice.rescue_carbs table'''
-    pass
+                         commit=True):
+    '''import rescue_carbs from the janice.rescue_carbs table.  That
+    table has just four columns: the user (Hugh), the date as a
+    varchar, carbs as varchar, and rec_n. The data in that table comes from a web form that Stan created, and it is still in use. We can parse the date to get
+    the relevant information, but there are some bogus values, such as:
+
+| Warning | 1292 | Incorrect datetime value: '-- 20:15:00'           |
+| Warning | 1292 | Incorrect datetime value: '2023-02-11 1740:0:00'  |
+
+    For now, I'm going to ignore those.
+    '''
+    logging.info(f'looking for rescue carbs')
+    start_time = date_ui.to_rtime(start_time)
+    end_time = date_ui.to_rtime(end_time)
+    curs = dbi.cursor(conn)
+    # the cast will return NULL if it fails, and the NULL won't match
+    # the 'between' condition, so we should only get valid rows.
+    nrows = curs.execute(f'''SELECT cast(date as datetime), carbs
+                             FROM janice.rescue_carbs
+                             WHERE user = '{USER}'
+                             AND cast(date as datetime) between %s and %s''',
+                 [start_time, end_time])
+    if nrows == 0:
+        logging.debug('no rescue carbs found')
+        return
+    logging.debug(f'found {nrows} rescue carbs')
+    update = dbi.cursor(conn)
+    for date, carbs in curs.fetchall():
+        rtime = date_ui.to_rtime(date)
+        update.execute(f'''update {TABLE}
+                           set carbs = %s, carb_code = 'rescue'
+                           where rtime = %s''',
+                       [carbs, rtime])
+        if commit:
+            conn.commit()
 
 def migrate_rescue_carbs_from_diamond(conn, start_time, 
                                       end_time=date_ui.to_rtime(datetime.now()),
                                       debug=False):
-    '''import rescue_carbs from the janice.rescue_carbs_from_diamond table'''
+    '''import rescue_carbs from the janice.rescue_carbs_from_diamond table. That table
+    is populated by pull_data_from_diamond.py which is run as a cron job. See additional notes
+    in that script.
+    '''
     pass
 
 
@@ -713,25 +750,28 @@ def update_dynamic_insulin(conn,
             conn.commit()
 
 # ================================================================
-# Predicted Dynamic Insulin
+# Projecting into the future
 
-def update_predicted_dynamic_insulin(conn, start_time,
-                                     end_time=date_ui.to_rtime(datetime.now()),
-                                     commit=True):
-    '''July 2024, we considered computing future (predicted) values DI
-    so that we could use it as part of a predictive model. We will put
-    it in the same column, but new rows. This should be okay, since
-    inserting rows is idempotent. For now, just 30 minutes into the
-    future. So we'll add 30 minutes to the end_time.
+def update_projected_data(conn, start_time, end_time, duration):
+    '''July 2024. For the purposes of predicting future highs and
+    lows, we project values like DI and DC into the future. (This
+    entails creating the rows for the data to go in and also requires
+    projecting basal rate forward.) The DI and DC data go into the
+    same columns as the past values, and will be overwritten. They'll
+    be overwritten with the same value if there aren't any inputs, and
+    if there's a meal or a bolus, or a change in basal, that will
+    cause new values to be computed.
 
     '''
+
     start_time = date_ui.to_rtime(start_time)
     end_time = date_ui.to_rtime(end_time)
-    prediction_time = end_time + timedelta(minutes=30) # Should be a global constant
-    logging.info(f'predicting future insulin from {end_time} to {prediction_time}')
-    fill_forward_between(conn, end_time, prediction_time)
-    update_dynamic_insulin(conn, end_time, prediction_time, commit)
-
+    projection_time = end_time + timedelta(minutes=duration)
+    logging.info(f'projecting future data from {end_time} to {projection_time}')
+    fill_forward_between(conn, end_time, projection_time)
+    migrate_basal_12(conn, start_time, projection_time)
+    update_dynamic_insulin(conn, start_time, projection_time)
+    update_dynamic_carbs(conn, start_time, projection_time)
 
 # ================================================================
 # Dynamic Carbs
@@ -843,6 +883,10 @@ def update_dynamic_carbs(conn,
                          WHERE rtime = %s''',
                      [curr_rtime])
         curr_row = curs.fetchone()
+        if curr_row is None:
+            # this shouldn't happen
+            logging.error(f'ERROR: missing row in {TABLE} for rtime {curr_rtime}')
+            return
         if curr_row[2] is not None:
             # a new meal, so add it to the list
             logging.debug(f'new meal {curr_row[2]} at time {curr_rtime}')
@@ -1059,11 +1103,12 @@ def migrate_between(conn, start_time, end_time):
     bolus_import(conn, start_time, end_time)
     logging.info('carbohydrate')
     carbohydrate_import(conn, start_time, end_time)
+    migrate_rescue_carbs(conn, start_time, end_time)
     update_minutes_since_last_meal(conn, start_time, end_time)
     update_minutes_since_last_bolus(conn, start_time, end_time)
     update_corrective_insulin(conn, start_time, end_time)
     update_dynamic_insulin(conn, start_time, end_time)
-    update_predicted_dynamic_insulin(conn, start_time, end_time)
+    # update_projected_data(conn, start_time, end_time, duration)
     update_dynamic_carbs(conn, start_time, end_time)
     logging.info('done with migration')
 
