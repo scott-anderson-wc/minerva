@@ -124,7 +124,7 @@ duration mean? See #57 among others.'''
     # bolus table equals the date in the basal_hour table. Are those
     # incompatible?
 
-    # Note that because the rows should now exist, we have to use the
+    # Note that because the rows should exist, we have to use the
     # on duplicate key trick, because replace will *delete* any
     # existing row and replace it. We don't want that. We want to
     # update it if it's already there, and it will be. There may be a
@@ -132,20 +132,39 @@ duration mean? See #57 among others.'''
     # this should not insert any rows, but update existing rows, and
     # it should be idempotent.
 
-    # Now that we have relevance_lag, this should capture S boluses in
-    # the recent past. The ON DUPLICATE KEY code should make it
-    # idempotent.
-    nr = curs.execute(f'''insert into {TABLE}( rtime, bolus_type, total_bolus_volume)
-                         select
-                            janice.date5f(date),
-                            type,
-                            if(value='', NULL, value)
-                        from autoapp.bolus
-                        where user_id = 7 and type = 'S' and date >= %s and date <= %s
-                        ON DUPLICATE KEY UPDATE 
-                            bolus_type = values(bolus_type),
-                            total_bolus_volume = values(total_bolus_volume)''',
+    # On Jul 23, 2024, I discovered some rows of ICS2 (TABLE) where
+    # user was null. That should not happen. There was an S bolus at
+    # the time, so I suspect this function.
+    
+    # nr = curs.execute(f'''insert into {TABLE}(user, rtime, bolus_type, total_bolus_volume)
+    #                      select
+    #                         '{USER}',
+    #                         janice.date5f(date),
+    #                         type,
+    #                         if(value='', NULL, value)
+    #                     from autoapp.bolus
+    #                     where user_id = 7 and type = 'S' and date >= %s and date <= %s
+    #                     ON DUPLICATE KEY UPDATE 
+    #                         bolus_type = values(bolus_type),
+    #                         total_bolus_volume = values(total_bolus_volume)''',
+    #                   [start_time, end_time])
+
+    # the following code is not as efficient but can't insert
+    nr = curs.execute(f'''select janice.date5f(date), type, if(value='', NULL, value)
+                          from autoapp.bolus
+                          where user_id = {USER_ID}
+                            and type = 'S'
+                            and date >= %s and date <= %s''',
                       [start_time, end_time])
+    logging.info(f'need to import {nr} boluses')
+    update = dbi.cursor(conn)
+    for rtime, bolus_type, bolus_value in curs.fetchall():
+        num_updates = update.execute(f'''update {TABLE}
+                                        set bolus_type = %s, total_bolus_volume = %s
+                                        where user = '{USER}' and rtime = %s''',
+                            [bolus_type, bolus_value, rtime])
+        if num_updates != 1:
+            logging.error(f'no row was updated for bolus at time {rtime}: num_updates is {num_updates}')
     if not debugp:
         conn.commit()
     return nr
