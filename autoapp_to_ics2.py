@@ -679,6 +679,26 @@ def di_worker(window, index, iac):
         sum += weight * insulin
     return sum
 
+def missing_rows(conn, 
+                 start_time,
+                 end_time=date_ui.to_rtime(datetime.now())):
+    '''Return a list of rows (rtime values) that are missing in the given
+    interval. Used only for debugging.'''
+    start_time = date_ui.to_rtime(start_time)
+    end_time = date_ui.to_rtime(end_time)
+    all_rtimes = []
+    rtime = start_time
+    while rtime <= end_time:
+        all_rtimes.append(date_ui.python_datetime_to_mysql_datetime(rtime))
+        rtime += timedelta(minutes=5)
+    curs = dbi.cursor(conn)
+    sql = f'''select rtime from {TABLE}
+              where rtime >= %s and rtime <= %s
+              and rtime not in {tuple(all_rtimes)}'''
+    print(sql)
+    curs.execute(sql, [start_time, end_time])
+    return curs.fetchall()
+
 def update_dynamic_insulin(conn,
                            start_time,
                            end_time=date_ui.to_rtime(datetime.now()),
@@ -700,6 +720,11 @@ def update_dynamic_insulin(conn,
     curs.execute(recent_insulin, [past_time, start_time])
     window = [ row[1] for row in curs.fetchall() ]
     if len(window) != len(iac):
+        # try to figure out why. It seems that some row is missing. What row?
+        mr = missing_rows(conn, past_time, start_time)
+        logging.error(f'{len(mr)} rows are missing')
+        for row in mr:
+            logging.error(f'missing: row')
         raise ValueError(f'window {len(window)} and iac {len(iac)} must be lists of the same length')
     win_width = len(iac)
     index = -1
