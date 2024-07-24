@@ -91,7 +91,8 @@ get_migration_time().
                  VALUES(%s, '{USER}')
                  ON DUPLICATE KEY UPDATE user=user; '''
     rtime = start_time
-    while rtime < end_time:
+    # it's important that it be <= because we want to include the last row
+    while rtime <= end_time:
         curs.execute(insert, [rtime])
         rtime += timedelta(minutes=5)
     conn.commit()
@@ -115,9 +116,12 @@ def print_tuples(col_names, rows):
 
 # ================================================================
 
-def bolus_import_s(conn, start_time, end_time, debugp=False):
+def bolus_import_s_and_ds(conn, start_time, end_time, debugp=False):
     '''An S entry means just a simple bolus. But what does a non-zero
-duration mean? See #57 among others.'''
+duration mean? See #57 among others. DS is handled the same, at least
+for now (July 24, 2024).
+
+    '''
     curs = conn.cursor()
 
     # Note, there are 13 rows where the date in the
@@ -134,110 +138,51 @@ duration mean? See #57 among others.'''
 
     # On Jul 23, 2024, I discovered some rows of ICS2 (TABLE) where
     # user was null. That should not happen. There was an S bolus at
-    # the time, so I suspect this function.
+    # the time, so I suspect this function. See outtakes
     
-    # nr = curs.execute(f'''insert into {TABLE}(user, rtime, bolus_type, total_bolus_volume)
-    #                      select
-    #                         '{USER}',
-    #                         janice.date5f(date),
-    #                         type,
-    #                         if(value='', NULL, value)
-    #                     from autoapp.bolus
-    #                     where user_id = 7 and type = 'S' and date >= %s and date <= %s
-    #                     ON DUPLICATE KEY UPDATE 
-    #                         bolus_type = values(bolus_type),
-    #                         total_bolus_volume = values(total_bolus_volume)''',
-    #                   [start_time, end_time])
-
     # the following code is not as efficient but can't insert
     nr = curs.execute(f'''select janice.date5f(date), type, if(value='', NULL, value)
                           from autoapp.bolus
                           where user_id = {USER_ID}
-                            and type = 'S'
+                            and (type = 'S' or type = 'DS')
                             and date >= %s and date <= %s''',
                       [start_time, end_time])
     logging.info(f'need to import {nr} boluses')
     update = dbi.cursor(conn)
     for rtime, bolus_type, bolus_value in curs.fetchall():
-        num_updates = update.execute(f'''update {TABLE}
-                                        set bolus_type = %s, total_bolus_volume = %s
-                                        where user = '{USER}' and rtime = %s''',
-                            [bolus_type, bolus_value, rtime])
-        if num_updates != 1:
-            logging.error(f'no row was updated for bolus at time {rtime}: num_updates is {num_updates}')
+        # we assume this will work because of fill_forward.  We can't
+        # check whether an update happened because it might have been
+        # already updated by a previous run of this script.
+        update.execute(f'''update {TABLE}
+                           set bolus_type = %s, total_bolus_volume = %s
+                           where user = '{USER}' and rtime = %s''',
+                       [bolus_type, bolus_value, rtime])
     if not debugp:
         conn.commit()
     return nr
 
-def bolus_import_s_test(conn, start_time, end_time):
+def bolus_import_s_and_ds_test(conn, start_time, end_time):
     start_time = date_ui.to_rtime(start_time)
     end_time = date_ui.to_rtime(end_time)
     curs = conn.cursor()
-    nr = curs.execute('''select janice.date5f(date),type,if(value='', NULL, value)
+    # same query as above
+    nr = curs.execute(f'''select janice.date5f(date),type,if(value='', NULL, value)
                          from autoapp.bolus
-                         where user_id = 7 and type = 'S' and date >= %s and date <= %s''',
+                         where user_id = {USER_ID} and (type = 'S' or 'DS')
+                         and date >= %s and date <= %s''',
                  [start_time, end_time])
-    print(f'{nr} S boluses between {start_time} and {end_time}')
+    print(f'{nr} S or DS boluses between {start_time} and {end_time}')
     print_tuples(['date', 'type', 'value'], curs.fetchall())
-    nr = bolus_import_s(conn, start_rtime, debugp=True)
-    print('result: {} rows modified'.format(nr))
+    nr = bolus_import_s_and_ds(conn, start_time, end_time, debugp=True)
+    print('result: {} boluses imported'.format(nr))
     nr = curs.execute(f'''select rtime, bolus_type, total_bolus_volume
                          from {TABLE}
-                         where bolus_type = 'S' and rtime >= %s and rtime < %s''',
+                         where rtime >= %s and rtime < %s''',
                       [start_time, end_time])
-    print(f'imported {nr} S boluses between {start_time} and {end_time}')
+    print(f'imported {nr} S and DS boluses between {start_time} and {end_time}')
     print_tuples(['rtime', 'bolus_type', 'total_bolus_volume'], curs.fetchall())
     
-def bolus_import_ds(conn, start_time, end_time, debugp=False):
-    '''A DS entry is, I think, the same as an S entry, but maybe is paired
-    with a DE entry?  '''
-    # DS events. Treating them just like S, for now.
-    curs = conn.cursor()
-    # Again, the ON DUPLICATE KEY trick should make this idempotent
-    n = curs.execute(f'''insert into {TABLE}( rtime, bolus_type, total_bolus_volume)
-                    select 
-                        janice.date5f(date),
-                        'DS',
-                        if(value='', NULL, value)
-                    from autoapp.bolus
-                    where user_id = 7 and type = 'DS' and date >= %s and date <= %s
-                    ON DUPLICATE KEY UPDATE 
-                        bolus_type = values(bolus_type),
-                        total_bolus_volume = values(total_bolus_volume)''',
-                     [start_time, end_time])
-    logging.debug('updated with {} DS events from bolus table'.format(n))
-    if not debugp:
-        conn.commit()
 
-def bolus_import_ds_test(conn, start_time, end_time):
-    start_time = date_ui.to_rtime(start_time)
-    end_time = date_ui.to_rtime(start_time)
-    curs = conn.cursor()
-    nr = curs.execute('''select janice.date5f(date),type,if(value='', NULL, value)
-                         from autoapp.bolus
-                         where user_id = 7 and type = 'DS' and date >= %s and date <= %s''',
-                 [start_time, end_time])
-    print(f'{nr} DS boluses between {start_time} and {end_time}')
-    print_tuples(['rtime', 'type', 'bolus_value'], curs.fetchall())
-    nr = bolus_import_ds(conn, start_time, end_time, debugp=True)
-    print('result: {} rows modified'.format(nr))
-    nr = curs.execute(f'''select rtime, bolus_type, total_bolus_volume
-                         from {TABLE}
-                         where bolus_type = 'DS' and rtime >= %s and rtime <= %s'''
-                      [start_rtime])
-    print(f'{nr} DS boluses between {start_time} and {end_time}')
-    print_tuples(['rtime', 'bolus_type', 'total bolus volume'], curs.fetchall())
-
-def approx_equal(x, y, maxRelDiff = 0.0001):
-    '''see https://randomascii.wordpress.com/2012/02/25/comparing-floating-point-numbers-2012-edition/
-true if the numbers are within maxRelDiff of each other, default 0.01%'''
-    diff = abs(x-y)
-    x = abs(x)
-    y = abs(y)
-    larger = x if x > y else y
-    return diff <= larger * maxRelDiff
-
-    
 # ================================================================
 
 def extended_bolus_import(conn, start_time, end_time, debugp=False):
@@ -320,6 +265,14 @@ def extended_bolus_import_test(conn, start_time, end_time):
     # floating point equality: less than 0.01%
     print('are the sums approximately equal? {}'.format(approx_equal(before_sum, after_sum)))
 
+def approx_equal(x, y, maxRelDiff = 0.0001):
+    '''see https://randomascii.wordpress.com/2012/02/25/comparing-floating-point-numbers-2012-edition/
+true if the numbers are within maxRelDiff of each other, default 0.01%'''
+    diff = abs(x-y)
+    x = abs(x)
+    y = abs(y)
+    larger = x if x > y else y
+    return diff <= larger * maxRelDiff
 
 # ================================================================
 
@@ -338,8 +291,7 @@ Why are some bolus ids missing?
 
     '''
     logging.info('starting bolus_import')
-    bolus_import_s(conn, start_time, end_time, debugp=debugp)
-    bolus_import_ds(conn, start_time, end_time, debugp=debugp)
+    bolus_import_s_and_ds(conn, start_time, end_time, debugp=debugp)
     extended_bolus_import(conn, start_time, end_time, debugp=debugp)
     # Added this to fix any carb_codes that were incorrect because the
     # bolus hadn't yet been recorded.
@@ -716,7 +668,7 @@ def di_worker(window, index, iac):
 
     '''
     if len(window) != len(iac):
-        raise ValueError('window and iac must be lists of the same length')
+        raise ValueError('window {len(window)} and iac {len(iac)} must be lists of the same length')
     win_width = len(iac)
     sum = 0 
     for i in range(win_width):
@@ -1191,12 +1143,20 @@ if __name__ == '__main__':
         sys.exit()
     # The default is to run as a cron job
     # when run as a script, log to a logfile 
-    today = datetime.today()
-    logfile = os.path.join(LOG_DIR, 'day'+str(today.day))
+    # if it's the first run of the day, delete the old file from last month
+    # this incantation really should move to a file of utilities; I do similar
+    # stuff for other cron jobs
+    now = datetime.now()
+    logfile = os.path.join(LOG_DIR, 'day'+str(now.day))
+    if now.hour == 0 and now.minute==0:
+        try:
+            os.unlink(logfile)
+        except FileNotFoundError:
+            pass
     logging.basicConfig(format='%(asctime)s %(levelname)s %(message)s',
                         datefmt='%H:%M',
                         filename=logfile,
                         level=logging.DEBUG)
-    logging.info('==== script begins at  {}'.format(datetime.now()))
+    logging.info(f'==== script begins at  {now}')
     migrate_all(conn)
     migrate_cgm(conn)
