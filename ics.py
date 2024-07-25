@@ -18,13 +18,12 @@ DEFAULT_HOURS = 6
 
 def get_insulin_info(conn, start_time=None, hours=DEFAULT_HOURS):
     '''Get insulin info for given time period after given start time
-(default to now-hours).  Returns four values, each a list of values:
-(1) bolus info, which will be mostly None values; (2)
-programmed_basal; (3) basal_amt (this is basal_amt, not basal_amt_12;
-(4) extended_bolus.
-
-The second value is currently returned as an empty list; we may add that later at
-some point.
+(default to now-hours).  Returns these values, each a list of numeric values or None:
+    (1) bolus info, which will be mostly None values;
+    (2) programmed_basal;
+    (3) basal_amt (this is basal_amt, not basal_amt_12;
+    (4) extended_bolus
+    (5) dynamic_insulin
 
     '''
     if start_time is None:
@@ -43,7 +42,7 @@ some point.
     end_time = start_time + timedelta(hours=hours)
     desired_len = 12*hours
     curs = dbi.cursor(conn)
-    n = curs.execute('''SELECT total_bolus_volume, basal_amt_12, extended_bolus_amt_12
+    n = curs.execute('''SELECT total_bolus_volume, basal_amt_12, extended_bolus_amt_12, dynamic_insulin
                         FROM insulin_carb_smoothed_2
                         WHERE user = '{}' 
                         AND rtime >= %s and rtime < %s'''.format(USER),
@@ -55,15 +54,20 @@ some point.
         pass
     rows = curs.fetchall()
     boluses = [ row[0] for row in rows ]
+    di_values = [ row[3] for row in rows ]
     prog_basal = []             # fix this someday?
+    # for cosmetic reasons, multiply by 12 and round to 2 digits
     def round2x12(x):
         return round(x*12,2) if x is not None else None
     actual_basal = [ round2x12(row[1]) for row in rows ]
     extended = [ round2x12(row[2])  for row in rows ]
-    # and also last_update
+    return (boluses, prog_basal, actual_basal, extended, di_values)
+
+def get_last_autoapp_update(conn):
+    curs = dbi.cursor(conn)
     curs.execute('SELECT date FROM autoapp.dana_history_timestamp WHERE user_id = %s', [USER_ID])
     last_update = curs.fetchone()[0]
-    return (boluses, prog_basal, actual_basal, extended, last_update)
+    return last_update
 
 def get_cgm_info(conn, start_time=None, hours=DEFAULT_HOURS, debug_on=False):
     '''Get cgm info for given time period after
@@ -119,7 +123,7 @@ suitable for a Plotly trace.
 
 if __name__ == '__main__':
     conn = dbi.connect()
-    boluses, prog_basal, actual_basal, extended_boluses = get_insulin_info(conn)
+    boluses, prog_basal, actual_basal, extended_boluses, di_values = get_insulin_info(conn)
     print('boluses:')
     print(boluses)
     print('programmed basal')
@@ -128,7 +132,10 @@ if __name__ == '__main__':
     print(actual_basal)
     print('extended boluses')
     print(extended_boluses)
+    print('dynamic_insulin')
+    print(di_values)
     cgm = get_cgm_info(conn)
     print('cgm')
     print(cgm)
+    print('last autoapp update', get_last_autoapp_update(conn))
     
