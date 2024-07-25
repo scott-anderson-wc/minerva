@@ -136,9 +136,20 @@ def plot_data(start_date, start_time, hours):
     # finally, real work
     try:
         conn = dbi.connect()
-        boluses, prog_basal, actual_basal, extended, last_update = ics.get_insulin_info(conn, start_time, hours)
+        boluses, prog_basal, actual_basal, extended, dynamic_insulin = ics.get_insulin_info(conn, start_time, hours)
+        last_autoapp_update = ics.get_last_autoapp_update(conn)
         cgm = ics.get_cgm_info(conn, start_time, hours)
-        return jsonify([boluses, prog_basal, actual_basal, extended, last_update, cgm])
+        # I wish Python had the shorthand that JS does, but using a
+        # dictionary makes it easier to read the data in the browser.
+        dic = {'boluses': boluses,
+               'prog_basal': prog_basal,
+               'actual_basal': actual_basal,
+               'extended': extended,
+               'dynamic_insulin': dynamic_insulin,
+               'cgm': cgm,
+               'last_autoapp_update': last_autoapp_update,
+               }
+        return jsonify(dic)
     except Exception as err:
         return jsonify({'error': repr(err)})
 

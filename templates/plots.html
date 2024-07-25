@@ -8,24 +8,25 @@
     span { color: red; font-weight: bold; }
 </style>
 
-<h2>Starting at <span id="span_start_time">{{start_time}}</span>
+<h2>Data for <span id="span_date">{{start_date}}</span>
+    starting at <span id="span_start_time">{{start_time}}</span>
     running for <span id="span_hours">{{hours}}</span> hours</h2>
 
-<h2>Autoapp Last Update : <span id="span_last_update"></span></h2>
+<!-- <h2>Autoapp Last Update : <span id="span_last_update"></span></h2> -->
 
-<p>
 <form method="GET" action="{{url_for('plots0')}}">
     <label>start date <input name="input_start_date" type="date"></label>
     <label>start time <input name="input_start_time" type="time"></label>
     <label>duration (hours) <input name="input_duration" type="number" min="1" max="24" step="1"></label>
     <input type="submit" value="change date/time/duration">
 </form>
-</p>
 
-<p><form method="GET" action="{{url_for('plots0')}}"><input type="submit" value="latest"></form></p>
+<form method="GET" action="{{url_for('plots0')}}"><input type="submit" value="latest"></form>
 
 <div id="insulinPlot" style="width:100%;max-width:1024px"></div>
 <div id="cgmPlot" style="width:100%;max-width:1024px"></div>
+
+<script src="{{url_for('static', filename='plots.js')}}"></script>
 
 <script>
     // this URL is the bare URL. Need to concatenate the start datetime and duration
@@ -39,165 +40,7 @@
     var start_datetime = to_date(start_date_str+" "+start_time_str);
     var duration_hours = {{hours}};
 
-    function to_date(datetime_str, opt_timestr) {
-        let dt_str = opt_timestr ? datetime_str + " " + opt_timestr : datetime_str;
-        try {
-            return new Date(dt_str);
-        } catch (err) {
-            console.error('Not a proper datetime str: ', datetime_str, opt_timestr);
-            throw err;
-        }
-    }
-
-    function date_to_ISO_datestring(date) {
-        // dunno why this method doesn't exist
-        const yyyy = date.getFullYear();
-        const m = date.getMonth()+1;
-        const mm = m<10?"0"+m:""+m;
-        const d = date.getDate();
-        const dd = d<10?"0"+d:""+d;
-        return yyyy+'-'+mm+'-'+dd;
-    }
-
-    function date_to_ISO_timestring(date) {
-        // dunno why this method doesn't exist
-        const h = date.getHours();
-        const m = date.getMinutes();
-        return (h<10 ? "0"+h : ""+h)
-            +":"
-            +(m<10 ? "0"+m : ""+m);
-    }
-
-    // obsolete
-    function to_start_datetime_str(start) {
-        // argument is probably a string, but can also be a datetime object
-        try {
-            start = to_date(start);
-            // sets the globals
-            start_datetime = start;
-            start_datetime_str = date_to_ISO_datestring(start)+" "+date_to_ISO_timestring(start);
-            return start_datetime_str;
-        } catch (err) {
-            console.error('start is not a proper datetime: ',start);
-            throw err;
-        }
-    }
-
-    function to_duration(duration) {
-        // should check that it's a small, positive integer
-        try {
-            if( (typeof duration === typeof 2) &&
-                duration > 0 &&
-                duration < 24 ) {
-                // 
-                duration = Math.round(duration);
-                // set global
-                duration_hours = duration;
-                return duration;
-            }
-        } catch (err) {
-            console.error('duration is not a small, positive integer: ',duration);
-            throw err;
-        }
-    }
-
-    function data_url(date, time, duration) {
-        // to do: add debugging
-        let start = new Date(date + " " + time);
-        let start_date = date_to_ISO_datestring(start);
-        let start_time = date_to_ISO_timestring(start);
-        // finally, we get to work
-        const slash = "/";
-        return data_url_base + start_date + slash + start_time + slash + duration;
-    }
-
-    function page_url(date, time, duration) {
-        // to do: add debugging
-        let start = new Date(date + " " + time);
-        let start_date = date_to_ISO_datestring(start);
-        let start_time = date_to_ISO_timestring(start);
-        // finally, we get to work
-        const slash = "/";
-        return page_url_base + start_date + slash + start_time + slash + duration;
-    }
-
     // the response to the Ajax request; just for debugging
-    var g;
-
-    function datetime_to_minutes(datetime) {
-        let date = new Date(datetime);
-        return date.getHours()*60 + date.getMinutes();
-    }
-
-    function timesteps(startmin, endmin) {
-        let vals = [];
-        for(let mins = startmin; mins <= endmin; mins += 5) {
-            vals.push(mins);
-        }
-        return vals;
-    }
-
-    function minutes_to_timestr(mins) {
-        let hh = Math.floor(mins/60);
-        let mm = mins - hh*60;
-        hh = hh % 24;
-        
-        return (hh<10?"0"+hh:""+hh)
-            +":"
-            +(mm<10?"0"+mm:""+mm);
-    }
-
-
-    function update_insulin_plot(boluses, prog_basal, actual_basal, extended) {
-        const trace_boluses = { x: times_str,
-                                y: boluses,
-                                type: "bar",
-                                name: "bolus"};
-        const trace_used_basal = {x: times_str,
-                                  y: actual_basal,
-                                  type: "line",
-                                  name: "actual basal"};
-        const trace_extended_bolus = {x: times_str,
-                                      y: extended,
-                                      type: "line",
-                                      name: "extended bolus"};
-        traces = [trace_boluses,
-                  // trace_prog_basal,
-                  trace_used_basal,
-                  trace_extended_bolus
-                 ];
-        // Display using Plotly
-        var data = [trace_boluses,
-                    // trace_prog_basal,
-                    trace_used_basal,
-                    trace_extended_bolus
-                   ];
-        var layout = {title: "Insulin plot",
-                      showlegend: true,
-                      legend: {
-                          x: 1,
-                          xanchor: 'right',
-                          y: 0}
-                     };
-        var config = {responsive: true};
-        Plotly.newPlot("insulinPlot", data, layout, config);
-    }
-
-    function update_cgm_plot(cgm_values) {
-        var trace_cgm_values = {x: times_str,
-                                y: cgm_values,
-                                type: "line",
-                                name: "realtime CGM"};
-        var config = {responsive: true,
-                      yaxis: {range: [0, 300]}};
-        Plotly.newPlot("cgmPlot",
-                       [trace_cgm_values],
-                       {title: "realtime CGM plot",
-                        showlegend: false},
-                       config);
-    }
-
-    // global to hold Ajax response, to help in debugging
     var g;
 
     // globals, to share data and ease debugging
@@ -222,13 +65,16 @@
             if(resp.error) {
                 alert('Sorry; there was this error '+resp.error)
             }
-            const [boluses, prog_basal, actual_basal, extended, last_update, cgm ] = resp;
-            // ready to plot
-            // Note that there's no timezone information in the last_update data;
-            // it's just a string from the server
-            $("#span_last_update").text(last_update);
-            update_insulin_plot(boluses, prog_basal, actual_basal, extended);
-            update_cgm_plot(cgm);
+            const {boluses, prog_basal, actual_basal, extended,
+                   dynamic_insulin,
+                   cgm,
+                   last_autoapp_update,
+                  } = resp;
+            // Note that there is no timezone information in the last_autoapp_update data;
+            // it is just a string from the server
+            $("#span_last_update").text(last_autoapp_update);
+            update_insulin_plot("insulinPlot", times_str, resp);
+            update_cgm_plot("cgmPlot", times_str, cgm);
         });
     }
 
@@ -249,7 +95,7 @@
         let start_time = $("#input_start_time").val();
         let start = new Date(start_date + " " + start_time);
         console.log("switching to ", start);
-        // Ajax would be nice, but then we couldn't bookmark, etc.
+        // Ajax would be nice, but then we could not bookmark, etc.
         // Maybe allow either, as a user preference?
         document.location = page_url(start_date, start_time, duration_hours);
     }
