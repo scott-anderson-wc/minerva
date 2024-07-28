@@ -1,8 +1,14 @@
 
-'''Iterate over 2hr clean regions to compute nudge ISFs and reverse engineer an IAC.
-Modified from isf2.py implemented by Scott 1/22/2019'''
+'''Iterate over 2hr clean regions to find clean regions used for: 
+1. Clean ISFs and 
+2. Reverse engineered IAC
 
-'''This newer version attempts to be more clear about the different criteria
+Modified from isf2.py implemented by Scott 1/22/2019. 
+Last updated by Mileva 7/28/24. 
+"""
+
+"""
+Criteria for 2hr clean regions: 
 
 1. There's a 30-minute window at the beginning of the 2-hour span for
 ISF calculations. Any boluses in that 30 minute window are summed, and the 
@@ -19,16 +25,9 @@ ISF value is stored in ISF_rounded instead of ISF.
 
 '''
 
-import sys
 import MySQLdb
-import dbconn2
-import csv
-import math
-import itertools
-from datetime import datetime, timedelta,date
-import dateparser
-import decimal                  # some MySQL types are returned as type decimal
-from dbi import get_dsn, get_conn # connect to the database
+from datetime import timedelta
+from dbi import get_conn # connect to the database
 import date_ui
 
 # added 12/13/2018 to avoid huge ISF values caused by tiny boluses
@@ -155,7 +154,6 @@ def get_clean_regions_2hr():
     skipped_nobg_end = 0
     good_isf = 0       # events with good ISF value 
     insulin_before = 0 #events with insulin 4 hours prior to the event 
-    clean_regions = []
     count = 0
     
     for row in rows:
@@ -188,9 +186,6 @@ def get_clean_regions_2hr():
         if boluses_in_time_range(rows, t3+timedelta(minutes=5), t4-timedelta(minutes=5)):
             skipped_middle += 1
             continue
-
-        # Allow boluses in 20 minute "end" time (between t4 and t5)
-        boluses_in_end = boluses_in_time_range(rows, t4, t5)
             
         ## Clean Regions
         # print(t3)
@@ -199,7 +194,8 @@ def get_clean_regions_2hr():
         bg_at_t5 = bg_at_time_extended(bg_rows,t5)
         if bg_at_t3 and bg_at_t5:
             count += 1
-            curs.execute('''insert into clean_regions_2hr_new (rtime,bg0,bg1,bolus) values (%s,%s,%s,%s)''',[t3,bg_at_t3,bg_at_t5, bolus_sum]) 
+            isf = (bg_at_t3 - bg_at_t5) / bolus_sum
+            curs.execute('''replace into clean_regions_2hr_new (rtime,bg0,bg1,bolus,isf) values (%s,%s,%s,%s, %s)''',[t3,bg_at_t3,bg_at_t5, bolus_sum, isf]) 
 
     print(count)
     print('''There were {} corrective insulin events from 2014 -  present. 
