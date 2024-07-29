@@ -195,10 +195,63 @@ def getRecentISF(time_bucket,min_weeks, min_data):
 
 
 @app.route('/isfplots/')
-def isfplots():
-    '''A box-and-whisker plot with isf data sorted in 2-hr time buckets '''
-    return '''<p>sorry; this is not currently available; see Scott. 
-             <p>The code was moved to the "outtakes/md_deploy.py" file.'''
+@app.route('/isfplots/<start_date>/<end_date>')
+def isfplots(start_date='', end_date=''):
+    '''A box-and-whisker plot with isf data sorted in 2-hr time buckets.
+    Resurrected July 2024. This plots ISF values in two-hour buckets
+    in twelve box-and-whisker plots, with time along the x-axis, so
+    0am-2am is the leftmost box-and-whisker. The data is drawn from
+    the isf_details table, since ISFs are compute-intensive and better
+    to compute and store. See compute_isf in isf2.py.
+    Default UI is the last year of data.'''
+    # all the real work is done in JS. See the template file and the
+    # following endpoint to get the data.
+    if start_date == '' or end_date == '':
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=365)
+        html_url = url_for('isfplots',
+                           start_date=start_date.date().isoformat(),
+                           end_date=end_date.date().isoformat())
+        print('url', html_url)
+        return redirect(html_url)
+    data_url = url_for('isfplot_data',
+                           start_date=start_date,
+                           end_date=end_date)
+    return render_template('isfplots.html',
+                           # these values are in the <script> part of the template
+                           # we could just parse the URL...
+                           start_date=start_date,
+                           end_date=end_date,
+                           data_url=data_url)
+
+@app.route('/isfplot-data/<start_date>/<end_date>')
+def isfplot_data(start_date, end_date):
+    '''Endpoint that returns a list of all ISF values and their bucket
+    number (even numbers from 0-22) for the given date range.'''
+    if start_date == '':
+        end_date = datetime.now()
+        start_date = end_date - deltatime(days=365)
+    else:
+        try:
+            start_date = date_ui.to_rtime(start_date)
+        except Exception as err:
+            return jsonify({'error': f'bad start time {start_date} error: {repr(err)}'})
+        try:
+            end_date = date_ui.to_rtime(end_date)
+        except Exception as err:
+            return jsonify({'error': f'bad end time {end_date} error: {repr(err)}'})
+    # Finally, to work.  Plotly just wants the raw data as a list of
+    # values. It will compute the parameters of the box and whisker.
+    # This is a lot of data to send. We cut it in half by bucketing in
+    # the front end.
+    conn = dbi.connect()
+    try:
+        data = isf.get_isf_between(conn, start_date, end_date)
+    except Exception as err:
+        return jsonify({'error': f'error getting data: {repr(err)}', 'data': None})
+    return jsonify({'error': False, 'data': data})
+           
+
 
 @app.teardown_appcontext
 def teardown_db(exception):

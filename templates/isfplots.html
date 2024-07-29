@@ -3,29 +3,61 @@
 {% block main_content %}
 
 <div id="isfPlot"></div>
+
 <p>{{table1 | safe}}</p>
 <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+
 <script>
-  var isfGraph = {{graphJSON | safe}}
-  console.log('data is '+isfGraph.data)
-  console.log('type is '+typeof(isfGraph))
-  Plotly.plot('isfPlot', isfGraph.data, isfGraph.layout, {showLink: false});
- 
+    const startDate = '{{start_date}}';
+    const endDate = '{{end_date}}';
+    const url = '{{data_url}}';
+
+    const labels = ["12am", "2am", "4am", "6am", "8am", "10am", "12pm", "2pm", "4pm", "6pm", "8pm", "10pm", "12am"]
+
+    function getData() {
+        $.get(url)
+            .then((resp) => {
+                globalThis.resp = resp; // global for debugging
+                if(resp.error) {
+                    alert(`error in JSON request: ${resp.error}`);
+                    return;
+                }
+                plotData(resp.data);
+            });
+    }
+    
+    function plotData(data, max) {
+        let allData = data
+        globalThis.allData = allData;     // debug
+        let traces = [];
+        let allIsfVals = allData.map( pair => pair[1] );
+        const traceAll = {y: allIsfVals, type: 'box', name: 'all ISF values'}
+        traces.push(traceAll);
+        for( let bucket = 0; bucket < 24; bucket += 2 ) {
+            console.log('bucket', bucket);
+            let data = allData.filter( pair => (pair[0] == bucket) );
+            let isfVals = data.map( pair => pair[1] );
+            let label = labels[bucket/2]+labels[bucket/2+1];
+            console.log(`bucket ${bucket} has ${data.length} values`);
+            let trace = {y: isfVals, type: 'box', name: label}
+            traces.push(trace);
+        };
+        globalThis.traces = traces; // debug
+        layout = {title: `ISF values from ${startDate} to ${endDate}`,
+                  width: 1500,
+                  height: 1000,
+                  yaxis: {title: "mgdl/unit",
+                          zeroline: true,
+                          zerolinecolor: '#800000',
+                          zerolinewidth: 2,
+                          // don't show the vertical line at the left edge
+                          showline: false,
+                          rangemode: 'tozero'}};
+        Plotly.plot('isfPlot', traces, layout);
+    }
+    
+    $(document).ready(getData);
+
 </script>
 
-<div id="isf2014"></div>
-<script src = "https://cdn.plot.ly/plotly-latest.min.js"></script>
-<script>
-  var isfGraph2014 = {{graphJSON2 | safe}}
-  Plotly.plot('isf2014', isfGraph2014.data, isfGraph2014.layout, {showLink: false});
-  console.log("GRAPH: " +  isfGraph2014.layout)
-</script>
-
-<div id = "isf2016"></div>
-<script src = "https://cdn.plot.ly/plotly-latest.min.js"></script>
-<script>
-  var isfGraph2016 = {{graphJSON3 | safe }}
-  Plotly.plot ('isf2016',isfGraph2016.data, isfGraph2016.layout, {showLink: false});
-</script>
-							 
 {% endblock %}
