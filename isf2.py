@@ -111,6 +111,8 @@ found'''
             break
         base_index += 1
     for delta in [0,1,-1,2,-2,3,4,5,6,7,8,9]:
+        if base_index + delta >= len(rows):
+            return None
         row = rows[base_index + delta]
         if row['bg']: 
             return row['bg']
@@ -128,12 +130,20 @@ def get_bg_time_window(curs, time):
     return rows
 
 def compute_isf(debug=False):
-    '''compute ISF values for all clean corrections in the database; store
-results in isf_details table. This should be run whenever there's new
-data. Eventually, need to come up with an incremental version.
+    '''compute ISF values for all clean corrections in the database;
+store results in isf_details table. This should be run whenever
+there's new data.
+
+    Eventually, need to come up with an incremental version. For now
+(as of July 2024), this code processes 10,671 corrective insulin
+events into 2699 good events in about 30 seconds, which is good
+enough.
+
     '''
     conn = dbi.connect()
     print('conn autocommit: {}'.format(conn.autocommit_mode))
+    # July 2024, I'm not sure why we need autocommit. Maybe just
+    # commit at the end? Or after doing the DDL?
     conn.autocommit(True)
     print('conn autocommit: {}'.format(conn.autocommit_mode))
     curs = dbi.dict_cursor(conn)
@@ -354,6 +364,7 @@ def get_all_isf_plus_buckets():
 
 def get_isf_for_years(start_year,end_year):
     '''returns all isf values and all isf values in 2-hour time buckets for a specific time period (in years) '''
+    print('obsolete function; prefer get_isf_between')
     conn = dbi.connect()
     curs = dbi.dict_cursor(conn)
     curs.execute('''SELECT isf from isf_details where year(rtime) >= %s and year(rtime)<= %s''',[start_year, end_year])
@@ -366,6 +377,15 @@ def get_isf_for_years(start_year,end_year):
 
     return (allData, bucket_list)
                    
+def get_isf_between(conn, start_time, end_time=datetime.now()):
+    '''returns all isf values and all isf values in 2-hour time
+    buckets for a specific time period. Returned as a list of tuples:
+    (bucket, isf). Represented as tuples for conciseness.
+    '''
+    curs = dbi.cursor(conn)
+    curs.execute('''SELECT time_bucket(rtime), isf from isf_details where rtime between %s and %s''',
+                 [start_time, end_time])
+    return curs.fetchall()
 
 def get_isf_for_bg (bg_value):
     ''' returns isf values and isf values in 2-hour time buckets for a specific starting bg value'''
@@ -917,8 +937,11 @@ if __name__ == '__main__':
     import sys
     if len(sys.argv) > 1:
         expr = sys.argv[1]
-        print('evaluating {}'.format(expr), file=sys.stderr)
-        eval(expr)
+        if expr == 'compute_isf':
+            compute_isf()
+        else:
+            print('evaluating {}'.format(expr), file=sys.stderr)
+            eval(expr)
     else:
         # if there's no command line arg, do this:
         compute_predicted_bg()
