@@ -218,6 +218,7 @@ def isfplots(start_date='', end_date=''):
                            start_date=start_date,
                            end_date=end_date)
     return render_template('isfplots.html',
+                           page_title=f'ISF plots',
                            # these values are in the <script> part of the template
                            # we could just parse the URL...
                            start_date=start_date,
@@ -246,7 +247,15 @@ def isfplot_data(start_date, end_date):
     # the front end.
     conn = dbi.connect()
     try:
-        data = isf.get_isf_between(conn, start_date, end_date)
+        # get data from Mileva's table
+        curs = dbi.cursor(conn)
+        curs.execute('''select time_bucket(rtime),isf
+                        from clean_regions_2hr_new
+                        where rtime between %s and %s''',
+                     [start_date, end_date])
+        data = curs.fetchall()
+        # the following gets data from isf_details
+        # data = isf.get_isf_between(conn, start_date, end_date)
     except Exception as err:
         return jsonify({'error': f'error getting data: {repr(err)}', 'data': None})
     return jsonify({'error': False, 'data': data})
