@@ -123,7 +123,7 @@ def plot_data0():
 
 @app.route('/plot-data/<start_date>/<start_time>/<hours>')
 def plot_data(start_date, start_time, hours):
-    '''return JSON data (insulin and cgm) for given start_time and hours. '''
+    '''return JSON data (insulin, carbs and cgm) for given start_time and hours. '''
     # can't trust the user's start_time
     try:
         start_time = date_ui.to_rtime(start_date + " " + start_time)
@@ -136,7 +136,7 @@ def plot_data(start_date, start_time, hours):
     # finally, real work
     try:
         conn = dbi.connect()
-        boluses, prog_basal, actual_basal, extended, dynamic_insulin = ics.get_insulin_info(conn, start_time, hours)
+        boluses, prog_basal, actual_basal, extended, dynamic_insulin, carbs, dynamic_carbs = ics.get_carb_and_insulin_info(conn, start_time, hours)
         last_autoapp_update = ics.get_last_autoapp_update(conn)
         cgm = ics.get_cgm_info(conn, start_time, hours)
         # I wish Python had the shorthand that JS does, but using a
@@ -146,6 +146,8 @@ def plot_data(start_date, start_time, hours):
                'actual_basal': actual_basal,
                'extended': extended,
                'dynamic_insulin': dynamic_insulin,
+               'carbs': carbs,
+               'dynamic_carbs': dynamic_carbs,
                'cgm': cgm,
                'last_autoapp_update': last_autoapp_update,
                }
@@ -154,7 +156,7 @@ def plot_data(start_date, start_time, hours):
         return jsonify({'error': repr(err)})
 
 @app.route ('/getRecentISF/<int:time_bucket>/<int:min_weeks>/<int:min_data>/')
-def getRecentISF(time_bucket,min_weeks, min_data):
+def get_recent_ISF(time_bucket,min_weeks, min_data):
     '''Returns the first, second, and third quartile isf information given a time bucket and number of weeks and data points to look back. '''
     return_example_result = False
     if return_example_result:
@@ -167,7 +169,7 @@ def getRecentISF(time_bucket,min_weeks, min_data):
                'timestamp_of_calculation': None}
     else:
         #get the number of weeks of data and isf data for recent ISF values 
-        weeks_of_data, isf_vals = isf.getRecentISF(int(time_bucket),min_weeks,int( min_data))
+        weeks_of_data, isf_vals = isf.get_recent_ISF(int(time_bucket),min_weeks,int( min_data))
         num_data = len(isf_vals)
 
         #calculate the index and value of first quartile 
@@ -212,7 +214,6 @@ def isfplots(start_date='', end_date=''):
         html_url = url_for('isfplots',
                            start_date=start_date.date().isoformat(),
                            end_date=end_date.date().isoformat())
-        print('url', html_url)
         return redirect(html_url)
     data_url = url_for('isfplot_data',
                            start_date=start_date,

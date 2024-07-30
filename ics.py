@@ -16,7 +16,7 @@ DEFAULT_HOURS = 6
 # ================================================================
 # Data readout. Helpful for testing and data display
 
-def get_insulin_info(conn, start_time=None, hours=DEFAULT_HOURS):
+def get_carb_and_insulin_info(conn, start_time=None, hours=DEFAULT_HOURS):
     '''Get insulin info for given time period after given start time
 (default to now-hours).  Returns these values, each a list of numeric values or None:
     (1) bolus info, which will be mostly None values;
@@ -24,6 +24,8 @@ def get_insulin_info(conn, start_time=None, hours=DEFAULT_HOURS):
     (3) basal_amt (this is basal_amt, not basal_amt_12;
     (4) extended_bolus
     (5) dynamic_insulin
+    (6) carbs
+    (7) dynamic_carbs
 
     '''
     if start_time is None:
@@ -42,7 +44,8 @@ def get_insulin_info(conn, start_time=None, hours=DEFAULT_HOURS):
     end_time = start_time + timedelta(hours=hours)
     desired_len = 12*hours
     curs = dbi.cursor(conn)
-    n = curs.execute('''SELECT total_bolus_volume, basal_amt_12, extended_bolus_amt_12, dynamic_insulin
+    n = curs.execute('''SELECT total_bolus_volume, basal_amt_12, extended_bolus_amt_12, dynamic_insulin,
+                               carbs, dynamic_carbs
                         FROM insulin_carb_smoothed_2
                         WHERE user = '{}' 
                         AND rtime >= %s and rtime < %s'''.format(USER),
@@ -52,16 +55,20 @@ def get_insulin_info(conn, start_time=None, hours=DEFAULT_HOURS):
         # pump. Since that's not uncommon, let's skip the debug statement.
         # debug('in get_insulin_info, wrong number of values: wanted {} got {}'.format(desired_len, n))
         pass
-    rows = curs.fetchall()
-    boluses = [ row[0] for row in rows ]
-    di_values = [ row[3] for row in rows ]
-    prog_basal = []             # fix this someday?
+
     # for cosmetic reasons, multiply by 12 and round to 2 digits
     def round2x12(x):
         return round(x*12,2) if x is not None else None
+
+    rows = curs.fetchall()
+    boluses = [ row[0] for row in rows ]
     actual_basal = [ round2x12(row[1]) for row in rows ]
     extended = [ round2x12(row[2])  for row in rows ]
-    return (boluses, prog_basal, actual_basal, extended, di_values)
+    di_values = [ row[3] for row in rows ]
+    prog_basal = []             # fix this someday?
+    carb_values = [ row[4] for row in rows ]
+    dc_values = [ row[5] for row in rows ]
+    return (boluses, prog_basal, actual_basal, extended, di_values, carb_values, dc_values)
 
 def get_last_autoapp_update(conn):
     curs = dbi.cursor(conn)

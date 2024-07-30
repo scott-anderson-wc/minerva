@@ -402,15 +402,22 @@ def get_isf_for_bg (bg_value):
     
     return (less_than_list, greater_than_list) 
     
-def getRecentISF (time_bucket, num_weeks, min_data, debug=False):
-    '''returns at least min_data isf values for a specific 2-hour time bucket looking back num_weeks (or more depending on available data points)  '''
+def get_recent_ISF (time_bucket, num_weeks, min_data, debug=False):
+    '''returns at least min_data isf values for a specific 2-hour time
+    bucket looking back num_weeks (or more depending on available data
+    points)'''
     conn = dbi.connect()
     curs = dbi.cursor(conn)
 
     def try_weeks(num_weeks):
-        time_end = datetime.strptime("18/09/10", '%y/%m/%d') - timedelta(weeks = num_weeks)
-        curs.execute ('''SELECT isf FROM isf_details where time_bucket(rtime) = %s and rtime > %s ''',
-                      [time_bucket, time_end])
+        # time_end = datetime.strptime("18/09/10", '%y/%m/%d') - timedelta(weeks = num_weeks)
+        ISF_TABLE = 'clean_regions_2hr_new' # isf_details
+        nrows = curs.execute (f'''SELECT isf FROM {ISF_TABLE}
+                                  WHERE time_bucket(rtime) = %s
+                                  AND rtime > date_sub(current_date(), interval %s week)''',
+                      [time_bucket, num_weeks])
+        if debug:
+            print(f'There have been {nrows} ISF values in the last {num_weeks} weeks')
 
     def doubling_up(min_weeks):
         if debug:
@@ -947,8 +954,6 @@ if __name__ == '__main__':
         compute_predicted_bg()
         
     # compute_isf()
-    # print((getRecentISF(0,4,40,debug=True)))
-    # print((getRecentISF(0,4,50,debug=True)))
     # import pdb; pdb.set_trace()
     # long_isf_values()
     # test_isf_at_time(min_rtime(),date_ui.to_datetime('12/1/2014 1:00am'))

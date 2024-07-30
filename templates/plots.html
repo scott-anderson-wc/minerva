@@ -24,6 +24,7 @@
 <form method="GET" action="{{url_for('plots0')}}"><input type="submit" value="latest"></form>
 
 <div id="insulinPlot" style="width:100%;max-width:1024px"></div>
+<div id="carbsPlot" style="width:100%;max-width:1024px"></div>
 <div id="cgmPlot" style="width:100%;max-width:1024px"></div>
 
 <script src="{{url_for('static', filename='plots.js')}}"></script>
@@ -74,6 +75,7 @@
             // it is just a string from the server
             $("#span_last_update").text(last_autoapp_update);
             update_insulin_plot("insulinPlot", times_str, resp);
+            update_carbs_plot("carbsPlot", times_str, resp);
             update_cgm_plot("cgmPlot", times_str, cgm);
         });
     }

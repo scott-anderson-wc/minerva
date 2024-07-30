@@ -145,31 +145,46 @@ function page_url(date, time, duration) {
  * second Y axis (on the right). */
 
 function update_insulin_plot(displayElementId, times_str, data) {
-    const trace_boluses = { x: times_str,
-                            y: data.boluses,
-                            type: "bar",
-                            name: "bolus"};
-    const trace_used_basal = {x: times_str,
-                              y: data.actual_basal,
-                              type: "line",
-                              name: "actual basal"};
-    const trace_extended_bolus = {x: times_str,
-                                  y: data.extended,
-                                  type: "line",
-                                  name: "extended bolus"};
-    const trace_dynamic_insulin = {x: times_str,
-                                  y: data.dynamic_insulin,
-                                  type: "line",
-                                  name: "dynamic insulin"};
     const cgmColor = 'rgb(203, 66, 245)';
+    const diColor = 'green';
+    const insulinColor = 'rgb(31, 119, 180)';
+    // y axis on the right
     const trace_cgm = {x: times_str,
                        y: data.cgm,
-                       yaxis: 'y2', // necessary to put this on the right-hand axis
+                       yaxis: 'y', // necessary to put this on the right-hand axis
                        line: {
                            color: cgmColor,
                            width: 2},
                        type: "line",
                        name: "CGM"};
+    // 3 insulin traces on y2
+    const trace_boluses = { x: times_str,
+                            y: data.boluses,
+                            yaxis: 'y2',
+                            type: "bar",
+                            marker: {color: insulinColor},
+                            name: "bolus"};
+    const trace_used_basal = {x: times_str,
+                              y: data.actual_basal,
+                              yaxis: 'y2',
+                              type: "line",
+                              line: {color: insulinColor,
+                                     width: 1},
+                              name: "actual basal"};
+    const trace_extended_bolus = {x: times_str,
+                                  y: data.extended,
+                                  yaxis: 'y2',
+                                  type: "line",
+                                  line: {color: insulinColor,
+                                         width: 1},
+                                  name: "extended bolus"};
+    // DI trace on y3
+    const trace_dynamic_insulin = {x: times_str,
+                                   y: data.dynamic_insulin,
+                                   yaxis: 'y3',
+                                   type: "line",
+                                   line: {color: diColor, width: 2},
+                                   name: "dynamic insulin"};
     const traces = [trace_boluses,
                     // trace_prog_basal,
                     trace_used_basal,
@@ -179,14 +194,34 @@ function update_insulin_plot(displayElementId, times_str, data) {
                    ];
     // Display using Plotly
     var layout = {title: "Insulin plot",
+                  // this says that the x-axis takes up this part of
+                  // the horizontal space for the graphic, leaving a little
+                  // space for the left y-axes, which are at 0 and 0.1
+                  xaxis: {domain: [0.1, 1]},
                   showlegend: true,
-                  yaxis: {title: "insulin"},
-                  yaxis2: {title: "CGM",
+                  yaxis: {title: "CGM",
                            titlefont: {color: cgmColor},
                            tickfont: {color: cgmColor},
-                           overlaying: 'y',
                            side: 'right'
+                         },
+                  yaxis2: {title: "insulin",
+                           titlefont: {color: insulinColor},
+                           tickfont: {color: insulinColor},
+                           overlaying: 'y',
+                           side: 'left',
+                           anchor: 'free',
+                           position: 0
+                          },
+                  yaxis3: {title: "dynamic insulin",
+                           titlefont: {color: diColor},
+                           tickfont: {color: diColor},
+                           overlaying: 'y',
+                           side: 'left',
+                           // the following two properties position this y axis offset from yaxis2
+                           anchor: 'free',
+                           position: 0.1
                           }
+                           
                   /*
                   ,legend: {
                       x: 1,
@@ -195,8 +230,74 @@ function update_insulin_plot(displayElementId, times_str, data) {
                   */
                  };
     var config = {responsive: true};
-    Plotly.newPlot("insulinPlot", traces, layout, config);
+    Plotly.newPlot(displayElementId, traces, layout, config);
 }
+
+function update_carbs_plot(displayElementId, times_str, data) {
+    const cgmColor = 'rgb(203, 66, 245)';
+    const dcColor = 'orange';
+    const carbColor = 'purple';
+    // y axis on the right
+    const trace_cgm = {x: times_str,
+                       y: data.cgm,
+                       yaxis: 'y', // necessary to put this on the right-hand axis
+                       line: {
+                           color: cgmColor,
+                           width: 2},
+                       type: "line",
+                       name: "CGM"};
+    // 2 carb traces on y2
+    const trace_carbs = { x: times_str,
+                          y: data.carbs,
+                            yaxis: 'y2',
+                            type: "bar",
+                            marker: {color: carbColor},
+                            name: "carbs"};
+    // DC trace on y3
+    const trace_dynamic_carbs = {x: times_str,
+                                 y: data.dynamic_carbs,
+                                 yaxis: 'y3',
+                                 type: "line",
+                                 line: {color: dcColor, width: 2},
+                                 name: "dynamic carbs"};
+    const traces = [trace_carbs,
+                    trace_dynamic_carbs,
+                    trace_cgm
+                   ];
+    // Display using Plotly
+    var layout = {title: "Carb plot",
+                  // this says that the x-axis takes up this part of
+                  // the horizontal space for the graphic, leaving a little
+                  // space for the left y-axes, which are at 0 and 0.1
+                  xaxis: {domain: [0.1, 1]},
+                  showlegend: true,
+                  yaxis: {title: "CGM",
+                           titlefont: {color: cgmColor},
+                           tickfont: {color: cgmColor},
+                           side: 'right'
+                         },
+                  yaxis2: {title: "carbs",
+                           titlefont: {color: carbColor},
+                           tickfont: {color: carbColor},
+                           overlaying: 'y',
+                           side: 'left',
+                           anchor: 'free',
+                           position: 0
+                          },
+                  yaxis3: {title: "dynamic carbs",
+                           titlefont: {color: dcColor},
+                           tickfont: {color: dcColor},
+                           overlaying: 'y',
+                           side: 'left',
+                           // the following two properties position this y axis offset from yaxis2
+                           anchor: 'free',
+                           position: 0.1
+                          }
+                 };
+    var config = {responsive: true};
+    Plotly.newPlot(displayElementId, traces, layout, config);
+}
+    
 
 function update_cgm_plot(displayElementId, times_str, cgm_values) {
     var trace_cgm_values = {x: times_str,
