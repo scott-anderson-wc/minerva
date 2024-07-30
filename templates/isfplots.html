@@ -44,8 +44,6 @@
         };
         globalThis.traces = traces; // debug
         layout = {title: `ISF values from ${startDate} to ${endDate}`,
-                  width: 1500,
-                  height: 1000,
                   yaxis: {title: "mgdl/unit",
                           zeroline: true,
                           zerolinecolor: '#800000',
@@ -53,7 +51,8 @@
                           // don't show the vertical line at the left edge
                           showline: false,
                           rangemode: 'tozero'}};
-        Plotly.plot('isfPlot', traces, layout);
+        let config = {responsive: true};
+        Plotly.plot('isfPlot', traces, layout, config);
     }
     
     $(document).ready(getData);
