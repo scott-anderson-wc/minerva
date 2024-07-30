@@ -113,10 +113,10 @@ section#box_container {
     </header>
     <main class="main-content">
       <section id="box_container">
-	<div id="box"><span id="Q3"></span><span id="Q2"></span><span id="Q1"></span></div>
+    <div id="box"><span id="Q3"></span><span id="Q2"></span><span id="Q1"></span></div>
       </section>
       <section class="controls">
-	<p>Quartiles based on
+    <p>Quartiles based on
       <span id="number_of_data"></span>
       values from the last
       <span id="weeks_of_data"></span>
@@ -136,7 +136,7 @@ section#box_container {
     </main>
     <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
     <script>
-      var URL = "{{url_for('getRecentISF',min_data=0,min_weeks=0,time_bucket=0)}}";
+      var URL = "{{url_for('get_recent_ISF',min_data=0,min_weeks=0,time_bucket=0)}}";
     </script>
 
     <script src="{{url_for('static',filename='isf-interaction.js')}}"></script>
