@@ -342,7 +342,7 @@ null. The latter is a problem that is fixed by a different function
         update.execute(f'''update {TABLE} 
                            set carbs = %s, carb_code = %s,
                            minutes_since_last_meal = if(%s='rescue',minutes_since_last_meal,0)
-                           where rtime = %s''',
+                           where user = '{USER}' and rtime = %s''',
                        [carbs, carb_code, carb_code, rtime])
         if not debugp:
             conn.commit()
@@ -391,7 +391,7 @@ migrated a bolus.'''
         logging.debug(f'{carbs} carbs at {str(rtime)} is {carb_code}')
         update.execute(f'''update {TABLE} 
                            set carbs = %s, carb_code = %s
-                           where rtime = %s''',
+                           where user = '{USER}' and rtime = %s''',
                        [carbs, carb_code, rtime])
         if not debugp:
             conn.commit()
@@ -431,19 +431,37 @@ def migrate_rescue_carbs(conn, start_time,
         rtime = date_ui.to_rtime(date)
         update.execute(f'''update {TABLE}
                            set carbs = %s, carb_code = 'rescue'
-                           where rtime = %s''',
+                           where user = '{USER}' and rtime = %s''',
                        [carbs, rtime])
         if commit:
             conn.commit()
 
-def migrate_rescue_carbs_from_diamond(conn, start_time, 
-                                      end_time=date_ui.to_rtime(datetime.now()),
-                                      debug=False):
-    '''import rescue_carbs from the janice.rescue_carbs_from_diamond table. That table
-    is populated by pull_data_from_diamond.py which is run as a cron job. See additional notes
+def migrate_rescue_carbs_from_diamon(conn, start_time, 
+                                     end_time=date_ui.to_rtime(datetime.now()),
+                                     commit=True):
+    '''import rescue_carbs from the janice.rescue_carbs_from_diamon table. That table
+    is populated by pull_data_from_diamon.py which is run as a cron job. See additional notes
     in that script.
     '''
-    pass
+    curs = dbi.cursor(conn)
+    update = dbi.cursor(conn)
+    # this ignores the carbCountGrams column
+    curs.execute(f'''select user, timestamp, totalCarbGrams, quantity, carbName
+                     from rescue_carbs_from_diamon
+                     where timestamp between %s and %s''',
+                 [start_time, end_time])
+    
+    for row in curs.fetchall():
+        user, timestamp, total_carbs, quantity, carb_name = row
+        notes = f'{quantity} of {carb_name} at {timestamp}'
+        logging.debug('rescue carb from diamon: {total_carbs} at {timestamp}')
+        rtime = date_ui.to_rtime(timestamp)
+        update.execute('''update insulin_carb_smoothed_2 set
+                          carb_code = 'rescue', carbs = %s, rescue_carbs = %s, notes = %s
+                          where user = '{USER_ID}' and rtime = %s''',
+                       [total_carbs, total_carbs, notes, rtime])
+    if commit:
+        conn.commit()
 
 
 # ================================================================
@@ -502,7 +520,7 @@ def update_minutes_since_last_meal(conn, start_time,
             else:
                 mm += 5
             curs.execute(f'''UPDATE {TABLE} SET minutes_since_last_meal = %s
-                             WHERE rtime = %s''',
+                           where user = '{USER}' and rtime = %s''',
                          [mm, rtime])
             rtime += timedelta(minutes=5)
         if not debug:
@@ -571,7 +589,7 @@ def update_minutes_since_last_bolus(conn,
             else:
                 mb += 5
             curs.execute(f'''UPDATE {TABLE} SET minutes_since_last_bolus = %s
-                             WHERE rtime = %s''',
+                             where user = '{USER}' and rtime = %s''',
                          [mb, rtime])
             rtime += timedelta(minutes=5)
         if not debug:
@@ -610,7 +628,7 @@ def update_corrective_insulin(conn,
         logging.debug(f'bolus at time {rtime} {matched} {meal} meal')
         update = conn.cursor()
         update.execute(f'''UPDATE {TABLE} SET corrective_insulin = %s
-                           WHERE rtime = %s''',
+                           WHERE user = '{USER}' and rtime = %s''',
                        [1-meal, rtime])
         if commit:
             conn.commit()
@@ -740,7 +758,8 @@ def update_dynamic_insulin(conn,
         window[index] = insulin
         di = di_worker(window, index, iac)
         # print([str(rtime),di])
-        update.execute(f'''UPDATE {TABLE} SET dynamic_insulin = %s WHERE rtime = %s''',
+        update.execute(f'''UPDATE {TABLE} SET dynamic_insulin = %s
+                           WHERE user = '{USER}' and rtime = %s''',
                        [di, rtime])
         if commit:
             conn.commit()
@@ -908,7 +927,8 @@ def update_dynamic_carbs(conn,
             recent_meals = [ meal for meal in recent_meals if meal is not None ]
         # Done computing DC
         logging.debug(f'At {curr_rtime} DC is {curr_dc}')
-        curs.execute(f'UPDATE {TABLE} SET dynamic_carbs = %s WHERE rtime = %s',
+        curs.execute(f'''UPDATE {TABLE} SET dynamic_carbs = %s
+                         WHERE user = '{USER}' and rtime = %s''',
                      [curr_dc, curr_rtime])
         if commit:
             conn.commit()
@@ -940,7 +960,8 @@ def update_dynamic_carbs_test(conn=None):
             ]:
         rtime, carbs, carb_code = row
         rtime = date_ui.to_rtime(rtime)
-        curs.execute(f'UPDATE {TABLE} SET carbs = %s, carb_code = %s WHERE rtime = %s',
+        curs.execute(f'''UPDATE {TABLE} SET carbs = %s, carb_code = %s
+                         WHERE user = '{USER}' and rtime = %s''',
                      [carbs, carb_code, rtime])
     conn.commit()
     print('before')
@@ -1100,6 +1121,7 @@ def migrate_between(conn, start_time, end_time):
     logging.info('carbohydrate')
     carbohydrate_import(conn, start_time, end_time)
     migrate_rescue_carbs(conn, start_time, end_time)
+    migrate_rescue_carbs_from_diamon(conn, start_time, end_time)
     update_minutes_since_last_meal(conn, start_time, end_time)
     update_minutes_since_last_bolus(conn, start_time, end_time)
     update_corrective_insulin(conn, start_time, end_time)
