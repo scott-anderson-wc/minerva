@@ -45,7 +45,7 @@ $python dexcom_cgm_sample.py
 
 # as of July 31, 2024, this seems to be working
 # needs to be before the autoapp job
-$python pull_data_from_diamond.py
+$python pull_data_from_diamon.py
 
 # 'cron' is actually the default, so it's not necessary
 $python autoapp_to_ics2.py cron 
