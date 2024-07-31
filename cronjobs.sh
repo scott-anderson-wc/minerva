@@ -43,13 +43,13 @@ cd $repo
 
 $python dexcom_cgm_sample.py 
 
+# as of July 31, 2024, this seems to be working
+# needs to be before the autoapp job
+$python $repo/pull_data_from_diamond.py
+
 # 'cron' is actually the default, so it's not necessary
 $python autoapp_to_ics2.py cron 
 
 # $python $repo/autoapp_to_loop_logic.py
 $python autoapp_to_loop_logic_inputs.py 
 $python loop_logic_testing_cgm_cron.py
-
-# temporary removal until we know this is working
-# $python $repo/pull_data_from_diamond.py
-
