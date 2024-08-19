@@ -666,7 +666,7 @@ def read_insulin_action_curve(col=1,test=False):
             return IAC
         logging.info(f'USING REAL IAC from {IAC_filename}')
         logging.debug(f'reading IAC file {IAC_filename} from CWD: {os.getcwd()}')
-        with open(IAC_filename, 'rU') as csvfile:
+        with open(IAC_filename, 'r') as csvfile:
             reader = csv.reader(csvfile) # default format is Excel
             # skip first row, which is the headers
             headers = next(reader)
@@ -824,7 +824,7 @@ for before6 and after9, since those happen every so often.
         bls_vals = []
         dinner_vals = []
         logging.debug(f'reading CAC file {CAC_filename} from CWD: {os.getcwd()}')
-        with open(CAC_filename, 'rU') as csvfile:
+        with open(CAC_filename, 'r') as csvfile:
             reader = csv.reader(csvfile) # default format is Excel
             # skip headers
             headers = next(reader)
