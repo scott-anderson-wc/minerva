@@ -18,13 +18,14 @@
 
 devel=/home/hugh9/scott/devel3
 prod=/home/hugh9/scott/prod3/
+venv=venv310
 
 if [ "$PWD" = "$devel" ]; then
     echo "running the development versions, output to terminal"
-    python="$devel/venv369/bin/python3"
+    python="$devel/$venv/bin/python3"
     repo="$devel"
 else
-    python="$prod/venv369/bin/python3"
+    python="$prod/$venv/bin/python3"
     repo="$prod/minerva"
 fi
 
