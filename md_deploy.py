@@ -7,6 +7,7 @@ import time
 import logging
 import random
 import math
+import secrets
 
 '''Deployed app'''
 
@@ -14,8 +15,6 @@ LOGFILE='md_deploy.log'
 LOGLEVEL=logging.DEBUG
 
 from logging.handlers import RotatingFileHandler
-
-from flaskext.mysql import MySQL
 
 from datetime import datetime, timedelta
 import json
@@ -37,6 +36,8 @@ def debug(*args):
         app.logger.debug(s)
 
 app = Flask(__name__)
+DATABASE = 'janice'
+dbi.cache_cnf(DATABASE)
 
 # builtins.app = app           # so it's available to other modules.
 
@@ -44,9 +45,7 @@ app.config.from_object('config')
 os.environ['FLASK_SETTINGS'] = '/home/hugh9/settings.cfg'
 debug('FLASK_SETTINGS is '+os.environ['FLASK_SETTINGS'])
 app.config.from_envvar('FLASK_SETTINGS')
-app.secret_key = os.urandom(24)
-mysql = MySQL()
-mysql.init_app(app)
+app.secret_key = secrets.token_hex(20)
 
 @app.route('/')
 def displayRecentISF():
