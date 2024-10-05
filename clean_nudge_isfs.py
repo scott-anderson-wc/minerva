@@ -24,16 +24,17 @@ import argparse
 
 ## Utils
 
-WINDOW_COLUMN_MAPPING = {
-    "clean_5_min_yrly_basal": 1, 
-    "clean_5_min": 1, 
-    "clean_15_min_yrly_basal": 3, 
-    "clean_15_min": 3, 
-    "clean_30_min_yrly_basal": 6, 
-    "clean_30_min": 6, 
-    "clean_2_hr_yrly_basal": 24, 
-    "clean_2_hr": 24
-}
+# Mapping: (column, duration, use yrly basal)
+MAPPING = [
+    ("clean_5_min", 1,  False), 
+    ("clean_15_min", 3,  False), 
+    ("clean_30_min", 6,  False), 
+    ("clean_2_hr", 24,  False), 
+    ("clean_5_min_yrly_basal", 1,  True), 
+    ("clean_15_min_yrly_basal", 3,  True), 
+    ("clean_30_min_yrly_basal", 6,  True), 
+    ("clean_2_hr_yrly_basal", 24,  True) 
+]
 
 # Basal amts per hour (based on afternoon basal rates from each year)
 BASAL_AMTS = {
@@ -47,7 +48,7 @@ BASAL_AMTS = {
     2021: 0.7741597285226145,
     2022: 0.699999988079071, 
     2023: 0.699999988079071, 
-    2024:  0.9520596590909091
+    2024: 0.9520596590909091
 }
 
 def configure_logging(log_level = logging.INFO): 
@@ -55,11 +56,17 @@ def configure_logging(log_level = logging.INFO):
     logfile = f"./nudge_isf/experiments/{str(datetime.now())}.txt"
     sys.stdout = open(logfile, 'w')
 
-def get_basal_amt_per_window(year, window_length): 
-    """ Compute basal amt per window based on the yearly afternoon averages"""
+def get_basal_amt_per_window(window_length, year=None): 
+    """ Compute basal amt per window. 
+    If a year is provided, use yearly afternoon averages. 
+    Otherwise assume a constant basal amount of 0.6 units per hour"""
     windows_per_hour = 60 / (5 * window_length)
-    return BASAL_AMTS[year] / windows_per_hour
-
+    if year: 
+        return BASAL_AMTS[year] / windows_per_hour
+    else: 
+        BASAL_AMT_HR = 0.6 # Assumes baseline basal of 0.6 units/ hr. 
+        return BASAL_AMT_HR / windows_per_hour
+    
 def insert_isfs(curs, rtime: str, isf: float, column) -> None: 
     """ Insert the specified rtime and ISF into the nudge_isf_results table
         
@@ -85,7 +92,7 @@ def get_clean_window(curs, start_time: str, duration: int = 2) -> list:
     curs.execute(sql_statement, [start_time, start_time])
     return curs.fetchall()
 
-def compute_nudge_isfs(rows: list, window_length: int=3) -> list: 
+def compute_nudge_isfs(rows: list, window_length: int=3, yearly_basal = True) -> list: 
     
     '''Computes the nudge_isf values for the given window length (in units of 5min) using the following equation:
         ISF = (cgm_start - cgm_end) /  ( DI over the window - basal over the window)
@@ -102,7 +109,6 @@ def compute_nudge_isfs(rows: list, window_length: int=3) -> list:
         result (list) - list of (rtime, nudge_isf) tuples 
     '''
     results = []
-    active_dis = []
     
     ## Constants - todo: verify assumptions here    
     MIN_DI = 0.01 * window_length  
@@ -124,9 +130,11 @@ def compute_nudge_isfs(rows: list, window_length: int=3) -> list:
         
         # Compute the active DI: sum DI over window - basal over window >= MIN_DI
         di_sum = sum(filter(None,[di for _, _, di in window]))
-        basal_amt_per_window = get_basal_amt_per_window(start_time.year, window_length=window_length)
+        if yearly_basal: 
+            basal_amt_per_window = get_basal_amt_per_window(window_length=window_length, year=start_time.year)
+        else: 
+            basal_amt_per_window = get_basal_amt_per_window(window_length=window_length, year=None)
         active_di = di_sum - basal_amt_per_window
-        active_dis.append(active_di)
         if active_di < MIN_DI: 
             skipped_di += 1
             continue
@@ -144,14 +152,13 @@ def compute_nudge_isfs(rows: list, window_length: int=3) -> list:
             skipped_cgm += 1
             
     print(f"skipped_di = {skipped_di} \t skipped_cgm = {skipped_cgm} \t completed = {completed}")
-    print(f"Active DI: avg = {np.mean(active_dis)}, min = {min(active_dis)}, max = {max(active_dis)}, ")
             
     return results
 
-def compute_clean_nudge_isfs(curs, window_length: int, column: str): 
+def compute_clean_nudge_isfs(curs, window_length: int, column: str, yearly_basal: bool): 
     """ Compute clean nudge ISFs and save them into the nudge_isf_results table """
     
-    # Get rtimes of al the 2hr clean regions
+    # Get rtimes of all the 2hr clean regions
     curs.execute('''select rtime from clean_regions_2hr_new''')
     clean_regions = curs.fetchall()
     
@@ -159,7 +166,7 @@ def compute_clean_nudge_isfs(curs, window_length: int, column: str):
     for clean_start, in clean_regions: 
         print()
         clean_rows = get_clean_window(curs, clean_start, duration=2)
-        nudge_isfs = compute_nudge_isfs(clean_rows, window_length=window_length)
+        nudge_isfs = compute_nudge_isfs(clean_rows, window_length=window_length, yearly_basal=yearly_basal)
         for i, (start_time, nudge_isf) in enumerate(nudge_isfs): 
             print(f"i = {i} \t start_time = {start_time} \t nudge_isf = {nudge_isf}")
             insert_isfs(curs, rtime = start_time, isf = nudge_isf, column = column )
@@ -253,15 +260,15 @@ def main_compute_nudge_isfs():
     Main function for computing the clean nudge ISFs
     This should be run if the nudge ISFs need to be updated. 
     """
-    for column, window_length in WINDOW_COLUMN_MAPPING.items(): 
+    for column, window_length, yearly_basal in MAPPING: 
         print(f"\nwindow_length: {window_length}, column: {column}")
-        compute_clean_nudge_isfs(curs, window_length=window_length, column=column)
+        compute_clean_nudge_isfs(curs, window_length=window_length, column=column, yearly_basal=yearly_basal)
         clean_isfs_to_file(curs, column)
     
     
 def main_analyze_nudge_isfs(): 
     """ Main function for analyzing the already computed nudge ISFs. """
-    for column, _ in WINDOW_COLUMN_MAPPING.items(): 
+    for column, _, _ in MAPPING: 
         print(f"\n{column}")
         compute_isf_statistics(curs, column)
         print(get_isf_statistics_df(curs, column).to_string())
