@@ -6,6 +6,7 @@ Flask-MySQLdb
 importlib-metadata
 itsdangerous
 Jinja2
+jupyterlab
 MarkupSafe
 mysqlclient
 numpy
