@@ -1,5 +1,6 @@
 click
 dataclasses
+dateparser
 Flask
 Flask-MySQLdb
 importlib-metadata
