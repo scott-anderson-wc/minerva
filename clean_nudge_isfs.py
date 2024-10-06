@@ -132,6 +132,7 @@ def compute_nudge_isfs(rows: list, window_length: int=3, yearly_basal = True) ->
         
         # Compute the active DI: sum DI over window - basal over window >= MIN_DI
         di_sum = sum(filter(None,[di for _, _, di in window]))
+        avg_cgm = np.average(list(filter(None, [cgm for _, cgm, _ in window])))
         if yearly_basal: 
             basal_amt_per_window = get_basal_amt_per_window(window_length=window_length, year=start_time.year)
         else: 
@@ -142,9 +143,9 @@ def compute_nudge_isfs(rows: list, window_length: int=3, yearly_basal = True) ->
             continue
         
         # Compute Nudge ISFs
-        if start_cgm and end_cgm and active_di: 
+        if start_cgm and avg_cgm and active_di: 
             try: 
-                nudge_isf = (start_cgm-end_cgm) / active_di
+                nudge_isf = (start_cgm-avg_cgm) / active_di
                 completed += 1
             except Exception as e: 
                 print("Failed to compute Nudge ISF", e)

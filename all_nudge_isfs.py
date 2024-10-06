@@ -27,7 +27,18 @@ import pandas as pd
 import argparse
 
 
-from clean_nudge_isfs import MAPPING, compute_nudge_isfs, insert_isfs
+from clean_nudge_isfs import compute_nudge_isfs, insert_isfs
+
+MAPPING = [
+    ("clean_5_min", 1,  False), 
+    ("clean_15_min", 3,  False), 
+    ("clean_30_min", 6,  False), 
+    ("clean_2_hr", 24,  False), 
+    ("clean_5_min_yrly_basal", 1,  True), 
+    ("clean_15_min_yrly_basal", 3,  True), 
+    ("clean_30_min_yrly_basal", 6,  True), 
+    ("clean_2_hr_yrly_basal", 24,  True) 
+]
 
 ## utils    
 def get_latest_update_time(table: str) -> Optional[str]: 
@@ -86,7 +97,7 @@ if __name__ == '__main__':
     curs = conn.cursor()
     
     if args.compute: 
-        main_compute_all_nudge_isfs(table = "nudge_isf_results")
+        main_compute_all_nudge_isfs(table = "nudge_isf_results_avg")
     if args.analyze: 
         # main_analyze_nudge_isfs()
         pass
