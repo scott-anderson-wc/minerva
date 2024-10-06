@@ -1,7 +1,10 @@
-'''Iterate over ICS2 and compute ISF values
+'''Utils for iterating over ICS2 and computing ISF values. Focused on computing for clean regions. 
+
+The results are entered into nudge_isf_results_clean table. 
 
 Author: Mileva
-Last Updated: 6/28/24
+Created: 7/1/24
+Last Updated: 10/6/24
 '''
 
 import logging
@@ -67,15 +70,15 @@ def get_basal_amt_per_window(window_length, year=None):
         BASAL_AMT_HR = 0.6 # Assumes baseline basal of 0.6 units/ hr. 
         return BASAL_AMT_HR / windows_per_hour
     
-def insert_isfs(curs, rtime: str, isf: float, column) -> None: 
-    """ Insert the specified rtime and ISF into the nudge_isf_results table
+def insert_isfs(curs, rtime: str, isf: float, column, table: str = "nudge_isf_results_clean") -> None: 
+    """ Insert the specified rtime and ISF into the specified table
         
     args: 
         rtime (str) - rtime for the nudge ISF value being inserted into the table
         isf (float) - nudge isf value being inserted into the table
     
     """
-    sql_string = f"INSERT INTO nudge_isf_results (rtime, {column}) VALUES (%s, %s) ON DUPLICATE KEY UPDATE {column}=VALUES({column})"
+    sql_string = f"INSERT INTO {table} (rtime, {column}) VALUES (%s, %s) ON DUPLICATE KEY UPDATE {column}=VALUES({column})"
     curs.execute(sql_string, [rtime, isf])   
     
 def get_clean_window(curs, start_time: str, duration: int = 2) -> list: 
@@ -98,7 +101,6 @@ def compute_nudge_isfs(rows: list, window_length: int=3, yearly_basal = True) ->
         ISF = (cgm_start - cgm_end) /  ( DI over the window - basal over the window)
         
     Assumptions: 
-        steady state basal amt = 0.6 units/ hr
         minimum DI = 0.01 * window_length. This is based on the fact that previously our MIN_DI = (0.35 / 33.713) ~ 0.01
         DI over the window - basal over the window >= minimum DI
     
@@ -126,7 +128,7 @@ def compute_nudge_isfs(rows: list, window_length: int=3, yearly_basal = True) ->
         window = rows[i:i+window_length + 1]
 
         end_time, end_cgm, _ = window[-1]
-        print(f"start_time: {start_time} \t end_time: {end_time} \t start_cgm: {start_cgm} \t end_cgm: {end_cgm}")
+        # print(f"start_time: {start_time} \t end_time: {end_time} \t start_cgm: {start_cgm} \t end_cgm: {end_cgm}")
         
         # Compute the active DI: sum DI over window - basal over window >= MIN_DI
         di_sum = sum(filter(None,[di for _, _, di in window]))
@@ -156,7 +158,7 @@ def compute_nudge_isfs(rows: list, window_length: int=3, yearly_basal = True) ->
     return results
 
 def compute_clean_nudge_isfs(curs, window_length: int, column: str, yearly_basal: bool): 
-    """ Compute clean nudge ISFs and save them into the nudge_isf_results table """
+    """ Compute clean nudge ISFs and save them into the nudge_isf_results_clean table """
     
     # Get rtimes of all the 2hr clean regions
     curs.execute('''select rtime from clean_regions_2hr_new''')
@@ -173,8 +175,8 @@ def compute_clean_nudge_isfs(curs, window_length: int, column: str, yearly_basal
             
 def clean_isfs_to_file(curs, column: str) -> None: 
     """ Writes the clean ISF values to a file titled: column_isfs.json"""
-    # Queries nudge_isf_results for all nudge ISFs
-    curs.execute(f'''select rtime, {column} from nudge_isf_results''')
+    # Queries nudge_isf_results_clean for all nudge ISFs
+    curs.execute(f'''select rtime, {column} from nudge_isf_results_clean''')
     rows = curs.fetchall()
     
     with open (f"./nudge_isf/{column}_isfs.json", "w") as f:
@@ -183,8 +185,8 @@ def clean_isfs_to_file(curs, column: str) -> None:
 def compute_isf_statistics(curs, column: str) -> None: 
     """ Queries the Nudge ISF table and computes statistics on the bucketed ISFs"""
     
-    # Queries nudge_isf_results for all nudge ISFs
-    curs.execute(f'''select rtime, {column} from nudge_isf_results''')
+    # Queries nudge_isf_results_clean for all nudge ISFs
+    curs.execute(f'''select rtime, {column} from nudge_isf_results_clean''')
     rows = curs.fetchall()
     
     # bucket the nudge ISF values
@@ -241,8 +243,8 @@ def get_isf_statistics_df(curs, column: str) -> None:
         return np.quantile(values, 0.75)
         
     
-    # Queries nudge_isf_results for all nudge ISFs
-    curs.execute(f'''select rtime, {column} from nudge_isf_results''')
+    # Queries nudge_isf_results_clean for all nudge ISFs
+    curs.execute(f'''select rtime, {column} from nudge_isf_results_clean''')
     rows = curs.fetchall()    
     
     df = pd.DataFrame(rows, columns=["rtime", column])
@@ -255,7 +257,7 @@ def get_isf_statistics_df(curs, column: str) -> None:
     return statistics 
 
 
-def main_compute_nudge_isfs(): 
+def main_compute_clean_nudge_isfs(): 
     """ 
     Main function for computing the clean nudge ISFs
     This should be run if the nudge ISFs need to be updated. 
@@ -286,6 +288,6 @@ if __name__ == '__main__':
     curs = conn.cursor()
     
     if args.compute: 
-        main_compute_nudge_isfs()
+        main_compute_clean_nudge_isfs()
     if args.analyze: 
         main_analyze_nudge_isfs()
