@@ -713,7 +713,7 @@ def missing_rows(conn,
     sql = f'''select rtime from {TABLE}
               where rtime >= %s and rtime <= %s
               and rtime not in {tuple(all_rtimes)}'''
-    print(sql)
+    # print(sql)
     curs.execute(sql, [start_time, end_time])
     return curs.fetchall()
 
@@ -743,7 +743,9 @@ def update_dynamic_insulin(conn,
         logging.error(f'{len(mr)} rows are missing')
         for row in mr:
             logging.error(f'missing: row')
-        raise ValueError(f'window {len(window)} and iac {len(iac)} must be lists of the same length')
+        logging.error(f'recent insulin values (len={len(window)}) and iac {len(iac)} must be lists of the same length')
+        # rather than raise an error, we just return. Maybe other work can get done.
+        return
     win_width = len(iac)
     index = -1
     curs.execute(recent_insulin, [start_time, end_time])
