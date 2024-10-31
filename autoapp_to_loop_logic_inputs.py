@@ -274,18 +274,40 @@ It uses the passed-in values, to avoid issues of simultaneous updates.
 
 # ================================================================
 
+def cgm_source(conn):
+    '''Returns either 'dexcom' or 'libre' depending on which sensor is
+    currently supplying the data.'''
+    curs = dbi.cursor(conn)
+    curs.execute('select cgm_source from janice.controls')
+    row = curs.fetchone()
+    if row is not None:
+        return row[0]
+    else:
+        # default
+        return 'dexcom'
+
 def migrate_cgm(conn, dest, start_time, commit=True):
     '''start_time is a string or a python datetime. '''
     if conn is None:
         conn = dbi.connect()
     curs = dbi.cursor(conn)
-    logging.debug(f'migrating realtime_cgm since {start_time}')
-    # must use rtime, not dexcom_time, since the latter can be null
-    # but we retrieve the dexcom_time, to be be consistent with {dest}.realtime_cgm
-    nrows = curs.execute('''select user_id, dexcom_time, mgdl, trend, trend_code
-                            from janice.realtime_cgm2
-                            where rtime > %s and mgdl is not NULL''',
-                         [start_time])
+    source = cgm_source(conn)
+    logging.debug(f'migrating realtime_cgm from {source} since {start_time}')
+    if source == 'dexcom':
+        # must use rtime, not dexcom_time, since the latter can be null
+        # but we retrieve the dexcom_time, to be be consistent with {dest}.realtime_cgm
+        nrows = curs.execute('''select user_id, dexcom_time, mgdl, trend, trend_code
+                                from janice.realtime_cgm2
+                                where rtime > %s and mgdl is not NULL''',
+                             [start_time])
+    elif source == 'libre':
+        # New query for realtime_cgm_libre, setting trend_code to NULL
+        nrows = curs.execute('''select user_id, libre_time as dexcom_time, mgdl, trend, NULL as trend_code
+                                from janice.realtime_cgm_libre
+                                where rtime > %s and mgdl is not NULL''',
+                             [start_time])
+    else:
+        raise ValueError(f'''bad value returned from 'cgm_source': {source}''')
     logging.debug(f'got {nrows} from realtime_cgm2')
     ins = dbi.cursor(conn)
     for row in curs.fetchall():
@@ -297,9 +319,15 @@ def migrate_cgm(conn, dest, start_time, commit=True):
                          [user_id, dexcom_time])
         logging.debug(f'found {nr} matches (already migrated rows)')
         if nr == 0:
-            ins.execute(f'''insert into {dest}.realtime_cgm(cgm_id,user_id,dexcom_time,mgdl,trend,trend_code,src)
-                           values(null,%s,%s,%s,%s,%s,'real')''',
-                        row)
+            if source == 'dexcom':
+                ins.execute(f'''insert into {dest}.realtime_cgm(cgm_id,user_id,dexcom_time,mgdl,trend,trend_code,src)
+                                values(null,%s,%s,%s,%s,%s,'real')''',
+                            row)
+            elif source == 'libre':
+                # Updated insertion with trend_code set to NULL
+                ins.execute(f'''insert into {dest}.realtime_cgm(cgm_id,user_id,dexcom_time,mgdl,trend,trend_code,src)
+                                values(null,%s,%s,%s,%s,NULL,'libre')''',
+                            (user_id, dexcom_time, row[2], row[3]))  # omitting trend_code
     if commit:
         conn.commit()
 
@@ -1945,5 +1973,8 @@ if __name__ == '__main__':
     migrate_all(conn, 'autoapp_test', 'loop_logic_test')
 
 '''
-SELECT loop_summary_id, bolus_timestamp, bolus_pump_id, bolus_type, bolus_value, command_Id, created_timestamp, state, type, completed, linked_cgm_value, anchor FROM `loop_summary` ORDER BY `loop_summary_id` DESC ;
+SELECT loop_summary_id, 
+       time(bolus_timestamp) as bolus_time, bolus_pump_id, bolus_type, bolus_value, 
+       carb_id, time(carb_timestamp) as carb_time, carb_value,
+       created_timestamp, state, type, completed, linked_cgm_value, anchor FROM `loop_summary` ORDER BY `loop_summary_id` DESC ;
 '''

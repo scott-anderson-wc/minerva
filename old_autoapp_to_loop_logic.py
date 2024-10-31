@@ -888,6 +888,9 @@ def matching_bolus_row_within(conn, source, bolus_amount, timestamp, interval_mi
     around the timestamp to Python and find the best match, if any,
     here. So, that's what I've done.
 
+    The time complexity of this query will be O(1) if we have an index on timestamp, 
+    which I think we should. That's on the to-do list, I think. 
+
     '''
     curs = dbi.dict_cursor(conn)
     query = f'''SELECT bolus_id, user_id, date, type, value, duration, server_date 
