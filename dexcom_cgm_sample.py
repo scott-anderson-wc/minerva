@@ -220,7 +220,11 @@ look like JSON, list of dictionaries of length max_count.'''
                     [resp.status_code, resp.reason, html2text.html2text(resp.text)] )
 
 def parse_cgm_values(raw_data):
-    json_data = json.loads(raw_data)
+    try:
+        json_data = json.loads(raw_data)
+    except:
+        logging.error('raw data from Dexcom cannot be parsed as JSON')
+        raise TypeError('raw data from Dexcom cannot be parsed as JSON')
     if type(json_data) is not type([]):
         logging.error('ERROR: response is not a list of dictionaries')
     for d in json_data:
@@ -330,6 +334,9 @@ def get_cgm():
         logging.debug('requested {} values, got {} values'.format(count, len(cgm_values)))
         # so many things could go wrong. Are they all different
         # timestamp values? We might *still* be in a NoData situation.
+        if len(cgm_values) == 0:
+            logging.info(f'Catching up failed. Requested {count+1} data; got zero')
+            return cgm_values
         cgm = cgm_values[0]
         first_wt = cgm['WT']
         logging.debug('first returned WT is {} versus stored {}'.format(first_wt, stored_dexcom_time))
