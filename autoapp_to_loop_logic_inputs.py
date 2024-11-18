@@ -321,7 +321,7 @@ def migrate_cgm(conn, dest, start_time, commit=True):
         if nr == 0:
             if source == 'dexcom':
                 ins.execute(f'''insert into {dest}.realtime_cgm(cgm_id,user_id,dexcom_time,mgdl,trend,trend_code,src)
-                                values(null,%s,%s,%s,%s,%s,'real')''',
+                                values(null,%s,%s,%s,%s,%s,'dexcom')''',
                             row)
             elif source == 'libre':
                 # Updated insertion with trend_code set to NULL
