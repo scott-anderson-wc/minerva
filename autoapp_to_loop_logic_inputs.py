@@ -308,7 +308,7 @@ def migrate_cgm(conn, dest, start_time, commit=True):
                              [start_time])
     else:
         raise ValueError(f'''bad value returned from 'cgm_source': {source}''')
-    logging.debug(f'got {nrows} from realtime_cgm2')
+    logging.debug(f'got {nrows} from realtime_cgm2 from source {source}')
     ins = dbi.cursor(conn)
     for row in curs.fetchall():
         # we can't use on duplicate key, because the key is an auto_increment value that we don't have.
@@ -328,6 +328,7 @@ def migrate_cgm(conn, dest, start_time, commit=True):
                 ins.execute(f'''insert into {dest}.realtime_cgm(cgm_id,user_id,dexcom_time,mgdl,trend,trend_code,src)
                                 values(null,%s,%s,%s,%s,NULL,'libre')''',
                             (user_id, dexcom_time, row[2], row[3]))  # omitting trend_code
+                    
     if commit:
         conn.commit()
 
