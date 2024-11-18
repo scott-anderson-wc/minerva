@@ -147,25 +147,37 @@ def stop_run(conn, source, dest, user_id, status):
 # this is copied from dexcom_cgm_sample.py
 # we should consider storing this useful value
 
-def get_latest_stored_data(conn):
+def get_latest_stored_data(conn, source):
     '''Looks up the latest data that we stored from previous inquiries.
 Returns rtime and dexcom_time from last non-NULL value. We can infer
 the number of values we need from Dexcom from those.
 
+Nov 18, we now have a source argument which is either 'dexcom' or 'libre'    
+
     '''
     curs = dbi.cursor(conn)
-    curs.execute('''SELECT rtime, dexcom_time
-                    FROM janice.realtime_cgm2
-                    WHERE user_id = %s and
-                          rtime = (SELECT max(rtime) FROM janice.realtime_cgm2
-                                   WHERE user_id = %s and mgdl is not NULL)''',
-                 [HUGH_USER_ID, HUGH_USER_ID])
+    if source == 'dexcom':
+        curs.execute('''SELECT rtime, dexcom_time
+                        FROM janice.realtime_cgm2
+                        WHERE user_id = %s and
+                              rtime = (SELECT max(rtime) FROM janice.realtime_cgm2
+                                       WHERE user_id = %s and mgdl is not NULL)''',
+                     [HUGH_USER_ID, HUGH_USER_ID])
+    elif source == 'libre':
+        curs.execute('''SELECT rtime, libre_time
+                        FROM janice.realtime_cgm_libre
+                        WHERE user_id = %s and
+                              rtime = (SELECT max(rtime) FROM janice.realtime_cgm_libre
+                                       WHERE user_id = %s and mgdl is not NULL)''',
+                     [HUGH_USER_ID, HUGH_USER_ID])
+    else:
+        raise Exception(f'bad value for source: {source}')
     row = curs.fetchone()
     return row
 
 
 
-def get_cgm_update_times(conn, dest):
+def get_cgm_update_times(conn, source, dest):
     '''Long discussion about the data to migrate. See
 https://docs.google.com/document/d/1ZCtErlxRQmPUz_vbfLXdg7ap2hIz5g9Lubtog8ZqFys/edit#heading=h.umdjcuqs1gq4
 
@@ -175,21 +187,24 @@ store that useful value somewhere. It also returns the prior value of
 that, we stored as DEST.migration_status.prev_cgm_update
 (PY). Returns both (Y,PY) if Y > Py, otherwise None, None.
 
+A return value of None, None will skip migration of CGM.    
+
+Nov 18, we now have a source argument which is either 'dexcom' or 'libre'    
+
     '''
-    (rtime, dexcom_time) = get_latest_stored_data(conn)
-    last_cgm = min(rtime, dexcom_time)
+    (rtime, cgm_time) = get_latest_stored_data(conn, source)
+    last_cgm = min(rtime, cgm_time)
     curs = dbi.cursor(conn)
     curs.execute(f'''select prev_cgm_update from {dest}.migration_status where user_id = %s''',
                  [HUGH_USER_ID])
     prev_cgm = curs.fetchone()[0]
-    logging.debug(f'last update from dexcom was at {last_cgm}; the previous value was {prev_cgm}')
+    logging.debug(f'last update from {source} was at {last_cgm}; the previous value was {prev_cgm}')
     if prev_cgm < last_cgm:
         # new data, so return the time to migrate since
         return prev_cgm, last_cgm # increasing order
     else:
         return None, None
     
-
 def set_cgm_migration_time(conn, dest, prev_update, last_update):
     '''Long discussion about the data to migrate. See
 https://docs.google.com/document/d/1ZCtErlxRQmPUz_vbfLXdg7ap2hIz5g9Lubtog8ZqFys/edit#heading=h.umdjcuqs1gq4
@@ -317,8 +332,9 @@ def migrate_cgm(conn, dest, start_time, commit=True):
         nr = ins.execute(f'''select cgm_id from {dest}.realtime_cgm 
                              where user_id = %s and dexcom_time = %s''',
                          [user_id, dexcom_time])
-        logging.debug(f'found {nr} matches (already migrated rows)')
+        logging.debug(f'found {nr} matches (already migrated rows) for time {dexcom_time}')
         if nr == 0:
+            logging.debug(f'inserting into {dest}.realtime_cgm cgm = {row[2]} from {source}')
             if source == 'dexcom':
                 ins.execute(f'''insert into {dest}.realtime_cgm(cgm_id,user_id,dexcom_time,mgdl,trend,trend_code,src)
                                 values(null,%s,%s,%s,%s,%s,'dexcom')''',
@@ -361,7 +377,8 @@ is running in dest.
     if try_in_loop_logic_test_mode(conn, dest):
         logging.debug(f'skipping cgm migration because in test mode for {dest}')
         return
-    prev_cgm_update, last_cgm_update = get_cgm_update_times(conn, dest)
+    source = cgm_source(conn)
+    prev_cgm_update, last_cgm_update = get_cgm_update_times(conn, source, dest)
     if prev_cgm_update is None:
         logging.debug('no new cgm data to migrate')
         return
